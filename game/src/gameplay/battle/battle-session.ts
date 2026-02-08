@@ -193,7 +193,7 @@ export class BattleSession {
       this.manualFireHeld = false;
       return;
     }
-    const controlled = this.state.units.find((unit) => unit.id === this.playerControlledId && unit.alive && unit.side === "player");
+    const controlled = this.getControlledUnit();
     if (!controlled) {
       this.manualFireHeld = false;
       return;
@@ -210,9 +210,7 @@ export class BattleSession {
     if (!this.state.active || !this.playerControlledId) {
       return;
     }
-    const controlled = this.state.units.find((unit) => {
-      return unit.id === this.playerControlledId && unit.side === "player" && unit.alive;
-    });
+    const controlled = this.getControlledUnit();
     if (!controlled) {
       return;
     }
@@ -224,7 +222,7 @@ export class BattleSession {
     if (!this.playerControlledId || !this.state.active) {
       return;
     }
-    const controlled = this.state.units.find((unit) => unit.id === this.playerControlledId && unit.alive && unit.side === "player");
+    const controlled = this.getControlledUnit();
     if (!controlled) {
       return;
     }
@@ -239,7 +237,7 @@ export class BattleSession {
     if (!this.playerControlledId || !this.state.active) {
       return;
     }
-    const controlled = this.state.units.find((unit) => unit.id === this.playerControlledId && unit.alive && unit.side === "player");
+    const controlled = this.getControlledUnit();
     if (!controlled) {
       return;
     }
