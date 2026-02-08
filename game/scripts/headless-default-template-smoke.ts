@@ -72,7 +72,7 @@ function readTemplateDir(dirPath: string): UnitTemplate[] {
       const filePath = `${dirPath}/${fileName}`;
       const raw = readFileSync(filePath, "utf8");
       const parsed = JSON.parse(raw) as unknown;
-      const normalized = parseTemplate(parsed, { injectLoaders: false, sanitizePlacement: true });
+      const normalized = parseTemplate(parsed, { injectLoaders: true, sanitizePlacement: true });
       if (!normalized) {
         continue;
       }
@@ -80,10 +80,7 @@ function readTemplateDir(dirPath: string): UnitTemplate[] {
       if (raw !== normalizedRaw) {
         writeFileSync(filePath, normalizedRaw, "utf8");
       }
-      const runtimeTemplate = parseTemplate(normalized, { injectLoaders: true, sanitizePlacement: true });
-      if (runtimeTemplate) {
-        templates.push(runtimeTemplate);
-      }
+      templates.push(normalized);
     } catch {
       continue;
     }

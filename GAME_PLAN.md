@@ -181,8 +181,8 @@ Display layer provides optional visual mesh/sprite styling and silhouette polish
 - Player-created object designs are stored separately under `game/templates/user/`.
 - On startup, game loads templates from both folders (user templates override same-id defaults).
 - Template parse/validation/merge rules are shared in `packages/game-core/src/templates/template-schema.ts` so game UI and arena tooling use identical template behavior.
-- File-backed template load normalizes placement first (invalid/overlapping functional placements are skipped), and normalized JSON is written back to disk so editor and headless checks read the same corrected shape.
-- Loader auto-injection is runtime parse behavior only and is intentionally independent from validation warning/error semantics.
+- File-backed template load normalizes placement and loader coverage, and normalized JSON is written back to disk so editor, headless checks, and battle runtime read the same corrected shape.
+- Loader auto-injection is part of persisted template normalization; injected loaders are placed on available structure cells to avoid overlapping existing functional footprints when possible.
 - Detailed template validation severity logic is isolated in `packages/game-core/src/templates/template-validation.ts`.
 - Headless smoke includes default-template validation to ensure all system default templates are warning/error free.
 
@@ -273,7 +273,7 @@ No simple fixed hitpoint exchange for whole units. Damage emerges from impacts, 
 1. Collision/projectile contact on structure cell.
 2. Compute local impact energy and contact impulse.
 3. Compare vs material resistance.
-4. Apply structural damage, crack, or breach on the impacted local structure cell (front hits damage front-side cells first).
+4. Apply structural damage, crack, or breach on the impacted local structure cell (when a sweep intersects multiple cells in one tick, use the earliest intersection along projectile travel).
 5. If breach occurs, inner functional modules can be hit.
 6. If structure is detached, all attached modules are removed with it.
 7. Module damage creates performance penalties or critical failure.

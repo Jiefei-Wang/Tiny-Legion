@@ -35,6 +35,11 @@
       "component": "heavyCannon",
       "cell": 3,
       "rotateQuarter": 0
+    },
+    {
+      "component": "cannonLoader",
+      "cell": 0,
+      "rotateQuarter": 0
     }
   ],
   "display": [

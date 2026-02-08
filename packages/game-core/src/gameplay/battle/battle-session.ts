@@ -2109,17 +2109,14 @@ export class BattleSession {
 
   private projectileHitsLiveCell(projectile: BattleState["projectiles"][number], unit: UnitInstance, isAir: boolean): number | null {
     const rects = this.getLiveCellRects(unit);
+    let bestCellId: number | null = null;
+    let bestEntryTime = Number.POSITIVE_INFINITY;
     for (const rect of rects) {
       const expandedLeft = rect.x - projectile.r;
       const expandedTop = rect.y - projectile.r;
       const expandedRight = rect.x + rect.w + projectile.r;
       const expandedBottom = rect.y + rect.h + projectile.r;
-      const hitNow =
-        projectile.x >= expandedLeft &&
-        projectile.x <= expandedRight &&
-        projectile.y >= expandedTop &&
-        projectile.y <= expandedBottom;
-      const hitSweep = this.segmentIntersectsAabb(
+      const entryTime = this.segmentAabbEntryTime(
         projectile.prevX,
         projectile.prevY,
         projectile.x,
@@ -2129,17 +2126,21 @@ export class BattleSession {
         expandedRight,
         expandedBottom,
       );
-      if (hitNow || hitSweep) {
-        if (isAir && Math.abs(unit.y - projectile.y) > AIR_TARGET_Z_TOLERANCE + projectile.r) {
-          continue;
-        }
-        return rect.id;
+      if (entryTime === null) {
+        continue;
+      }
+      if (isAir && Math.abs(unit.y - projectile.y) > AIR_TARGET_Z_TOLERANCE + projectile.r) {
+        continue;
+      }
+      if (entryTime < bestEntryTime) {
+        bestEntryTime = entryTime;
+        bestCellId = rect.id;
       }
     }
-    return null;
+    return bestCellId;
   }
 
-  private segmentIntersectsAabb(
+  private segmentAabbEntryTime(
     x0: number,
     y0: number,
     x1: number,
@@ -2148,7 +2149,7 @@ export class BattleSession {
     top: number,
     right: number,
     bottom: number,
-  ): boolean {
+  ): number | null {
     const dx = x1 - x0;
     const dy = y1 - y0;
     let tMin = 0;
@@ -2156,7 +2157,7 @@ export class BattleSession {
 
     if (Math.abs(dx) < 1e-6) {
       if (x0 < left || x0 > right) {
-        return false;
+        return null;
       }
     } else {
       const invDx = 1 / dx;
@@ -2170,13 +2171,13 @@ export class BattleSession {
       tMin = Math.max(tMin, tx1);
       tMax = Math.min(tMax, tx2);
       if (tMin > tMax) {
-        return false;
+        return null;
       }
     }
 
     if (Math.abs(dy) < 1e-6) {
       if (y0 < top || y0 > bottom) {
-        return false;
+        return null;
       }
     } else {
       const invDy = 1 / dy;
@@ -2190,11 +2191,14 @@ export class BattleSession {
       tMin = Math.max(tMin, ty1);
       tMax = Math.min(tMax, ty2);
       if (tMin > tMax) {
-        return false;
+        return null;
       }
     }
 
-    return tMax >= 0 && tMin <= 1;
+    if (tMax < 0 || tMin > 1) {
+      return null;
+    }
+    return Math.max(0, tMin);
   }
 
   private spawnBreakDebris(

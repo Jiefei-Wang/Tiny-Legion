@@ -260,7 +260,7 @@ function templateStorePlugin() {
       try {
         const raw = readFileSync(filePath, "utf8");
         const parsed = JSON.parse(raw);
-        const normalized = parseTemplate(parsed, { injectLoaders: false, sanitizePlacement: true });
+        const normalized = parseTemplate(parsed, { injectLoaders: true, sanitizePlacement: true });
         if (!normalized) {
           continue;
         }
@@ -329,7 +329,7 @@ function templateStorePlugin() {
         req.on("end", () => {
           try {
             const parsed = JSON.parse(body || "{}");
-            const normalized = parseTemplate(parsed, { injectLoaders: false, sanitizePlacement: true });
+            const normalized = parseTemplate(parsed, { injectLoaders: true, sanitizePlacement: true });
             if (!normalized) {
               res.statusCode = 400;
               res.end("invalid template payload");

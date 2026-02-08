@@ -207,8 +207,8 @@ Map node metadata supports test-only battle tuning via optional fields on `MapNo
 Template/editor architecture notes:
 
 - `template-validation.ts` is an isolated validation module with severity output (`errors` + `warnings`).
-- `template-schema.ts` parse pipeline supports placement sanitization (skip invalid/overlapping placements) before runtime usage, and middleware/headless loaders persist the sanitized JSON to keep editor/headless results aligned.
-- Loader injection is configurable in parse options and does not alter warning/error severity evaluation logic.
+- `template-schema.ts` parse pipeline supports placement sanitization plus loader coverage normalization, and middleware/headless flows persist the normalized JSON so editor/headless/runtime stay aligned.
+- Loader injection remains configurable in parse options; current dev/headless normalization persists the injected-loader result to template JSON.
 - Editor save does not block on warnings/errors; categories are surfaced in UI/logs for developer feedback.
 - Battle deploy/spawn paths validate templates and block creation when `errors` are present.
 - Editor `Open` workflow supports direct editing of existing templates and one-click copy creation (`-copy` suffix).

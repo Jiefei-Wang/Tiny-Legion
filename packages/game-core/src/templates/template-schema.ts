@@ -153,8 +153,8 @@ export function sanitizeTemplatePlacement(template: UnitTemplate): UnitTemplate 
   return next;
 }
 
-function ensureLoaderCoverage(attachments: UnitTemplate["attachments"]): UnitTemplate["attachments"] {
-  const next = attachments.map((attachment) => ({ ...attachment }));
+function ensureLoaderCoverage(template: UnitTemplate): UnitTemplate["attachments"] {
+  const next = template.attachments.map((attachment) => ({ ...attachment }));
   const weaponClasses = new Set(
     next
       .map((attachment) => COMPONENTS[attachment.component])
@@ -172,6 +172,24 @@ function ensureLoaderCoverage(attachments: UnitTemplate["attachments"]): UnitTem
     }
   }
 
+  const occupiedKeys = new Set<string>();
+  for (const attachment of next) {
+    const rotateQuarterRaw = attachment.rotateQuarter ?? (attachment.rotate90 ? 1 : 0);
+    const rotateQuarter = ((rotateQuarterRaw % 4 + 4) % 4) as 0 | 1 | 2 | 3;
+    const footprintOffsets = getComponentFootprintOffsets(attachment.component, rotateQuarter);
+    const baseX = attachment.x;
+    const baseY = attachment.y;
+    if (baseX !== undefined && baseY !== undefined) {
+      for (const offset of footprintOffsets) {
+        occupiedKeys.add(`xy:${baseX + offset.x},${baseY + offset.y}`);
+      }
+      continue;
+    }
+    for (const offset of footprintOffsets) {
+      occupiedKeys.add(`cell:${attachment.cell}:${offset.x},${offset.y}`);
+    }
+  }
+
   const injectLoader = (component: ComponentId, supportedClass: "tracking" | "heavy-shot" | "explosive"): void => {
     if (!weaponClasses.has(supportedClass) || supportedClasses.has(supportedClass)) {
       return;
@@ -183,13 +201,55 @@ function ensureLoaderCoverage(attachments: UnitTemplate["attachments"]): UnitTem
     if (!anchor) {
       return;
     }
-    next.push({
-      component,
+    const loaderFootprint = getComponentFootprintOffsets(component, 0);
+    let placed:
+      | { cell: number; x: number | undefined; y: number | undefined; keys: string[] }
+      | null = null;
+    for (let cellIndex = 0; cellIndex < template.structure.length; cellIndex += 1) {
+      const structureCell = template.structure[cellIndex];
+      const baseX = structureCell?.x;
+      const baseY = structureCell?.y;
+      const candidateKeys = loaderFootprint.map((offset) => {
+        if (baseX !== undefined && baseY !== undefined) {
+          return `xy:${baseX + offset.x},${baseY + offset.y}`;
+        }
+        return `cell:${cellIndex}:${offset.x},${offset.y}`;
+      });
+      if (candidateKeys.some((key) => occupiedKeys.has(key))) {
+        continue;
+      }
+      placed = {
+        cell: cellIndex,
+        x: baseX,
+        y: baseY,
+        keys: candidateKeys,
+      };
+      break;
+    }
+    const fallbackBaseX = anchor.x;
+    const fallbackBaseY = anchor.y;
+    const fallbackKeys = loaderFootprint.map((offset) => {
+      if (fallbackBaseX !== undefined && fallbackBaseY !== undefined) {
+        return `xy:${fallbackBaseX + offset.x},${fallbackBaseY + offset.y}`;
+      }
+      return `cell:${anchor.cell}:${offset.x},${offset.y}`;
+    });
+    const target = placed ?? {
       cell: anchor.cell,
       x: anchor.x,
       y: anchor.y,
+      keys: fallbackKeys,
+    };
+    next.push({
+      component,
+      cell: target.cell,
+      x: target.x,
+      y: target.y,
       rotateQuarter: 0,
     });
+    for (const key of target.keys) {
+      occupiedKeys.add(key);
+    }
     const loaderStats = COMPONENTS[component];
     if (loaderStats.type === "loader" && loaderStats.loader) {
       for (const supported of loaderStats.loader.supports) {
@@ -340,7 +400,7 @@ export function parseTemplate(input: unknown, options: ParseTemplateOptions = {}
 
   const placementNormalized = sanitizePlacement ? sanitizeTemplatePlacement(template) : template;
   const loaderNormalized = injectLoaders
-    ? { ...placementNormalized, attachments: ensureLoaderCoverage(placementNormalized.attachments) }
+    ? { ...placementNormalized, attachments: ensureLoaderCoverage(placementNormalized) }
     : placementNormalized;
   return loaderNormalized;
 }
