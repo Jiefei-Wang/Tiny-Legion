@@ -177,6 +177,5 @@ export const COMPONENTS: Record<ComponentId, ComponentStats> = {
       duration: 1.8,
     },
   },
-  fuel: { mass: 9, hpMul: 0.8, type: "fuel" },
   ammo: { mass: 7, hpMul: 0.8, type: "ammo" },
 };

@@ -56,13 +56,6 @@
       "x": 1,
       "y": 0,
       "rotateQuarter": 0
-    },
-    {
-      "component": "fuel",
-      "cell": 3,
-      "x": -1,
-      "y": 1,
-      "rotateQuarter": 0
     }
   ],
   "display": [

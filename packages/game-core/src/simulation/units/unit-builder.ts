@@ -17,7 +17,6 @@ export function createInitialTemplates(): UnitTemplate[] {
         { component: "control", cell: 1 },
         { component: "engineS", cell: 0 },
         { component: "rapidGun", cell: 2 },
-        { component: "fuel", cell: 0 },
       ],
     },
     {
@@ -56,7 +55,6 @@ export function createInitialTemplates(): UnitTemplate[] {
         { component: "jetEngine", cell: 3, x: 0, y: 1 },
         { component: "trackingMissile", cell: 2, x: 1, y: 0, rotateQuarter: 0 },
         { component: "missileLoader", cell: 1 },
-        { component: "fuel", cell: 0 },
       ],
     },
     {
@@ -77,7 +75,6 @@ export function createInitialTemplates(): UnitTemplate[] {
         { component: "propeller", cell: 1, x: 0, y: 0, rotateQuarter: 3 },
         { component: "trackingMissile", cell: 2, x: 1, y: 0, rotateQuarter: 0 },
         { component: "missileLoader", cell: 4, x: 0, y: 1 },
-        { component: "fuel", cell: 3, x: -1, y: 1 },
       ],
     },
   ];

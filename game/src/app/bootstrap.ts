@@ -1222,7 +1222,9 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         <div class="small">Material usage: ${materialUsage}</div>
         <div class="small bad">Errors (${validation.errors.length}): ${errorSummary}</div>
         <div class="small warn">Warnings (${validation.warnings.length}): ${warningSummary}</div>
-        <div class="editor-comp-grid">${paletteCards}</div>
+        <div class="editor-comp-scroll">
+          <div class="editor-comp-grid">${paletteCards}</div>
+        </div>
       `;
       return;
     }
@@ -2035,12 +2037,11 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       </div>
       ${editorTemplateDialogOpen ? `<div class="node-card">
         <div><strong>Open Template</strong></div>
-        <div class="small">Select one template to open directly, or use Copy to create an editable copy with "-copy" suffix.</div>
+        <div class="small">Click a template row to open it directly, or use Copy to create an editable copy with "-copy" suffix.</div>
         <div style="display:flex; flex-direction:column; gap:6px; margin-top:8px; max-height:220px; overflow:auto;">
           ${templateOpenRows || `<div class="small">No template available.</div>`}
         </div>
         <div class="row" style="margin-top:8px;">
-          <button id="btnOpenTemplateApply" ${editorTemplateDialogSelectedId ? "" : "disabled"}>Open Selected</button>
           <button id="btnOpenTemplateClose">Close</button>
         </div>
       </div>` : ""}
@@ -2218,13 +2219,6 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       renderPanels();
     });
 
-    getOptionalElement<HTMLButtonElement>("#editorLayerStructureRight")?.addEventListener("click", () => {
-      editorLayer = "structure";
-      hideEditorTooltip();
-      ensureEditorSelectionForLayer();
-      renderPanels();
-    });
-
     getOptionalElement<HTMLButtonElement>("#btnOpenTemplateWindow")?.addEventListener("click", () => {
       editorTemplateDialogOpen = !editorTemplateDialogOpen;
       if (editorTemplateDialogOpen && !editorTemplateDialogSelectedId) {
@@ -2239,7 +2233,17 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         if (!templateId) {
           return;
         }
+        const source = templates.find((template) => template.id === templateId);
+        if (!source) {
+          return;
+        }
+        editorDraft = cloneTemplate(source);
+        loadTemplateIntoEditorSlots(editorDraft);
+        editorDeleteMode = false;
+        editorWeaponRotateQuarter = 0;
+        editorTemplateDialogOpen = false;
         editorTemplateDialogSelectedId = templateId;
+        ensureEditorSelectionForLayer();
         renderPanels();
       });
     });
@@ -2266,57 +2270,13 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       });
     });
 
-    getOptionalElement<HTMLButtonElement>("#btnOpenTemplateApply")?.addEventListener("click", () => {
-      const templateId = editorTemplateDialogSelectedId;
-      if (!templateId) {
-        return;
-      }
-      const source = templates.find((template) => template.id === templateId);
-      if (!source) {
-        return;
-      }
-      editorDraft = cloneTemplate(source);
-      loadTemplateIntoEditorSlots(editorDraft);
-      editorDeleteMode = false;
-      editorWeaponRotateQuarter = 0;
-      editorTemplateDialogOpen = false;
-      ensureEditorSelectionForLayer();
-      renderPanels();
-    });
     getOptionalElement<HTMLButtonElement>("#btnOpenTemplateClose")?.addEventListener("click", () => {
       editorTemplateDialogOpen = false;
       renderPanels();
     });
 
-    getOptionalElement<HTMLButtonElement>("#editorLayerFunctionalRight")?.addEventListener("click", () => {
-      editorLayer = "functional";
-      hideEditorTooltip();
-      ensureEditorSelectionForLayer();
-      renderPanels();
-    });
-    getOptionalElement<HTMLButtonElement>("#editorLayerDisplayRight")?.addEventListener("click", () => {
-      editorLayer = "display";
-      hideEditorTooltip();
-      ensureEditorSelectionForLayer();
-      renderPanels();
-    });
-
     getOptionalElement<HTMLInputElement>("#editorDeleteMode")?.addEventListener("change", (event) => {
       editorDeleteMode = (event.currentTarget as HTMLInputElement).checked;
-      renderPanels();
-    });
-    getOptionalElement<HTMLSelectElement>("#editorGridCols")?.addEventListener("change", (event) => {
-      const value = Number.parseInt((event.currentTarget as HTMLSelectElement).value, 10);
-      if (Number.isFinite(value)) {
-        resizeEditorGrid(value, editorGridRows);
-      }
-      renderPanels();
-    });
-    getOptionalElement<HTMLSelectElement>("#editorGridRows")?.addEventListener("change", (event) => {
-      const value = Number.parseInt((event.currentTarget as HTMLSelectElement).value, 10);
-      if (Number.isFinite(value)) {
-        resizeEditorGrid(editorGridCols, value);
-      }
       renderPanels();
     });
     getOptionalElement<HTMLInputElement>("#editorName")?.addEventListener("input", (event) => {
@@ -2393,6 +2353,48 @@ export function bootstrap(options: BootstrapOptions = {}): void {
   tabs.map.addEventListener("click", () => setScreen("map"));
   tabs.battle.addEventListener("click", () => setScreen("battle"));
   tabs.editor.addEventListener("click", () => setScreen("editor"));
+
+  selectedInfo.addEventListener("click", (event) => {
+    const target = event.target as HTMLElement;
+    const button = target.closest<HTMLButtonElement>("button");
+    if (!button) {
+      return;
+    }
+    if (button.id === "editorLayerStructureRight") {
+      editorLayer = "structure";
+    } else if (button.id === "editorLayerFunctionalRight") {
+      editorLayer = "functional";
+    } else if (button.id === "editorLayerDisplayRight") {
+      editorLayer = "display";
+    } else {
+      return;
+    }
+    hideEditorTooltip();
+    ensureEditorSelectionForLayer();
+    renderPanels();
+  });
+
+  selectedInfo.addEventListener("change", (event) => {
+    const target = event.target as HTMLElement;
+    if (!(target instanceof HTMLSelectElement)) {
+      return;
+    }
+    if (target.id === "editorGridCols") {
+      const value = Number.parseInt(target.value, 10);
+      if (Number.isFinite(value)) {
+        resizeEditorGrid(value, editorGridRows);
+      }
+      renderPanels();
+      return;
+    }
+    if (target.id === "editorGridRows") {
+      const value = Number.parseInt(target.value, 10);
+      if (Number.isFinite(value)) {
+        resizeEditorGrid(editorGridCols, value);
+      }
+      renderPanels();
+    }
+  });
 
   selectedInfo.addEventListener("mouseover", (event) => {
     const target = event.target as HTMLElement;
@@ -2656,6 +2658,10 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         panelBucket = nextBucket;
         updateMetaBar();
         updateBattleOpsInfo();
+        if (screen === "editor") {
+          // Avoid remounting editor palette DOM on a timer, which causes visible flicker.
+          return;
+        }
         updateSelectedInfo();
         updateWeaponHud();
       }

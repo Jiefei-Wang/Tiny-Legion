@@ -347,10 +347,10 @@ Startup flow in `bootstrap.ts` merges templates from built-in defaults + file-ba
 Editor UX implementation details:
 
 - Canvas editor uses a resizable placement grid up to `10x10`.
-- Right-side palette renders up to `30` component cards (placeholder thumbnail + label + type), with hover detail text.
+- Right-side palette renders component cards (placeholder thumbnail + label + type) in a scrollable list with hover detail text.
 - Active layer (`structure`, `functional`, `display`) is switched from right-panel controls above the part palette.
 - Per-part gas contribution is not used in current editor stage; part cards and placement logic focus on gameplay stats/constraints.
-- Editor `Open` window lists all templates and supports either direct-open editing or one-click `Copy` (`-copy` suffix).
+- Editor `Open` window lists all templates; clicking a template row opens it directly, and one-click `Copy` creates an editable clone (`-copy` suffix).
 - Template ID is internal/auto-managed for new and copied templates (no manual ID field in editor UI).
 - Editor templates persist coordinates per placed part (`x`,`y`, origin `(0,0)`; negatives allowed).
 - Weapon functional entries may carry `rotateQuarter` metadata (0..3, each step = 90deg).

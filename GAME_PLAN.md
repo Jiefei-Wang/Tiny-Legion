@@ -137,7 +137,6 @@ Attachment rules:
   - Propeller (air units, directional thrust)
 - Power
   - Engine Core (power output)
-  - Fuel Tank
   - Battery Pack
 - Offense
   - Cannon
@@ -159,7 +158,7 @@ Design constraints:
 - Mass and power budget must be valid.
 - Air unit validity rule: at least one `jetEngine` or `propeller` is required. Ground engines do not provide lift/thrust to aircraft.
 - Weapon recoil/stability depends on structure and module placement.
-- Exposed ammo/fuel modules create high-risk weak points.
+- Exposed ammo modules create high-risk weak points.
 - The unit blueprint is invalid without exactly one Control Unit.
 - Propeller placement rule: multi-cell footprint, clearance area must stay empty, and anchor requires structure support from below.
 
@@ -314,7 +313,6 @@ Module outcomes:
 
 - Engine damaged -> reduced speed/power
 - Weapon damaged -> jam/misfire/disabled
-- Fuel tank ruptured -> fire risk
 - Ammo rack hit -> explosion chain risk
 
 Control Unit outcome:
@@ -416,7 +414,7 @@ Gas used for:
 
 - Deploying new army objects in battle
 - Operating stationed garrisons
-- Possibly fuel-heavy unit abilities
+- Possibly high-upkeep unit abilities
 
 Recommended balancing principles:
 
@@ -603,7 +601,6 @@ Functional components add mass and capability, but no armor.
 | Engine Core (small) | 10 | 1.0 | -45% thrust/power |
 | Engine Core (medium) | 16 | 1.0 | -60% thrust/power |
 | Ammo Rack | 7 | 0.8 | 30% secondary explosion chance |
-| Fuel Tank | 9 | 0.8 | Fire DOT risk |
 | Fire Control Unit | 6 | 0.9 | +35% weapon spread |
 | Radar/Sensor | 5 | 0.9 | Reduced detection range |
 

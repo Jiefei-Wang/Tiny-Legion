@@ -16,7 +16,6 @@ export type ComponentId =
   | "trackingMissile"
   | "precisionBeam"
   | "empEmitter"
-  | "fuel"
   | "ammo";
 
 export type WeaponClass =
@@ -42,7 +41,7 @@ export interface MaterialStats {
 }
 
 export interface ComponentStats {
-  readonly type: "control" | "engine" | "weapon" | "loader" | "fuel" | "ammo";
+  readonly type: "control" | "engine" | "weapon" | "loader" | "ammo";
   readonly mass: number;
   readonly hpMul: number;
   readonly directional?: boolean;
