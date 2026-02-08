@@ -2,7 +2,7 @@ import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { BattleSession } from "../src/gameplay/battle/battle-session.ts";
 import { COMPONENTS } from "../src/config/balance/weapons.ts";
 import { createInitialTemplates } from "../src/simulation/units/unit-builder.ts";
-import { mergeTemplates, parseTemplate } from "../src/app/template-store.ts";
+import { mergeTemplates, parseTemplate, validateTemplateDetailed } from "../src/app/template-store.ts";
 import type { BattleHooks } from "../src/gameplay/battle/battle-session.ts";
 import type { KeyState, MapNode, UnitInstance, UnitTemplate } from "../src/types.ts";
 
@@ -11,7 +11,7 @@ declare const process: { exit: (code?: number) => void; cwd: () => string };
 type Failure = {
   templateId: string;
   templateName: string;
-  check: "movement" | "firing";
+  check: "validation" | "movement" | "firing";
   detail: string;
 };
 
@@ -114,8 +114,28 @@ function getMissingLoaderClasses(template: UnitTemplate): string[] {
 
 function runSmoke(): Failure[] {
   const failures: Failure[] = [];
-  const requiredTemplateIds = ["scout-ground", "tank-ground", "air-light"];
+  const requiredTemplateIds = ["scout-ground", "tank-ground", "air-light", "air-jet", "air-propeller"];
   const templates = loadRuntimeMergedTemplates();
+  const defaultTemplateIds = new Set(readTemplateDir(`${process.cwd().replace(/\\/g, "/")}/templates/default`).map((template) => template.id));
+
+  for (const template of templates) {
+    if (!defaultTemplateIds.has(template.id)) {
+      continue;
+    }
+    const validation = validateTemplateDetailed(template);
+    if (validation.errors.length > 0 || validation.warnings.length > 0) {
+      failures.push({
+        templateId: template.id,
+        templateName: template.name,
+        check: "validation",
+        detail: `errors=${validation.errors.join(" | ") || "none"}; warnings=${validation.warnings.join(" | ") || "none"}`,
+      });
+    }
+  }
+  if (failures.length > 0) {
+    return failures;
+  }
+
   const testTemplates: UnitTemplate[] = [];
   for (const requiredTemplateId of requiredTemplateIds) {
     const matched = templates.find((template) => template.id === requiredTemplateId);

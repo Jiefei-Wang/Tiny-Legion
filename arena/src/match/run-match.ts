@@ -1,9 +1,14 @@
 import type { MatchResult, MatchSpec } from "./match-types.ts";
 import { setMathRandomSeed } from "../lib/seeded-rng.ts";
-import { loadBattleSessionModule, loadDecisionTreeModule, loadStructureGridModule } from "../game/game-loader.ts";
 import { loadRuntimeMergedTemplates } from "./templates.ts";
 import { mulberry32 } from "../lib/seeded-rng.ts";
 import { getSpawnFamily } from "../spawn/families.ts";
+import {
+  BATTLE_SALVAGE_REFUND_FACTOR,
+  BattleSession,
+} from "../../../packages/game-core/src/gameplay/battle/battle-session.ts";
+import { evaluateCombatDecisionTree } from "../../../packages/game-core/src/ai/decision-tree/combat-decision-tree.ts";
+import { structureIntegrity } from "../../../packages/game-core/src/simulation/units/structure-grid.ts";
 
 type GameBattleHooks = {
   addLog: (text: string, tone?: any) => void;
@@ -55,12 +60,7 @@ export async function runMatch(spec: MatchSpec): Promise<MatchResult> {
   setMathRandomSeed(spec.seed);
   const templates = await loadRuntimeMergedTemplates();
   const templateById = new Map<string, any>(templates.map((t: any) => [String(t.id), t] as const));
-  const battleMod = await loadBattleSessionModule();
-  const { evaluateCombatDecisionTree } = await loadDecisionTreeModule();
-  const { structureIntegrity } = await loadStructureGridModule();
-
-  const BattleSession = battleMod.BattleSession as any;
-  const refundFactor = typeof battleMod.BATTLE_SALVAGE_REFUND_FACTOR === "number" ? battleMod.BATTLE_SALVAGE_REFUND_FACTOR : 0.6;
+  const refundFactor = BATTLE_SALVAGE_REFUND_FACTOR;
 
   let playerGas = spec.playerGas;
   const logs: string[] = [];
@@ -85,7 +85,7 @@ export async function runMatch(spec: MatchSpec): Promise<MatchResult> {
     },
   };
 
-  const aiForSide = (side: "player" | "enemy") => {
+  const aiForSide = (side: "player" | "enemy"): any => {
     const aiSpec = side === "player" ? spec.aiPlayer : spec.aiEnemy;
     const kind = aiSpec.familyId;
 
@@ -370,7 +370,7 @@ export async function runMatch(spec: MatchSpec): Promise<MatchResult> {
     disableDefaultStarters: true,
   });
 
-  const node = {
+  const node: Parameters<BattleSession["start"]>[0] = {
     id: "arena",
     name: "Arena",
     owner: "neutral",
@@ -384,7 +384,7 @@ export async function runMatch(spec: MatchSpec): Promise<MatchResult> {
   battle.start(node);
   battle.clearControlSelection();
 
-  const rosterPreference = ["scout-ground", "tank-ground", "air-light"];
+  const rosterPreference = ["scout-ground", "tank-ground", "air-jet", "air-propeller", "air-light"];
   const availableTemplateIds = new Set<string>(templates.map((t: any) => String(t.id)));
   const roster = rosterPreference.filter((id) => availableTemplateIds.has(id));
   if (roster.length === 0) {

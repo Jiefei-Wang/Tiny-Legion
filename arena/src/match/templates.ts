@@ -1,9 +1,17 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs";
-import { locateGameTemplatesDir, loadTemplateStoreModule, loadUnitBuilderModule } from "../game/game-loader.ts";
+import { resolve } from "node:path";
+import { createInitialTemplates } from "../../../packages/game-core/src/simulation/units/unit-builder.ts";
+import { mergeTemplates, parseTemplate } from "../../../packages/game-core/src/templates/template-schema.ts";
+
+function locateGameTemplatesDir(): { defaultDir: string; userDir: string } {
+  const rootDir = resolve(process.cwd(), "..");
+  return {
+    defaultDir: resolve(rootDir, "game", "templates", "default"),
+    userDir: resolve(rootDir, "game", "templates", "user"),
+  };
+}
 
 export async function loadRuntimeMergedTemplates(): Promise<any[]> {
-  const { createInitialTemplates } = await loadUnitBuilderModule();
-  const { mergeTemplates, parseTemplate } = await loadTemplateStoreModule();
   const baseTemplates = createInitialTemplates();
   const { defaultDir, userDir } = locateGameTemplatesDir();
 

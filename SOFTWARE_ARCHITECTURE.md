@@ -10,12 +10,14 @@ Current active stack/runtime:
 - Language: `TypeScript`
 - Build tool: `Vite`
 - Active app path: `game/`
+- Shared logic package: `packages/game-core/`
 - Legacy prototype path: `webgame/` (reference only)
 
 Implemented gameplay architecture highlights:
 
 - Ground combat: continuous `X/Y` movement zone
 - Air combat: `X/Z` abstraction (rendered on screen vertical axis)
+- Air propulsion split: `jetEngine` (omni thrust) + `propeller` (directional thrust with placement constraints)
 - Unit layers: `structure + functional + display`
 - AI modules split by concern:
   - `src/ai/decision-tree/combat-decision-tree.ts` (combat orchestrator)
@@ -94,7 +96,7 @@ Use a browser-first stack with TypeScript for maintainability.
 
 ## 3. High-Level Architecture
 
-Split game into 4 runtime layers:
+Split implementation into 4 runtime layers plus 2 integration surfaces:
 
 1. **Core Simulation Layer**
    - Deterministic-ish fixed-timestep world update.
@@ -106,6 +108,15 @@ Split game into 4 runtime layers:
 4. **Platform Layer**
    - Save/load, settings, input devices, telemetry, networking.
 
+Integration surfaces:
+
+1. **Developer Interface**
+   - Debug options UI + `/__debug/*` middleware (`toggle`, `log`, `probe`).
+   - Runtime inspection without changing gameplay logic modules.
+2. **AI Arena Interface**
+   - Headless match/training/eval/replay in `arena/`.
+   - Consumes shared logic from `packages/game-core` directly.
+
 Rule: presentation can read simulation state, but simulation cannot depend on rendering classes.
 
 ---
@@ -115,50 +126,29 @@ Rule: presentation can read simulation state, but simulation cannot depend on re
 Current implemented structure (abridged):
 
 ```text
-src/
+packages/game-core/src/
+  ai/
+  config/balance/
+  core/ids/
+  gameplay/
+    battle/battle-session.ts
+    map/
+  simulation/
+  templates/template-schema.ts
+  templates/template-validation.ts
+  types.ts
+
+game/src/
   app/
     bootstrap.ts
     game-loop.ts
-    template-store.ts
+    template-store.ts      (fetch/save adapter over game-core template schema/validation)
+  ai|config|core|gameplay|simulation|types.ts
+    (thin re-exports to packages/game-core)
 
-  ai/
-    decision-tree/combat-decision-tree.ts
-    targeting/target-selector.ts
-    shooting/ballistic-aim.ts
-    shooting/weapon-ai-policy.ts
-    movement/threat-movement.ts
-
-  config/
-    balance/materials.ts
-    balance/weapons.ts
-    balance/commander.ts
-    balance/economy.ts
-    balance/range.ts
-
-  core/
-    ids/uid.ts
-
-  simulation/
-    physics/impulse-model.ts
-    physics/mass-cache.ts
-    combat/damage-model.ts
-    combat/recoil.ts
-    units/unit-builder.ts
-    units/structure-grid.ts
-    units/functional-attachments.ts
-    units/control-unit-rules.ts
-
-  gameplay/
-    battle/battle-session.ts
-    map/node-graph.ts
-    map/occupation.ts
-    map/garrison-upkeep.ts
-
-  types.ts
-
-  templates/
-    default/*.json
-    user/*.json
+game/templates/
+  default/*.json
+  user/*.json
 ```
 
 Arena training/runtime package (implemented):
@@ -202,16 +192,25 @@ arena/src/
 
 Arena-specific architecture notes:
 
+- Arena runtime imports battle/simulation/template domain code directly from `packages/game-core/src/*` (no dynamic loading from `game/.headless-dist`).
 - Training and evaluation run headless through `WorkerPool` + `match-worker.ts` for parallel CPU usage.
 - Model ranking now prioritizes `winRateLowerBound` then `winRate`, then `score`.
 - `cli.ts` includes an `eval` command for reproducible held-out benchmarking versus `baseline`.
-- Replay UI (`arena-ui/src/main.ts`) supports all arena AI families to preserve match/replay parity.
+- Replay UI (`arena-ui/src/main.ts`) still uses game interface bootstrap (`game/src/app/bootstrap.ts`) while consuming AI/simulation primitives from `packages/game-core`.
 
 Map node metadata supports test-only battle tuning via optional fields on `MapNode`:
 
 - `testEnemyMinActive` keeps a minimum enemy unit count active in battle.
 - `testEnemyInfiniteGas` bypasses enemy gas drain so test scenarios can sustain pressure.
 - `testBaseHpOverride` sets both player/enemy battle base HP and max HP for long-running test battles.
+
+Template/editor architecture notes:
+
+- `template-validation.ts` is an isolated validation module with severity output (`errors` + `warnings`).
+- Editor save does not block on warnings/errors; categories are surfaced in UI/logs for developer feedback.
+- Battle deploy/spawn paths validate templates and block creation when `errors` are present.
+- Editor `Open` workflow supports direct editing of existing templates and one-click copy creation (`-copy` suffix).
+- Template IDs are internal and auto-generated for new/copy templates; ID editing is removed from UI.
 
 ---
 
@@ -234,6 +233,10 @@ Encode your game rules as explicit modules (not scattered checks):
   - maintain incremental total mass (`M_total`) for fast recoil/knockback calculations.
 - `recoil.ts` and `impulse-model.ts`
   - shared formulas for fire recoil and incoming hit impulse.
+- `battle-session.ts` (air movement sub-system)
+  - aircraft only gain propulsion from air components (`jetEngine`/`propeller`).
+  - lift-vs-gravity deficit drives altitude loss.
+  - non-descent commands reserve thrust for vertical hold and spend spare thrust on horizontal movement.
 
 This keeps your physics behavior consistent across all systems.
 
@@ -343,8 +346,10 @@ Editor UX implementation details:
 
 - Canvas editor uses a resizable placement grid up to `10x10`.
 - Right-side palette renders up to `30` component cards (placeholder thumbnail + label + type), with hover detail text.
-- Active layer (`structure`, `functional`, `display`) determines placement semantics on the grid.
-- Gas cost is auto-derived from current layer content, not manually entered.
+- Active layer (`structure`, `functional`, `display`) is switched from right-panel controls above the part palette.
+- Per-part gas contribution is not used in current editor stage; part cards and placement logic focus on gameplay stats/constraints.
+- Editor `Open` window lists all templates and supports either direct-open editing or one-click `Copy` (`-copy` suffix).
+- Template ID is internal/auto-managed for new and copied templates (no manual ID field in editor UI).
 - Editor templates persist coordinates per placed part (`x`,`y`, origin `(0,0)`; negatives allowed).
 - Weapon functional entries may carry `rotateQuarter` metadata (0..3, each step = 90deg).
 - Heavy-shot weapons use grouped multi-cell occupancy in editor and rotate footprint with `rotateQuarter`.
@@ -356,7 +361,9 @@ Editor UX implementation details:
 - Weapon firing clamps out-of-angle aim to the nearest allowed boundary before projectile spawn/cooldown.
 - Runtime mobility derives from current engine power and current mass (power-to-mass), recalculated during battle updates.
 - Runtime mobility also applies per-engine max-speed caps; multiple-engine cap is computed as a power-weighted average, then used as a hard upper bound on computed speed.
-- Air units run a stall/lift check against reachable max speed (threshold `100`). Units below threshold transition into an air-drop state, are deselected/uncontrollable, and crash at a random ground-lane Y.
+- Air units compute lift from air propulsion thrust (`jetEngine` omni, `propeller` directional cone) and compare against gravity hold.
+- Air movement reserves thrust for vertical hold first, then spends remaining thrust for horizontal/intentional altitude movement.
+- If lift becomes critically low, units transition into an air-drop crash path.
 - Loader subsystem added for selected weapon classes (heavy-shot/explosive/tracking):
 - Loader components (`cannonLoader`, `missileLoader`) are functional modules with per-loader capabilities.
   - Each loader services one weapon at a time via per-unit loader state.

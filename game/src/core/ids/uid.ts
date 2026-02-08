@@ -1,6 +1,1 @@
-let uidCounter = 0;
-
-export function nextUid(prefix: string): string {
-  uidCounter += 1;
-  return `${prefix}-${uidCounter}`;
-}
+export * from "../../../../packages/game-core/src/core/ids/uid.ts";

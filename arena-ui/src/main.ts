@@ -2,9 +2,9 @@ import "../../game/src/style.css";
 
 import { bootstrap } from "../../game/src/app/bootstrap.ts";
 import type { ArenaReplayDecider, ArenaReplaySpec } from "../../game/src/app/bootstrap.ts";
-import type { BattleAiController, BattleAiInput, BattleSessionOptions } from "../../game/src/gameplay/battle/battle-session.ts";
-import { evaluateCombatDecisionTree } from "../../game/src/ai/decision-tree/combat-decision-tree.ts";
-import { structureIntegrity } from "../../game/src/simulation/units/structure-grid.ts";
+import type { BattleAiController, BattleAiInput, BattleSessionOptions } from "../../packages/game-core/src/gameplay/battle/battle-session.ts";
+import { evaluateCombatDecisionTree } from "../../packages/game-core/src/ai/decision-tree/combat-decision-tree.ts";
+import { structureIntegrity } from "../../packages/game-core/src/simulation/units/structure-grid.ts";
 import { getSpawnFamily } from "../../arena/src/spawn/families.ts";
 
 type MatchArtifact = { spec: ArenaReplaySpec };

@@ -2,7 +2,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { resolve, extname } from "node:path";
 
-function send(res: ServerResponse, status: number, contentType: string, body: string | Buffer): void {
+function send(res: ServerResponse, status: number, contentType: string, body: string | Uint8Array): void {
   res.statusCode = status;
   res.setHeader("content-type", contentType);
   res.setHeader("cache-control", "no-store");

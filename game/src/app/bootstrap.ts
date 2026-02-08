@@ -10,7 +10,7 @@ import { MATERIALS } from "../config/balance/materials.ts";
 import { BattleSession } from "../gameplay/battle/battle-session.ts";
 import type { BattleSessionOptions } from "../gameplay/battle/battle-session.ts";
 import { BATTLE_SALVAGE_REFUND_FACTOR } from "../gameplay/battle/battle-session.ts";
-import { cloneTemplate, fetchDefaultTemplatesFromStore, fetchUserTemplatesFromStore, getTemplateValidationIssues, mergeTemplates, saveUserTemplateToStore } from "./template-store.ts";
+import { cloneTemplate, fetchDefaultTemplatesFromStore, fetchUserTemplatesFromStore, mergeTemplates, saveUserTemplateToStore, validateTemplateDetailed } from "./template-store.ts";
 import type { ComponentId, DisplayAttachmentTemplate, GameBase, KeyState, MapNode, MaterialId, ScreenMode, TechState, UnitTemplate } from "../types.ts";
 
 export type ArenaReplaySpec = {
@@ -222,6 +222,8 @@ export function bootstrap(options: BootstrapOptions = {}): void {
   let editorStructureSlots: Array<MaterialId | null> = new Array<MaterialId | null>(EDITOR_GRID_MAX_SIZE).fill(null);
   let editorFunctionalSlots: EditorFunctionalSlot[] = new Array<EditorFunctionalSlot>(EDITOR_GRID_MAX_SIZE).fill(null);
   let editorDisplaySlots: Array<DisplayAttachmentTemplate["kind"] | null> = new Array<DisplayAttachmentTemplate["kind"] | null>(EDITOR_GRID_MAX_SIZE).fill(null);
+  let editorTemplateDialogOpen = false;
+  let editorTemplateDialogSelectedId: string | null = null;
   let editorDraft: UnitTemplate = {
     id: "custom-1",
     name: "Custom Unit",
@@ -824,7 +826,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     addLog(`Arena replay started (seed=${spec.seed})`, "good");
 
     // Replay macro loop state.
-    const rosterPreference = ["scout-ground", "tank-ground", "air-light"];
+    const rosterPreference = ["scout-ground", "tank-ground", "air-jet", "air-propeller", "air-light"];
     const availableTemplateIds = new Set<string>(templates.map((t) => t.id));
     let roster = rosterPreference.filter((id) => availableTemplateIds.has(id));
     if (roster.length === 0) {
@@ -1144,14 +1146,45 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     }
   };
 
+  const slugifyTemplateId = (rawName: string): string => {
+    const base = rawName
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .replace(/-+/g, "-");
+    return base || "custom-unit";
+  };
+
+  const makeUniqueTemplateId = (baseId: string): string => {
+    const used = new Set<string>(templates.map((template) => template.id));
+    used.delete(editorDraft.id);
+    let next = baseId;
+    let index = 2;
+    while (used.has(next)) {
+      next = `${baseId}-${index}`;
+      index += 1;
+    }
+    return next;
+  };
+
+  const makeCopyTemplate = (source: UnitTemplate): UnitTemplate => {
+    const copy = cloneTemplate(source);
+    copy.name = `${source.name}-copy`;
+    copy.id = makeUniqueTemplateId(slugifyTemplateId(copy.name));
+    return copy;
+  };
+
   const updateSelectedInfo = (): void => {
     if (screen === "editor") {
       ensureEditorSelectionForLayer();
       const catalog = getEditorCatalogItems();
+      const validation = validateTemplateDetailed(editorDraft);
       const controlCount = editorDraft.attachments.filter((attachment) => attachment.component === "control").length;
       const displayCount = (editorDraft.display ?? []).length;
       const materialUsage = getEditorMaterialBreakdown();
       const functionalUsage = editorDraft.attachments.length;
+      const errorSummary = validation.errors.length > 0 ? validation.errors.join(" | ") : "none";
+      const warningSummary = validation.warnings.length > 0 ? validation.warnings.join(" | ") : "none";
       const paletteCards = Array.from({ length: 30 }, (_, index) => {
         const item = catalog[index];
         if (!item) {
@@ -1166,7 +1199,11 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       }).join("");
       selectedInfo.innerHTML = `
         <div><strong>${editorDraft.name}</strong> (${editorDraft.type})</div>
-        <div class="small">ID: ${editorDraft.id}</div>
+        <div class="row">
+          <button id="editorLayerStructureRight" class="${editorLayer === "structure" ? "active" : ""}">Structure</button>
+          <button id="editorLayerFunctionalRight" class="${editorLayer === "functional" ? "active" : ""}">Functional</button>
+          <button id="editorLayerDisplayRight" class="${editorLayer === "display" ? "active" : ""}">Display</button>
+        </div>
         <div class="row">
           <label class="small">W
             <select id="editorGridCols">
@@ -1180,9 +1217,11 @@ export function bootstrap(options: BootstrapOptions = {}): void {
           </label>
         </div>
         <div class="small">Structure: ${editorDraft.structure.length} | Functional: ${functionalUsage} | Display: ${displayCount}</div>
-        <div class="small">Gas: ${editorDraft.gasCost} | Control Units: ${controlCount}</div>
+        <div class="small">Control Units: ${controlCount}</div>
         <div class="small">${isCurrentEditorSelectionDirectional() ? `Weapon direction: ${getRotationSymbol()} (${editorWeaponRotateQuarter * 90}deg)` : "Weapon direction: n/a"}</div>
         <div class="small">Material usage: ${materialUsage}</div>
+        <div class="small bad">Errors (${validation.errors.length}): ${errorSummary}</div>
+        <div class="small warn">Warnings (${validation.warnings.length}): ${warningSummary}</div>
         <div class="editor-comp-grid">${paletteCards}</div>
       `;
       return;
@@ -1295,14 +1334,6 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     thumb: string;
   };
 
-  const MATERIAL_GAS_COST: Record<MaterialId, number> = {
-    basic: 4,
-    reinforced: 6,
-    ceramic: 7,
-    reactive: 8,
-    combined: 10,
-  };
-
   const getEditorGridRect = (): { x: number; y: number; cell: number } => {
     const cell = 32;
     const x = Math.floor(canvas.width * 0.5 - (editorGridCols * cell) / 2 + editorGridPanX);
@@ -1347,27 +1378,70 @@ export function bootstrap(options: BootstrapOptions = {}): void {
 
   const getComponentFootprintOffsets = (component: ComponentId, rotateQuarter: 0 | 1 | 2 | 3): Array<{ x: number; y: number }> => {
     const stats = COMPONENTS[component];
-    if (stats.type !== "weapon") {
-      return [{ x: 0, y: 0 }];
+    const placementOffsets = stats.placement?.footprintOffsets;
+    if (placementOffsets && placementOffsets.length > 0) {
+      return placementOffsets.map((offset) => rotateOffsetByQuarter(offset.x, offset.y, rotateQuarter));
     }
-    if (stats.weaponClass === "heavy-shot") {
+    if (stats.type === "weapon" && stats.weaponClass === "heavy-shot") {
       return [{ x: 0, y: 0 }, { x: 1, y: 0 }].map((offset) => rotateOffsetByQuarter(offset.x, offset.y, rotateQuarter));
     }
     return [{ x: 0, y: 0 }];
   };
 
-  const getFootprintSlots = (anchorSlot: number, component: ComponentId, rotateQuarter: 0 | 1 | 2 | 3): number[] => {
+  const getFootprintSlots = (anchorSlot: number, component: ComponentId, rotateQuarter: 0 | 1 | 2 | 3): { slots: number[]; anchorCoord: { x: number; y: number } } | null => {
     const anchor = slotToCoord(anchorSlot);
     const offsets = getComponentFootprintOffsets(component, rotateQuarter);
     const slots: number[] = [];
     for (const offset of offsets) {
       const slot = coordToSlot(anchor.x + offset.x, anchor.y + offset.y);
       if (slot === null) {
-        return [];
+        return null;
       }
       slots.push(slot);
     }
-    return slots;
+    return { slots, anchorCoord: anchor };
+  };
+
+  const getPlacementOffsets = (component: ComponentId, rotateQuarter: 0 | 1 | 2 | 3): Array<{ x: number; y: number }> => {
+    return (COMPONENTS[component].placement?.requireEmptyOffsets ?? []).map((offset) => rotateOffsetByQuarter(offset.x, offset.y, rotateQuarter));
+  };
+
+  const validateFunctionalPlacement = (
+    component: ComponentId,
+    rotateQuarter: 0 | 1 | 2 | 3,
+    anchorSlot: number,
+    footprintSlots: number[],
+    anchorCoord: { x: number; y: number },
+  ): { ok: boolean; reason: string | null } => {
+    const stats = COMPONENTS[component];
+    const placement = stats.placement;
+    const requireStructureOnFootprint = placement?.requireStructureOnFootprint ?? true;
+    if (requireStructureOnFootprint && footprintSlots.some((occupiedSlot) => !editorStructureSlots[occupiedSlot])) {
+      return { ok: false, reason: "All occupied blocks must sit on structure cells" };
+    }
+
+    if (placement?.requireStructureBelowAnchor) {
+      const supportSlot = coordToSlot(anchorCoord.x, anchorCoord.y + 1);
+      if (supportSlot === null || !editorStructureSlots[supportSlot]) {
+        return { ok: false, reason: "Component requires structure support directly below anchor" };
+      }
+    }
+
+    const requiredEmptyOffsets = getPlacementOffsets(component, rotateQuarter);
+    for (const offset of requiredEmptyOffsets) {
+      const requiredSlot = coordToSlot(anchorCoord.x + offset.x, anchorCoord.y + offset.y);
+      if (requiredSlot === null) {
+        return { ok: false, reason: "Component clearance extends beyond editor bounds" };
+      }
+      if (editorStructureSlots[requiredSlot]) {
+        return { ok: false, reason: "Required clearance area must be empty of structure" };
+      }
+      if (editorFunctionalSlots[requiredSlot] && editorFunctionalSlots[requiredSlot]?.groupId !== (editorFunctionalSlots[anchorSlot]?.groupId ?? -1)) {
+        return { ok: false, reason: "Required clearance area is occupied by another functional component" };
+      }
+    }
+
+    return { ok: true, reason: null };
   };
 
   const clearFunctionalGroupAtSlot = (slot: number): boolean => {
@@ -1459,20 +1533,19 @@ export function bootstrap(options: BootstrapOptions = {}): void {
           value: materialId,
           title: stats.label,
           subtitle: materialId,
-          detail: `Mass ${stats.mass.toFixed(2)} | Armor ${stats.armor.toFixed(2)} | HP ${stats.hp.toFixed(0)} | Recover ${stats.recoverPerSecond.toFixed(1)}/s | Gas ${MATERIAL_GAS_COST[materialId]}`,
+          detail: `Mass ${stats.mass.toFixed(2)} | Armor ${stats.armor.toFixed(2)} | HP ${stats.hp.toFixed(0)} | Recover ${stats.recoverPerSecond.toFixed(1)}/s`,
           thumb: materialId.slice(0, 2).toUpperCase(),
         };
       });
     }
     if (editorLayer === "functional") {
       return Object.entries(COMPONENTS).map(([id, stats]) => {
-        const baseGas = stats.type === "weapon" ? 11 : stats.type === "engine" ? 8 : stats.type === "loader" ? 7 : 6;
         const rotateHint = stats.directional ? " | Supports 90deg rotate" : "";
         return {
           value: id,
           title: id,
           subtitle: stats.type,
-          detail: `Type ${stats.type} | Mass ${stats.mass.toFixed(2)} | HPx ${stats.hpMul.toFixed(2)} | Gas ${baseGas}${rotateHint}`,
+          detail: `Type ${stats.type} | Mass ${stats.mass.toFixed(2)} | HPx ${stats.hpMul.toFixed(2)}${rotateHint}`,
           thumb: id.slice(0, 2).toUpperCase(),
         };
       });
@@ -1530,22 +1603,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         y: slotToCoord(entry.slotIndex).y,
       }));
 
-    const structureGas = editorDraft.structure.reduce((sum, cell) => sum + MATERIAL_GAS_COST[cell.material], 0);
-    const functionalGas = editorDraft.attachments.reduce((sum, attachment) => {
-      const type = COMPONENTS[attachment.component].type;
-      if (type === "weapon") {
-        return sum + 11;
-      }
-      if (type === "engine") {
-        return sum + 8;
-      }
-      if (type === "loader") {
-        return sum + 7;
-      }
-      return sum + 6;
-    }, 0);
-    const displayGas = (editorDraft.display ?? []).length * 2;
-    editorDraft.gasCost = Math.max(1, 8 + structureGas + functionalGas + displayGas);
+    // Gas is currently not derived from parts in editor mode.
   };
 
   const loadTemplateIntoEditorSlots = (template: UnitTemplate): void => {
@@ -1577,16 +1635,17 @@ export function bootstrap(options: BootstrapOptions = {}): void {
           ? ((attachment.rotateQuarter % 4 + 4) % 4) as 0 | 1 | 2 | 3
           : (attachment.rotate90 ? 1 : 0);
         const normalizedRotate = isDirectionalComponent(attachment.component) ? rotateQuarter : 0;
-        const footprint = getFootprintSlots(slot, attachment.component, normalizedRotate);
-        if (footprint.length <= 0) {
+        const placement = getFootprintSlots(slot, attachment.component, normalizedRotate);
+        if (!placement || placement.slots.length <= 0) {
           continue;
         }
-        if (footprint.some((occupiedSlot) => !editorStructureSlots[occupiedSlot])) {
+        const check = validateFunctionalPlacement(attachment.component, normalizedRotate, slot, placement.slots, placement.anchorCoord);
+        if (!check.ok) {
           continue;
         }
         const groupId = editorFunctionalGroupSeq;
         editorFunctionalGroupSeq += 1;
-        for (const occupiedSlot of footprint) {
+        for (const occupiedSlot of placement.slots) {
           editorFunctionalSlots[occupiedSlot] = {
             component: attachment.component,
             rotateQuarter: normalizedRotate,
@@ -1693,26 +1752,31 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       context.fillText(`Q ccw | E cw`, canvas.width - 160, 47);
     }
 
-    const validationIssues = getTemplateValidationIssues(editorDraft);
-    const issuesHeight = Math.max(30, 12 + Math.min(7, validationIssues.length) * 14);
+    const validation = validateTemplateDetailed(editorDraft);
+    const lineCount = validation.errors.length + validation.warnings.length + 2;
+    const issuesHeight = Math.max(34, 16 + Math.min(10, lineCount) * 14);
     const issuesWidth = 360;
     const issuesX = canvas.width - issuesWidth - 16;
     const issuesY = canvas.height - issuesHeight - 14;
     context.fillStyle = "rgba(21, 31, 45, 0.94)";
     context.fillRect(issuesX, issuesY, issuesWidth, issuesHeight);
-    context.strokeStyle = validationIssues.length > 0 ? "rgba(224, 145, 111, 0.96)" : "rgba(151, 214, 165, 0.92)";
+    context.strokeStyle = validation.errors.length > 0 ? "rgba(224, 145, 111, 0.96)" : "rgba(151, 214, 165, 0.92)";
     context.lineWidth = 1;
     context.strokeRect(issuesX, issuesY, issuesWidth, issuesHeight);
-    context.fillStyle = validationIssues.length > 0 ? "#ffd1c1" : "#bde6c6";
+    context.fillStyle = validation.errors.length > 0 ? "#ffd1c1" : "#bde6c6";
     context.font = "12px Trebuchet MS";
-    if (validationIssues.length === 0) {
-      context.fillText("Validation issues: none", issuesX + 8, issuesY + 18);
-    } else {
-      context.fillText("Validation issues:", issuesX + 8, issuesY + 16);
-      const shown = validationIssues.slice(0, 6);
-      for (let i = 0; i < shown.length; i += 1) {
-        context.fillText(`- ${shown[i]}`, issuesX + 8, issuesY + 30 + i * 14);
-      }
+    context.fillText(`Errors (${validation.errors.length})`, issuesX + 8, issuesY + 16);
+    const shownErrors = validation.errors.slice(0, 4);
+    for (let i = 0; i < shownErrors.length; i += 1) {
+      context.fillText(`- ${shownErrors[i]}`, issuesX + 8, issuesY + 30 + i * 14);
+    }
+    const warningHeaderY = issuesY + 30 + shownErrors.length * 14;
+    context.fillStyle = "#ffd58c";
+    context.fillText(`Warnings (${validation.warnings.length})`, issuesX + 8, warningHeaderY);
+    context.fillStyle = "#ffe7b8";
+    const shownWarnings = validation.warnings.slice(0, Math.max(0, 8 - shownErrors.length));
+    for (let i = 0; i < shownWarnings.length; i += 1) {
+      context.fillText(`- ${shownWarnings[i]}`, issuesX + 8, warningHeaderY + 14 + i * 14);
     }
 
     for (let row = 0; row < editorGridRows; row += 1) {
@@ -1845,20 +1909,21 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       } else if (editorSelection in COMPONENTS) {
         const component = editorSelection as ComponentId;
         const rotateQuarter = COMPONENTS[component].directional ? editorWeaponRotateQuarter : 0;
-        const footprint = getFootprintSlots(slot, component, rotateQuarter);
-        if (footprint.length <= 0) {
+        const placement = getFootprintSlots(slot, component, rotateQuarter);
+        if (!placement || placement.slots.length <= 0) {
           addLog("Component footprint out of editor bounds", "warn");
           return;
         }
-        if (footprint.some((occupiedSlot) => !editorStructureSlots[occupiedSlot])) {
-          addLog("All occupied weapon blocks must sit on structure cells", "warn");
+        const check = validateFunctionalPlacement(component, rotateQuarter, slot, placement.slots, placement.anchorCoord);
+        if (!check.ok) {
+          addLog(check.reason ?? "Invalid component placement", "warn");
           return;
         }
         if (component === "control") {
           editorFunctionalSlots = editorFunctionalSlots.map((entry) => (entry?.component === "control" ? null : entry));
         }
         const occupiedGroupIds = new Set(
-          footprint
+          placement.slots
             .map((occupiedSlot) => editorFunctionalSlots[occupiedSlot]?.groupId ?? null)
             .filter((groupId): groupId is number => groupId !== null),
         );
@@ -1872,7 +1937,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         }
         const groupId = editorFunctionalGroupSeq;
         editorFunctionalGroupSeq += 1;
-        for (const occupiedSlot of footprint) {
+        for (const occupiedSlot of placement.slots) {
           editorFunctionalSlots[occupiedSlot] = {
             component,
             rotateQuarter,
@@ -1949,26 +2014,38 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     `;
 
     ensureEditorSelectionForLayer();
-    const templateOptions = templates
-      .map((template) => `<option value="${template.id}">${template.name} (${template.id})</option>`)
+    if (editorTemplateDialogSelectedId === null || !templates.some((template) => template.id === editorTemplateDialogSelectedId)) {
+      editorTemplateDialogSelectedId = templates[0]?.id ?? null;
+    }
+    const templateOpenRows = templates
+      .map((template) => {
+        const selectedClass = template.id === editorTemplateDialogSelectedId ? "active" : "";
+        return `<div class="row" style="justify-content:space-between; gap:8px;">
+          <button data-editor-open-select="${template.id}" class="${selectedClass}" style="flex:1; text-align:left;">${template.name} (${template.type})</button>
+          <button data-editor-open-copy="${template.id}">Copy</button>
+        </div>`;
+      })
       .join("");
     editorPanel.innerHTML = `
       <h3>Object Editor</h3>
       <div class="small">Choose a layer, pick a component card on the right panel, then click the ${editorGridCols}x${editorGridRows} grid on canvas. Drag with left mouse to move the grid. Origin is (0,0), negative coordinates supported.</div>
       <div class="row">
-        <label class="small">Load Existing
-          <select id="editorLoadTemplate">${templateOptions}</select>
-        </label>
-        <button id="btnLoadTemplate">Load</button>
+        <button id="btnOpenTemplateWindow">Open</button>
+        <span class="small">Current object: ${editorDraft.name}</span>
       </div>
-      <div class="row">
-        <button id="btnLayerStructure" class="${editorLayer === "structure" ? "active" : ""}">Structure</button>
-        <button id="btnLayerFunctional" class="${editorLayer === "functional" ? "active" : ""}">Functional</button>
-        <button id="btnLayerDisplay" class="${editorLayer === "display" ? "active" : ""}">Display</button>
-      </div>
+      ${editorTemplateDialogOpen ? `<div class="node-card">
+        <div><strong>Open Template</strong></div>
+        <div class="small">Select one template to open directly, or use Copy to create an editable copy with "-copy" suffix.</div>
+        <div style="display:flex; flex-direction:column; gap:6px; margin-top:8px; max-height:220px; overflow:auto;">
+          ${templateOpenRows || `<div class="small">No template available.</div>`}
+        </div>
+        <div class="row" style="margin-top:8px;">
+          <button id="btnOpenTemplateApply" ${editorTemplateDialogSelectedId ? "" : "disabled"}>Open Selected</button>
+          <button id="btnOpenTemplateClose">Close</button>
+        </div>
+      </div>` : ""}
       <div class="row">
         <label class="small">Name <input id="editorName" value="${editorDraft.name}" /></label>
-        <label class="small">ID <input id="editorId" value="${editorDraft.id}" /></label>
       </div>
       <div class="row">
         <label class="small">Type
@@ -1977,7 +2054,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
             <option value="air" ${editorDraft.type === "air" ? "selected" : ""}>Air</option>
           </select>
         </label>
-        <span class="small">Auto Gas: ${editorDraft.gasCost}</span>
+        <span class="small">Template cost is configured outside part composition.</span>
       </div>
       <div class="row">
         <label class="small"><input id="editorDeleteMode" type="checkbox" ${editorDeleteMode ? "checked" : ""} /> Delete mode</label>
@@ -2141,16 +2218,56 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       renderPanels();
     });
 
-    getOptionalElement<HTMLButtonElement>("#btnLayerStructure")?.addEventListener("click", () => {
+    getOptionalElement<HTMLButtonElement>("#editorLayerStructureRight")?.addEventListener("click", () => {
       editorLayer = "structure";
       hideEditorTooltip();
       ensureEditorSelectionForLayer();
       renderPanels();
     });
 
-    getOptionalElement<HTMLButtonElement>("#btnLoadTemplate")?.addEventListener("click", () => {
-      const select = getOptionalElement<HTMLSelectElement>("#editorLoadTemplate");
-      const templateId = select?.value;
+    getOptionalElement<HTMLButtonElement>("#btnOpenTemplateWindow")?.addEventListener("click", () => {
+      editorTemplateDialogOpen = !editorTemplateDialogOpen;
+      if (editorTemplateDialogOpen && !editorTemplateDialogSelectedId) {
+        editorTemplateDialogSelectedId = templates[0]?.id ?? null;
+      }
+      renderPanels();
+    });
+
+    document.querySelectorAll<HTMLButtonElement>("button[data-editor-open-select]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const templateId = button.getAttribute("data-editor-open-select");
+        if (!templateId) {
+          return;
+        }
+        editorTemplateDialogSelectedId = templateId;
+        renderPanels();
+      });
+    });
+
+    document.querySelectorAll<HTMLButtonElement>("button[data-editor-open-copy]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const templateId = button.getAttribute("data-editor-open-copy");
+        if (!templateId) {
+          return;
+        }
+        const source = templates.find((template) => template.id === templateId);
+        if (!source) {
+          return;
+        }
+        editorDraft = makeCopyTemplate(source);
+        loadTemplateIntoEditorSlots(editorDraft);
+        editorDeleteMode = false;
+        editorWeaponRotateQuarter = 0;
+        editorTemplateDialogOpen = false;
+        editorTemplateDialogSelectedId = editorDraft.id;
+        ensureEditorSelectionForLayer();
+        addLog(`Created template copy: ${editorDraft.name}`, "good");
+        renderPanels();
+      });
+    });
+
+    getOptionalElement<HTMLButtonElement>("#btnOpenTemplateApply")?.addEventListener("click", () => {
+      const templateId = editorTemplateDialogSelectedId;
       if (!templateId) {
         return;
       }
@@ -2162,16 +2279,22 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       loadTemplateIntoEditorSlots(editorDraft);
       editorDeleteMode = false;
       editorWeaponRotateQuarter = 0;
+      editorTemplateDialogOpen = false;
       ensureEditorSelectionForLayer();
       renderPanels();
     });
-    getOptionalElement<HTMLButtonElement>("#btnLayerFunctional")?.addEventListener("click", () => {
+    getOptionalElement<HTMLButtonElement>("#btnOpenTemplateClose")?.addEventListener("click", () => {
+      editorTemplateDialogOpen = false;
+      renderPanels();
+    });
+
+    getOptionalElement<HTMLButtonElement>("#editorLayerFunctionalRight")?.addEventListener("click", () => {
       editorLayer = "functional";
       hideEditorTooltip();
       ensureEditorSelectionForLayer();
       renderPanels();
     });
-    getOptionalElement<HTMLButtonElement>("#btnLayerDisplay")?.addEventListener("click", () => {
+    getOptionalElement<HTMLButtonElement>("#editorLayerDisplayRight")?.addEventListener("click", () => {
       editorLayer = "display";
       hideEditorTooltip();
       ensureEditorSelectionForLayer();
@@ -2200,11 +2323,6 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       editorDraft.name = (event.currentTarget as HTMLInputElement).value.trim() || "Custom Unit";
       updateSelectedInfo();
     });
-    getOptionalElement<HTMLInputElement>("#editorId")?.addEventListener("input", (event) => {
-      const raw = (event.currentTarget as HTMLInputElement).value.toLowerCase();
-      editorDraft.id = raw.replace(/[^a-z0-9-]/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "") || "custom-unit";
-      updateSelectedInfo();
-    });
     getOptionalElement<HTMLSelectElement>("#editorType")?.addEventListener("change", (event) => {
       const value = (event.currentTarget as HTMLSelectElement).value;
       editorDraft.type = value === "air" ? "air" : "ground";
@@ -2220,9 +2338,10 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     });
 
     getOptionalElement<HTMLButtonElement>("#btnNewDraft")?.addEventListener("click", () => {
+      const newName = "Custom Unit";
       editorDraft = {
-        id: `custom-${Date.now().toString().slice(-5)}`,
-        name: "Custom Unit",
+        id: makeUniqueTemplateId(slugifyTemplateId(newName)),
+        name: newName,
         type: "ground",
         gasCost: 0,
         structure: [],
@@ -2232,6 +2351,8 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       editorDeleteMode = false;
       editorLayer = "structure";
       editorWeaponRotateQuarter = 0;
+      editorTemplateDialogOpen = false;
+      editorTemplateDialogSelectedId = editorDraft.id;
       loadTemplateIntoEditorSlots({
         ...editorDraft,
         structure: [{ material: "basic" }, { material: "basic" }, { material: "basic" }],
@@ -2241,9 +2362,14 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     });
     getOptionalElement<HTMLButtonElement>("#btnSaveDraft")?.addEventListener("click", async () => {
       const snapshot = cloneTemplate(editorDraft);
-      const issues = getTemplateValidationIssues(snapshot);
-      if (issues.length > 0) {
-        for (const issue of issues) {
+      const validation = validateTemplateDetailed(snapshot);
+      if (validation.errors.length > 0) {
+        for (const issue of validation.errors) {
+          addLog(`Error: ${issue}`, "bad");
+        }
+      }
+      if (validation.warnings.length > 0) {
+        for (const issue of validation.warnings) {
           addLog(`Warning: ${issue}`, "warn");
         }
       }

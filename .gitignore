@@ -1,6 +1,20 @@
 arena/.arena-data/
 arena/.dist/
+node_modules/
 */node_modules/
 game/.headless-dist/
 .tmp/
 arena-ui/dist/
+
+# Build outputs
+dist/
+build/
+coverage/
+*.tsbuildinfo
+game/dist/
+arena-ui/dist/
+arena/dist/
+packages/*/dist/
+packages/*/build/
+game/.headless-dist/
+arena/.dist/

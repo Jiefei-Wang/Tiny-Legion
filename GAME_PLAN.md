@@ -64,19 +64,25 @@ Lose condition chain:
 
 Current implementation includes an in-app `Editor` mode where the player can:
 
-- Switch between `Structure`, `Functional`, and `Display` layers.
+- Switch between `Structure`, `Functional`, and `Display` layers from the right-side panel.
 - Use a resizable editor grid (up to `10x10`) for placement/removal by cell.
 - Choose components from a layer-specific side palette (placeholder image cards + hover info).
 - Toggle delete mode to remove items on the active layer.
+- Open any existing template from an `Open` window, or create a template copy using one-click `Copy` (`-copy` postfix).
+- Template IDs are auto-generated and hidden from editor UI (not user-editable).
 - Stored template parts include coordinate metadata (`x`,`y`) with origin `(0,0)` and negative coordinates supported.
 - Weapon functional parts store additive orientation (`rotateQuarter`, 0..3 in 90-degree steps).
 - Heavy-shot weapons occupy a multi-cell footprint in editor placement, and that footprint rotates with `rotateQuarter`.
 - Functional parts may declare `directional: true`; only directional parts show direction UI and use rotation controls. Parts without it are undirectional by default.
 - Editor canvas uses a resizable grid up to `10x10` with left-drag panning.
 - Battle rendering and hitboxes now honor stored structure/display/functional coordinates instead of compacting to a fixed index grid.
-- Auto-compute gas/material consumption from placed structure/functional/display content.
+- Part composition focuses on physical/functional stats; per-part gas contribution is not used in current editor stage.
 - Save custom objects to user storage and deploy them in battle.
-- Save is allowed even with validation issues; editor shows issue list and warns via popup on save.
+- Save is allowed even with validation issues.
+- Validation is split into `Error` and `Warning` categories:
+  - `Error`: severe issues (for example missing control module, air unit cannot hold altitude).
+  - `Warning`: spawn-allowed but suboptimal setup (for example no engine for ground unit, no weapon).
+- Runtime deployment/spawn gate: templates with any `Error` are blocked from spawning in battle.
 
 ## 4.1 Structure Layer (Outer)
 
@@ -127,7 +133,8 @@ Attachment rules:
   - Wheel Drive
   - Track Drive
   - Hover Thruster
-  - Lift Fan (air units)
+  - Jet Engine (air units, omni thrust)
+  - Propeller (air units, directional thrust)
 - Power
   - Engine Core (power output)
   - Fuel Tank
@@ -150,9 +157,11 @@ Attachment rules:
 Design constraints:
 
 - Mass and power budget must be valid.
+- Air unit validity rule: at least one `jetEngine` or `propeller` is required. Ground engines do not provide lift/thrust to aircraft.
 - Weapon recoil/stability depends on structure and module placement.
 - Exposed ammo/fuel modules create high-risk weak points.
 - The unit blueprint is invalid without exactly one Control Unit.
+- Propeller placement rule: multi-cell footprint, clearance area must stay empty, and anchor requires structure support from below.
 
 ## 4.3 Display Layer (Visual-Only)
 
@@ -172,6 +181,9 @@ Display layer provides optional visual mesh/sprite styling and silhouette polish
 - Default object designs are file-based under `game/templates/default/`.
 - Player-created object designs are stored separately under `game/templates/user/`.
 - On startup, game loads templates from both folders (user templates override same-id defaults).
+- Template parse/validation/merge rules are shared in `packages/game-core/src/templates/template-schema.ts` so game UI and arena tooling use identical template behavior.
+- Detailed template validation severity logic is isolated in `packages/game-core/src/templates/template-validation.ts`.
+- Headless smoke includes default-template validation to ensure all system default templates are warning/error free.
 
 ---
 
@@ -214,6 +226,11 @@ Recommended starter values:
 - Air units traverse left-right strategic direction on X, and altitude on Z.
 - Air objects do not use ground Y axis for hit eligibility.
 - On 2D screen, altitude Z is rendered on vertical axis; combat logic treats air layer separately from ground Y matching.
+- Air thrust model:
+  - Aircraft use only `jetEngine`/`propeller` thrust for movement and anti-gravity.
+  - If upward thrust is below gravity, aircraft lose altitude with fall acceleration based on thrust deficit.
+  - Unless the player requests descent, flight control prioritizes maintaining altitude and uses spare thrust for horizontal movement.
+  - Air movement is thrust-speed driven (direct speed from thrust), not acceleration-ramp driven.
 - Altitude affects:
   - weapon effectiveness
   - bomb accuracy

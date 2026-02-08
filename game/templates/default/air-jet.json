@@ -1,0 +1,25 @@
+{
+  "id": "air-jet",
+  "name": "Skylance Jet",
+  "type": "air",
+  "gasCost": 48,
+  "structure": [
+    { "material": "basic", "x": -1, "y": 0 },
+    { "material": "basic", "x": 0, "y": 0 },
+    { "material": "basic", "x": 1, "y": 0 },
+    { "material": "basic", "x": 0, "y": 1 }
+  ],
+  "attachments": [
+    { "component": "control", "cell": 1, "x": 0, "y": 0 },
+    { "component": "jetEngine", "cell": 3, "x": 0, "y": 1 },
+    { "component": "trackingMissile", "cell": 2, "x": 1, "y": 0, "rotateQuarter": 0 },
+    { "component": "missileLoader", "cell": 1, "x": 0, "y": 0 },
+    { "component": "fuel", "cell": 0, "x": -1, "y": 0 }
+  ],
+  "display": [
+    { "kind": "panel", "cell": 0, "x": -1, "y": 0 },
+    { "kind": "glass", "cell": 1, "x": 0, "y": 0 },
+    { "kind": "panel", "cell": 2, "x": 1, "y": 0 },
+    { "kind": "stripe", "cell": 3, "x": 0, "y": 1 }
+  ]
+}

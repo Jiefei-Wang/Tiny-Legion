@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "test:headless": "tsc -p tsconfig.headless.json && node .headless-dist/scripts/headless-default-template-smoke.js"
+    "test:headless": "tsc -p tsconfig.headless.json && node .headless-dist/game/scripts/headless-default-template-smoke.js"
   },
   "devDependencies": {
     "typescript": "~5.9.3",

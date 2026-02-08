@@ -11,7 +11,9 @@ If you are a new coding agent/session, read this file first, then read:
 
 - Project root: `physics god`
 - Active game app: `game/` (TypeScript + Vite + Canvas)
+- Shared game logic: `packages/game-core/`
 - Legacy prototype: `webgame/` (reference only)
+- Command reference: `game_command.md`
 
 ## Current Runtime/Feature Reality
 

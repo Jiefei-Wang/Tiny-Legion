@@ -4,8 +4,7 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "build:game": "tsc -p ../game/tsconfig.headless.json",
-    "build": "npm run build:game && tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json",
     "match": "npm run build && node .dist/cli.js match",
     "train": "npm run build && node .dist/cli.js train",
     "train:spawn": "npm run build && node .dist/cli.js train-spawn",

@@ -1,3 +1,1 @@
-export function armyCap(commanderSkill: number): number {
-  return 3 + Math.floor(commanderSkill / 2);
-}
+export * from "../../../../packages/game-core/src/config/balance/commander.ts";
