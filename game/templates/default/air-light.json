@@ -2,24 +2,168 @@
   "id": "air-light",
   "name": "Skylance",
   "type": "air",
-  "gasCost": 44,
+  "gasCost": 139,
   "structure": [
-    { "material": "basic" },
-    { "material": "basic" },
-    { "material": "basic" },
-    { "material": "basic" }
+    {
+      "material": "basic",
+      "x": -2,
+      "y": -2
+    },
+    {
+      "material": "basic",
+      "x": -1,
+      "y": -2
+    },
+    {
+      "material": "basic",
+      "x": 0,
+      "y": -2
+    },
+    {
+      "material": "basic",
+      "x": -1,
+      "y": -1
+    },
+    {
+      "material": "basic",
+      "x": -3,
+      "y": 0
+    },
+    {
+      "material": "basic",
+      "x": -2,
+      "y": 0
+    },
+    {
+      "material": "basic",
+      "x": -1,
+      "y": 0
+    },
+    {
+      "material": "basic",
+      "x": 0,
+      "y": 0
+    },
+    {
+      "material": "basic",
+      "x": 1,
+      "y": 0
+    },
+    {
+      "material": "basic",
+      "x": -3,
+      "y": 1
+    },
+    {
+      "material": "basic",
+      "x": -2,
+      "y": 1
+    },
+    {
+      "material": "basic",
+      "x": -1,
+      "y": 1
+    },
+    {
+      "material": "basic",
+      "x": 0,
+      "y": 1
+    },
+    {
+      "material": "basic",
+      "x": 1,
+      "y": 1
+    }
   ],
   "attachments": [
-    { "component": "control", "cell": 1 },
-    { "component": "engineS", "cell": 0 },
-    { "component": "trackingMissile", "cell": 2 },
-    { "component": "missileLoader", "cell": 1 },
-    { "component": "fuel", "cell": 3 }
+    {
+      "component": "engineM",
+      "cell": 0,
+      "x": -2,
+      "y": -2,
+      "rotateQuarter": 0
+    },
+    {
+      "component": "ammo",
+      "cell": 1,
+      "x": -1,
+      "y": -2,
+      "rotateQuarter": 0
+    },
+    {
+      "component": "engineM",
+      "cell": 2,
+      "x": 0,
+      "y": -2,
+      "rotateQuarter": 0
+    },
+    {
+      "component": "engineS",
+      "cell": 5,
+      "x": -2,
+      "y": 0,
+      "rotateQuarter": 0
+    },
+    {
+      "component": "control",
+      "cell": 6,
+      "x": -1,
+      "y": 0,
+      "rotateQuarter": 0
+    },
+    {
+      "component": "missileLoader",
+      "cell": 7,
+      "x": 0,
+      "y": 0,
+      "rotateQuarter": 0
+    },
+    {
+      "component": "fuel",
+      "cell": 8,
+      "x": 1,
+      "y": 0,
+      "rotateQuarter": 0
+    },
+    {
+      "component": "cannonLoader",
+      "cell": 9,
+      "x": -3,
+      "y": 1,
+      "rotateQuarter": 0
+    },
+    {
+      "component": "heavyCannon",
+      "cell": 12,
+      "x": 0,
+      "y": 1,
+      "rotateQuarter": 0
+    }
   ],
   "display": [
-    { "kind": "panel", "cell": 0 },
-    { "kind": "glass", "cell": 1 },
-    { "kind": "panel", "cell": 2 },
-    { "kind": "stripe", "cell": 3 }
+    {
+      "kind": "panel",
+      "cell": 5,
+      "x": -2,
+      "y": 0
+    },
+    {
+      "kind": "glass",
+      "cell": 6,
+      "x": -1,
+      "y": 0
+    },
+    {
+      "kind": "panel",
+      "cell": 7,
+      "x": 0,
+      "y": 0
+    },
+    {
+      "kind": "stripe",
+      "cell": 8,
+      "x": 1,
+      "y": 0
+    }
   ]
 }
