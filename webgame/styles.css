@@ -1,0 +1,165 @@
+:root {
+  --bg: #10161f;
+  --panel: #182331;
+  --panel-soft: #213146;
+  --text: #e9f0f8;
+  --muted: #9db0c8;
+  --good: #59d08f;
+  --warn: #f1be5f;
+  --bad: #ef6d6d;
+  --accent: #65b7ff;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: "Trebuchet MS", "Segoe UI", sans-serif;
+  color: var(--text);
+  background: radial-gradient(circle at 20% 0%, #1c2b3f, var(--bg) 50%);
+}
+
+.app {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.topbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 18px;
+  background: rgba(8, 12, 19, 0.8);
+  border-bottom: 1px solid #2e4159;
+}
+
+.title {
+  font-weight: 700;
+  letter-spacing: 0.5px;
+}
+
+.meta {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.layout {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 300px 1fr 280px;
+  gap: 12px;
+  padding: 12px;
+}
+
+.card {
+  background: linear-gradient(180deg, var(--panel), var(--panel-soft));
+  border: 1px solid #324962;
+  border-radius: 10px;
+  padding: 10px;
+}
+
+.left-panel,
+.right-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.panel {
+  min-height: 180px;
+}
+
+.tabs {
+  display: flex;
+  gap: 8px;
+}
+
+button {
+  background: #304760;
+  border: 1px solid #476587;
+  color: var(--text);
+  border-radius: 7px;
+  padding: 7px 10px;
+  cursor: pointer;
+}
+
+button:hover {
+  background: #3a5775;
+}
+
+button.active {
+  background: #486c92;
+  border-color: #6c9ccf;
+}
+
+.small {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.hidden {
+  display: none;
+}
+
+#battleCanvas {
+  width: 100%;
+  height: 100%;
+  border-radius: 8px;
+  border: 1px solid #3d5572;
+  background: linear-gradient(180deg, #263954 0%, #1a283a 48%, #151f2d 100%);
+}
+
+.log {
+  height: 260px;
+  overflow-y: auto;
+  font-size: 12px;
+  line-height: 1.35;
+  color: var(--muted);
+  background: rgba(5, 8, 13, 0.4);
+  border: 1px solid #2c425a;
+  border-radius: 7px;
+  padding: 8px;
+}
+
+.row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+
+.tag {
+  display: inline-block;
+  border-radius: 999px;
+  padding: 2px 8px;
+  border: 1px solid #466281;
+  font-size: 12px;
+  color: #c1d4ea;
+  margin-right: 5px;
+}
+
+.good {
+  color: var(--good);
+}
+
+.warn {
+  color: var(--warn);
+}
+
+.bad {
+  color: var(--bad);
+}
+
+@media (max-width: 1200px) {
+  .layout {
+    grid-template-columns: 1fr;
+  }
+
+  #battleCanvas {
+    height: 420px;
+  }
+}

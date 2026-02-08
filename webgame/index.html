@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Modular Army 2D</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="app">
+      <header class="topbar">
+        <div class="title">Modular Army 2D</div>
+        <div id="metaBar" class="meta"></div>
+      </header>
+
+      <main class="layout">
+        <section class="left-panel">
+          <div class="card">
+            <h3>Mode</h3>
+            <div class="tabs">
+              <button id="tabBase">Base</button>
+              <button id="tabMap">Map</button>
+              <button id="tabBattle">Battle</button>
+            </div>
+          </div>
+
+          <div id="basePanel" class="card panel"></div>
+          <div id="mapPanel" class="card panel hidden"></div>
+          <div id="battlePanel" class="card panel hidden"></div>
+        </section>
+
+        <section class="center-panel card">
+          <canvas id="battleCanvas" width="980" height="520"></canvas>
+        </section>
+
+        <section class="right-panel">
+          <div class="card">
+            <h3>Selected Unit</h3>
+            <div id="selectedInfo" class="small"></div>
+          </div>
+          <div class="card">
+            <h3>Log</h3>
+            <div id="logBox" class="log"></div>
+          </div>
+          <div class="card">
+            <h3>Controls</h3>
+            <div class="small">
+              - Click a friendly unit to control it<br />
+              - WASD: move selected unit<br />
+              - Space: fire selected unit<br />
+              - Ground units: W/S change route lane<br />
+              - Air units: W/S change altitude
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+    <script src="./main.js"></script>
+  </body>
+  </html>

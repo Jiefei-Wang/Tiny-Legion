@@ -1,0 +1,1769 @@
+import { armyCap } from "../config/balance/commander.ts";
+import { applyStrategicEconomyTick } from "../gameplay/map/garrison-upkeep.ts";
+import { createMapNodes } from "../gameplay/map/node-graph.ts";
+import { settleGarrison as settleNodeGarrison, setNodeOwner } from "../gameplay/map/occupation.ts";
+import { GameLoop } from "./game-loop.ts";
+import { createInitialTemplates } from "../simulation/units/unit-builder.ts";
+import { canOperate } from "../simulation/units/control-unit-rules.ts";
+import { COMPONENTS } from "../config/balance/weapons.ts";
+import { MATERIALS } from "../config/balance/materials.ts";
+import { BattleSession } from "../gameplay/battle/battle-session.ts";
+import { cloneTemplate, fetchDefaultTemplatesFromStore, fetchUserTemplatesFromStore, getTemplateValidationIssues, mergeTemplates, saveUserTemplateToStore } from "./template-store.ts";
+import type { ComponentId, DisplayAttachmentTemplate, GameBase, KeyState, MapNode, MaterialId, ScreenMode, TechState, UnitTemplate } from "../types.ts";
+
+export function bootstrap(): void {
+  const root = document.querySelector<HTMLDivElement>("#app");
+  if (!root) {
+    throw new Error("App root not found");
+  }
+
+  root.innerHTML = `
+    <div class="app-shell">
+      <header class="topbar">
+        <div class="title">Modular Army 2D - MVP</div>
+        <details id="debugMenu" class="debug-menu">
+          <summary>Debug Options</summary>
+          <label><input id="debugResourcesChk" type="checkbox" /> Unlimited Resources</label>
+          <label><input id="debugVisualChk" type="checkbox" /> Draw Path + Hitbox</label>
+          <label><input id="debugTargetLineChk" type="checkbox" /> Draw Target Lines</label>
+        </details>
+        <div id="metaBar" class="meta"></div>
+      </header>
+
+      <main class="layout">
+        <section class="left-panel">
+          <div class="card">
+            <h3>Mode</h3>
+            <div class="tabs">
+              <button id="tabBase">Base</button>
+              <button id="tabMap">Map</button>
+              <button id="tabBattle">Battle</button>
+              <button id="tabEditor">Editor</button>
+            </div>
+          </div>
+
+          <div id="basePanel" class="card panel"></div>
+          <div id="mapPanel" class="card panel hidden"></div>
+          <div id="battlePanel" class="card panel hidden"></div>
+          <div id="editorPanel" class="card panel hidden"></div>
+        </section>
+
+        <section class="center-panel card">
+          <canvas id="battleCanvas" width="980" height="520"></canvas>
+          <div id="weaponHud" class="weapon-hud small"></div>
+        </section>
+
+        <section class="right-panel">
+          <div class="card">
+            <h3>Selected Unit</h3>
+            <div id="selectedInfo" class="small"></div>
+          </div>
+          <div class="card">
+            <h3>Log</h3>
+            <div id="logBox" class="log"></div>
+          </div>
+          <div class="card">
+            <h3>Controls</h3>
+            <div class="small">
+              - Click a friendly unit to control it<br />
+              - Move mouse to aim selected unit<br />
+              - Hold left click: keep firing selected weapon<br />
+              - WASD: move selected unit<br />
+              - Space: flip selected unit direction<br />
+              - 1..9: select weapon slot<br />
+              - Shift+1..9: toggle auto fire for that slot<br />
+              - Ground units move freely on X/Y<br />
+              - Air units move on X/Z (same screen Y axis)
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+  `;
+
+  const basePanel = getElement<HTMLDivElement>("#basePanel");
+  const mapPanel = getElement<HTMLDivElement>("#mapPanel");
+  const battlePanel = getElement<HTMLDivElement>("#battlePanel");
+  const editorPanel = getElement<HTMLDivElement>("#editorPanel");
+  const selectedInfo = getElement<HTMLDivElement>("#selectedInfo");
+  const weaponHud = getElement<HTMLDivElement>("#weaponHud");
+  const logBox = getElement<HTMLDivElement>("#logBox");
+  const debugResourcesChk = getElement<HTMLInputElement>("#debugResourcesChk");
+  const debugVisualChk = getElement<HTMLInputElement>("#debugVisualChk");
+  const debugTargetLineChk = getElement<HTMLInputElement>("#debugTargetLineChk");
+  const metaBar = getElement<HTMLDivElement>("#metaBar");
+  const canvas = getElement<HTMLCanvasElement>("#battleCanvas");
+
+  const tabs = {
+    base: getElement<HTMLButtonElement>("#tabBase"),
+    map: getElement<HTMLButtonElement>("#tabMap"),
+    battle: getElement<HTMLButtonElement>("#tabBattle"),
+    editor: getElement<HTMLButtonElement>("#tabEditor"),
+  };
+
+  const templates: UnitTemplate[] = createInitialTemplates();
+  const keys: KeyState = { a: false, d: false, w: false, s: false, space: false };
+  const base: GameBase = { areaLevel: 1, refineries: 1, workshops: 1, labs: 0 };
+  const tech: TechState = {
+    reinforced: false,
+    ceramic: false,
+    combined: false,
+    reactive: false,
+    mediumWeapons: false,
+  };
+
+  const mapNodes: MapNode[] = createMapNodes();
+  let screen: ScreenMode = "base";
+  let running = true;
+  let round = 1;
+  let gas = 250;
+  let commanderSkill = 1;
+  let pendingOccupation: string | null = null;
+  let debugUnlimitedResources = true;
+  let debugVisual = true;
+  let debugTargetLines = true;
+  let debugServerEnabled = false;
+  const EDITOR_GRID_MAX_COLS = 10;
+  const EDITOR_GRID_MAX_ROWS = 10;
+  const EDITOR_GRID_MAX_SIZE = EDITOR_GRID_MAX_COLS * EDITOR_GRID_MAX_ROWS;
+  const EDITOR_DISPLAY_KINDS: DisplayAttachmentTemplate["kind"][] = ["panel", "stripe", "glass"];
+  type EditorFunctionalSlot = {
+    component: ComponentId;
+    rotateQuarter: 0 | 1 | 2 | 3;
+    groupId: number;
+    isAnchor: boolean;
+  } | null;
+  let editorLayer: "structure" | "functional" | "display" = "structure";
+  let editorDeleteMode = false;
+  let editorSelection = "basic";
+  let editorGridCols = 10;
+  let editorGridRows = 10;
+  let editorWeaponRotateQuarter: 0 | 1 | 2 | 3 = 0;
+  let editorFunctionalGroupSeq = 1;
+  let editorGridPanX = 0;
+  let editorGridPanY = 0;
+  let editorDragActive = false;
+  let editorDragMoved = false;
+  let editorDragStartClientX = 0;
+  let editorDragStartClientY = 0;
+  let editorDragLastClientX = 0;
+  let editorDragLastClientY = 0;
+  let editorPendingClickX = 0;
+  let editorPendingClickY = 0;
+  let editorStructureSlots: Array<MaterialId | null> = new Array<MaterialId | null>(EDITOR_GRID_MAX_SIZE).fill(null);
+  let editorFunctionalSlots: EditorFunctionalSlot[] = new Array<EditorFunctionalSlot>(EDITOR_GRID_MAX_SIZE).fill(null);
+  let editorDisplaySlots: Array<DisplayAttachmentTemplate["kind"] | null> = new Array<DisplayAttachmentTemplate["kind"] | null>(EDITOR_GRID_MAX_SIZE).fill(null);
+  let editorDraft: UnitTemplate = {
+    id: "custom-1",
+    name: "Custom Unit",
+    type: "ground",
+    gasCost: 0,
+    structure: [{ material: "basic" }, { material: "basic" }, { material: "basic" }],
+    attachments: [
+      { component: "control", cell: 1 },
+      { component: "engineS", cell: 0 },
+    ],
+    display: [{ kind: "panel", cell: 1 }],
+  };
+
+  const isUnlimitedResources = (): boolean => debugUnlimitedResources;
+  const isDebugVisual = (): boolean => debugVisual;
+  const isDebugTargetLines = (): boolean => debugTargetLines;
+  const getCommanderSkillForCap = (): number => (isUnlimitedResources() ? 999 : commanderSkill);
+  const editorTooltip = document.createElement("div");
+  editorTooltip.className = "editor-tooltip hidden";
+  editorTooltip.style.pointerEvents = "none";
+  document.body.appendChild(editorTooltip);
+
+  const isTypingInFormField = (target: EventTarget | null): boolean => {
+    if (!(target instanceof HTMLElement)) {
+      return false;
+    }
+    if (target.isContentEditable) {
+      return true;
+    }
+    const tag = target.tagName;
+    return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
+  };
+
+  const showEditorTooltip = (text: string, x: number, y: number): void => {
+    editorTooltip.textContent = text;
+    editorTooltip.classList.remove("hidden");
+    editorTooltip.style.left = `${x + 14}px`;
+    editorTooltip.style.top = `${y + 14}px`;
+  };
+
+  const hideEditorTooltip = (): void => {
+    editorTooltip.classList.add("hidden");
+  };
+
+  const postDebugEvent = (path: string, payload: Record<string, unknown>): void => {
+    void fetch(path, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(payload),
+    }).catch(() => {
+      return;
+    });
+  };
+
+  const syncDebugServerState = (): void => {
+    const shouldEnable = debugUnlimitedResources || debugVisual;
+    if (shouldEnable === debugServerEnabled) {
+      return;
+    }
+    debugServerEnabled = shouldEnable;
+    postDebugEvent("/__debug/toggle", { enabled: shouldEnable });
+  };
+
+  let suppressWarnLogs = false;
+  const addLog = (text: string, tone: "good" | "warn" | "bad" | "" = ""): void => {
+    if (suppressWarnLogs && tone === "warn") {
+      return;
+    }
+    const item = document.createElement("div");
+    item.className = tone;
+    item.textContent = `[${new Date().toLocaleTimeString()}] ${text}`;
+    logBox.prepend(item);
+    while (logBox.children.length > 140) {
+      logBox.removeChild(logBox.lastChild as Node);
+    }
+    if (debugServerEnabled) {
+      postDebugEvent("/__debug/log", {
+        level: tone || "info",
+        message: text,
+      });
+    }
+  };
+
+  const battle = new BattleSession(
+    canvas,
+    {
+      addLog,
+      getCommanderSkill: () => getCommanderSkillForCap(),
+      getPlayerGas: () => gas,
+      spendPlayerGas: (amount) => {
+        if (isUnlimitedResources()) {
+          return true;
+        }
+        if (gas < amount) {
+          return false;
+        }
+        gas -= amount;
+        return true;
+      },
+      addPlayerGas: (amount) => {
+        if (isUnlimitedResources()) {
+          return;
+        }
+        gas += amount;
+      },
+      onBattleOver: (victory, nodeId) => {
+        if (victory) {
+          const node = mapNodes.find((entry) => entry.id === nodeId);
+          if (!node) {
+            return;
+          }
+          setNodeOwner(mapNodes, nodeId, "player");
+          gas += node.reward;
+          commanderSkill += nodeId === "core" ? 2 : 1;
+          pendingOccupation = nodeId;
+          addLog(`Victory at ${node.name}. +${node.reward} gas, commander skill up`, "good");
+        } else {
+          addLog("Defeat in battle.", "bad");
+        }
+        renderPanels();
+      },
+    },
+    templates,
+  );
+
+  const refreshTemplatesFromStore = async (): Promise<void> => {
+    const defaultTemplates = await fetchDefaultTemplatesFromStore();
+    const userTemplates = await fetchUserTemplatesFromStore();
+    const merged = mergeTemplates(templates, mergeTemplates(defaultTemplates, userTemplates));
+    templates.splice(0, templates.length, ...merged);
+  };
+
+  type BuildKind = "refinery" | "expand" | "lab";
+  type BuildJob = { kind: BuildKind; remainingRounds: number };
+  const buildQueue: BuildJob[] = [];
+  const buildRounds: Record<BuildKind, number> = {
+    refinery: 1,
+    expand: 2,
+    lab: 2,
+  };
+
+  const formatBuildJob = (job: BuildJob): string => {
+    const label = job.kind === "refinery" ? "Refinery" : job.kind === "expand" ? "Base Expansion" : "Research Lab";
+    const r = Math.max(0, Math.floor(job.remainingRounds));
+    return `${label} (${r} round${r === 1 ? "" : "s"})`;
+  };
+
+  const endRound = (): void => {
+    if (!running) {
+      return;
+    }
+
+    gas = isUnlimitedResources() ? gas : applyStrategicEconomyTick(gas, base, mapNodes);
+
+    if (battle.getState().active && !battle.getState().outcome) {
+      suppressWarnLogs = true;
+      const noKeys: KeyState = { a: false, d: false, w: false, s: false, space: false };
+      const step = 1 / 60;
+      const maxSimSeconds = 240;
+      let t = 0;
+      while (battle.getState().active && !battle.getState().outcome && t < maxSimSeconds) {
+        battle.update(step, noKeys);
+        t += step;
+      }
+      suppressWarnLogs = false;
+
+      if (battle.getState().active && !battle.getState().outcome) {
+        const state = battle.getState();
+        const victory = state.enemyBase.hp <= state.playerBase.hp;
+        battle.forceEnd(victory, "Round deadline reached");
+      }
+    }
+
+    for (const job of buildQueue) {
+      job.remainingRounds -= 1;
+    }
+    for (let i = buildQueue.length - 1; i >= 0; i -= 1) {
+      const job = buildQueue[i];
+      if (!job || job.remainingRounds > 0) {
+        continue;
+      }
+      if (job.kind === "refinery") {
+        base.refineries += 1;
+        addLog("Construction complete: Refinery", "good");
+      } else if (job.kind === "expand") {
+        base.areaLevel += 1;
+        addLog("Construction complete: Base expanded", "good");
+      } else {
+        base.labs += 1;
+        addLog("Construction complete: Research Lab", "good");
+      }
+      buildQueue.splice(i, 1);
+    }
+
+    round += 1;
+    renderPanels();
+  };
+
+  const updateMetaBar = (): void => {
+    const gasLabel = isUnlimitedResources() ? "INF" : `${Math.floor(gas)}`;
+    const capLabel = isUnlimitedResources() ? "INF" : `${armyCap(getCommanderSkillForCap())}`;
+    const battleLabel = battle.getState().active && !battle.getState().outcome ? " | Battle: active" : "";
+    metaBar.innerHTML = `Round: ${round} | Gas: ${gasLabel} | Commander Skill: ${commanderSkill} | Army Cap: ${capLabel}${battleLabel} <button id="btnNextRound">Next Round</button>`;
+    getOptionalElement<HTMLButtonElement>("#btnNextRound")?.addEventListener("click", () => endRound());
+  };
+
+  const setScreen = (next: ScreenMode): void => {
+    screen = next;
+    basePanel.classList.toggle("hidden", next !== "base");
+    mapPanel.classList.toggle("hidden", next !== "map");
+    battlePanel.classList.toggle("hidden", next !== "battle");
+    editorPanel.classList.toggle("hidden", next !== "editor");
+    tabs.base.classList.toggle("active", next === "base");
+    tabs.map.classList.toggle("active", next === "map");
+    tabs.battle.classList.toggle("active", next === "battle");
+    tabs.editor.classList.toggle("active", next === "editor");
+    if (next !== "editor") {
+      hideEditorTooltip();
+    }
+  };
+
+  const updateSelectedInfo = (): void => {
+    if (screen === "editor") {
+      ensureEditorSelectionForLayer();
+      const catalog = getEditorCatalogItems();
+      const controlCount = editorDraft.attachments.filter((attachment) => attachment.component === "control").length;
+      const displayCount = (editorDraft.display ?? []).length;
+      const materialUsage = getEditorMaterialBreakdown();
+      const functionalUsage = editorDraft.attachments.length;
+      const paletteCards = Array.from({ length: 30 }, (_, index) => {
+        const item = catalog[index];
+        if (!item) {
+          return `<div class="editor-comp-card empty"></div>`;
+        }
+        const selectedClass = item.value === editorSelection ? "selected" : "";
+        return `<button class="editor-comp-card ${selectedClass}" data-comp-value="${item.value}" data-comp-detail="${item.detail}" data-comp-title="${item.title}" title="${item.title}">
+          <span class="editor-thumb">${item.thumb}</span>
+          <span class="editor-comp-name">${item.title}</span>
+          <span class="editor-comp-sub">${item.subtitle}</span>
+        </button>`;
+      }).join("");
+      selectedInfo.innerHTML = `
+        <div><strong>${editorDraft.name}</strong> (${editorDraft.type})</div>
+        <div class="small">ID: ${editorDraft.id}</div>
+        <div class="row">
+          <label class="small">W
+            <select id="editorGridCols">
+              ${Array.from({ length: EDITOR_GRID_MAX_COLS - 3 }, (_, i) => i + 4).map((v) => `<option value="${v}" ${v === editorGridCols ? "selected" : ""}>${v}</option>`).join("")}
+            </select>
+          </label>
+          <label class="small">H
+            <select id="editorGridRows">
+              ${Array.from({ length: EDITOR_GRID_MAX_ROWS - 3 }, (_, i) => i + 4).map((v) => `<option value="${v}" ${v === editorGridRows ? "selected" : ""}>${v}</option>`).join("")}
+            </select>
+          </label>
+        </div>
+        <div class="small">Structure: ${editorDraft.structure.length} | Functional: ${functionalUsage} | Display: ${displayCount}</div>
+        <div class="small">Gas: ${editorDraft.gasCost} | Control Units: ${controlCount}</div>
+        <div class="small">${isCurrentEditorSelectionDirectional() ? `Weapon direction: ${getRotationSymbol()} (${editorWeaponRotateQuarter * 90}deg)` : "Weapon direction: n/a"}</div>
+        <div class="small">Material usage: ${materialUsage}</div>
+        <div class="editor-comp-grid">${paletteCards}</div>
+      `;
+      return;
+    }
+    if (screen !== "battle") {
+      selectedInfo.innerHTML = `<span class="small">No unit selected.</span>`;
+      return;
+    }
+    const selection = battle.getSelection();
+    const selected = battle.getState().units.find((unit) => unit.id === selection.selectedUnitId);
+    if (!selected) {
+      selectedInfo.innerHTML = `<span class="small">No unit selected.</span>`;
+      return;
+    }
+
+    const weaponNames = selected.weaponAttachmentIds.map((weaponId, index) => {
+      const attachment = selected.attachments.find((entry) => entry.id === weaponId && entry.alive) ?? null;
+      if (!attachment) {
+        return `#${index + 1}: destroyed`;
+      }
+      const weaponType = COMPONENTS[attachment.component].type;
+      const mode = selected.weaponAutoFire[index] ? "auto" : "manual";
+      const selectedMark = index === selected.selectedWeaponIndex ? "*" : "";
+      return `${selectedMark}#${index + 1}: ${attachment.component} (${weaponType}, ${mode})`;
+    }).join(" | ");
+    const structureAlive = selected.structure.filter((cell) => !cell.destroyed).length;
+    const functionalAlive = selected.attachments.filter((attachment) => attachment.alive).length;
+    const recoverPerSecond = selected.structure
+      .filter((cell) => !cell.destroyed)
+      .reduce((sum, cell) => sum + cell.recoverPerSecond, 0);
+    selectedInfo.innerHTML = `
+      <div><strong>${selected.name}</strong> (${selected.side})</div>
+      <div class="small">Type: ${selected.type} | Mass: ${selected.mass.toFixed(1)} | Speed: ${selected.vx.toFixed(1)}</div>
+      <div class="small">Structure cells: ${structureAlive}/${selected.structure.length} | Functional: ${functionalAlive}/${selected.attachments.length}</div>
+      <div class="small">Structure recover: ${recoverPerSecond.toFixed(1)} hp/s</div>
+      <div class="small">Weapons: ${weaponNames || "none"} | Display Layer: ${battle.isDisplayEnabled() ? "ON" : "OFF"}</div>
+      <div class="small">Control Unit: ${canOperate(selected) ? "online" : "offline"}</div>
+    `;
+  };
+
+  const updateWeaponHud = (): void => {
+    if (screen === "editor") {
+      weaponHud.innerHTML = `<div><strong>Object Editor</strong></div><div class="small">Layer=${editorLayer} | Mode=${editorDeleteMode ? "delete" : "place"}. Right-click = delete. Q/E = weapon rotate 90deg (ccw/cw). Display items attach to structure cells only.</div>`;
+      return;
+    }
+    if (screen !== "battle") {
+      weaponHud.innerHTML = `<div class="small">Weapon Control - enter battle to activate.</div>`;
+      return;
+    }
+    const selection = battle.getSelection();
+    const controlled = battle.getState().units.find((unit) => unit.id === selection.playerControlledId && unit.alive && unit.side === "player");
+    if (!controlled || controlled.weaponAttachmentIds.length === 0) {
+      weaponHud.innerHTML = `<div><strong>Weapon Control</strong> - Press 1..9 to select weapon, Shift+1..9 to toggle auto fire</div><div class="small">No controlled weapon system.</div>`;
+      return;
+    }
+
+    const chips = controlled.weaponAttachmentIds.map((weaponId, index) => {
+      const attachment = controlled.attachments.find((entry) => entry.id === weaponId && entry.alive) ?? null;
+      const selectedMark = index === controlled.selectedWeaponIndex ? "selected" : "";
+      const auto = controlled.weaponAutoFire[index] ? "AUTO" : "MANUAL";
+      const label = attachment ? attachment.component : "destroyed";
+      const timer = controlled.weaponFireTimers[index] ?? 0;
+      const cooldown = attachment ? (COMPONENTS[attachment.component].cooldown ?? 0) : 0;
+      const cooldownPct = cooldown > 0 ? Math.max(0, Math.min(100, ((cooldown - timer) / cooldown) * 100)) : 100;
+      const cooldownText = timer > 0.01 ? `${timer.toFixed(2)}s` : "ready";
+      const weaponClass = attachment ? COMPONENTS[attachment.component].weaponClass : undefined;
+      const loaderManaged = weaponClass === "heavy-shot" || weaponClass === "explosive" || weaponClass === "tracking";
+      const charges = controlled.weaponReadyCharges[index] ?? 0;
+      const loadTimer = controlled.weaponLoadTimers[index] ?? 0;
+      const loaderText = loaderManaged ? ` | load ${loadTimer > 0.01 ? `${loadTimer.toFixed(2)}s` : "idle"} | chg ${charges}` : "";
+      return `<span class="weapon-chip ${selectedMark}">[${index + 1}] ${label} ${auto} | ${cooldownText} (${cooldownPct.toFixed(0)}%)${loaderText}</span>`;
+    }).join("");
+
+    weaponHud.innerHTML = `
+      <div><strong>Weapon Control</strong> - Press 1..9 to select weapon, Shift+1..9 to toggle auto fire</div>
+      <div class="weapon-row">${chips}</div>
+    `;
+
+    if (debugVisual) {
+      const aiRows = battle.getState().units
+        .filter((unit) => unit.side === "enemy" && unit.alive)
+        .slice(0, 6)
+        .map((unit) => {
+          const angleDeg = (unit.aiDebugLastAngleRad * 180 / Math.PI).toFixed(1);
+          const target = unit.aiDebugTargetId ?? "base";
+          const slot = unit.aiDebugPreferredWeaponSlot >= 0 ? `${unit.aiDebugPreferredWeaponSlot + 1}` : "-";
+          const lead = unit.aiDebugLeadTimeS > 0 ? `${unit.aiDebugLeadTimeS.toFixed(2)}s` : "-";
+          const blocked = unit.aiDebugFireBlockReason ?? "none";
+          return `<div class="small">${unit.name}: ${unit.aiState}${unit.aiDebugShouldEvade ? "(evade)" : ""}, target=${target}, slot=${slot}, angle=${angleDeg}deg, range=${unit.aiDebugLastRange.toFixed(0)}, lead=${lead}, block=${blocked}, v=(${unit.vx.toFixed(1)},${unit.vy.toFixed(1)}), tree=${unit.aiDebugDecisionPath}</div>`;
+        }).join("");
+      weaponHud.innerHTML += `<div class="ai-debug"><strong>AI Live Debug</strong>${aiRows || `<div class="small">No active enemy units.</div>`}</div>`;
+    }
+  };
+
+  const updateBattleOpsInfo = (): void => {
+    const activeInfo = getOptionalElement<HTMLDivElement>("#friendlyActive");
+    if (!activeInfo) {
+      return;
+    }
+    const activeFriendly = battle.getState().units.filter((unit) => unit.side === "player" && unit.alive).length;
+    const capText = isUnlimitedResources() ? "INF" : `${armyCap(getCommanderSkillForCap())}`;
+    activeInfo.textContent = `Friendly active: ${activeFriendly} / ${capText}`;
+  };
+
+  type EditorCatalogItem = {
+    value: string;
+    title: string;
+    subtitle: string;
+    detail: string;
+    thumb: string;
+  };
+
+  const MATERIAL_GAS_COST: Record<MaterialId, number> = {
+    basic: 4,
+    reinforced: 6,
+    ceramic: 7,
+    reactive: 8,
+    combined: 10,
+  };
+
+  const getEditorGridRect = (): { x: number; y: number; cell: number } => {
+    const cell = 32;
+    const x = Math.floor(canvas.width * 0.5 - (editorGridCols * cell) / 2 + editorGridPanX);
+    const y = Math.floor(canvas.height * 0.54 - (editorGridRows * cell) / 2 + editorGridPanY);
+    return { x, y, cell };
+  };
+
+  const slotToCoord = (slot: number): { x: number; y: number } => {
+    const col = slot % editorGridCols;
+    const row = Math.floor(slot / editorGridCols);
+    const originCol = Math.floor(editorGridCols / 2);
+    const originRow = Math.floor(editorGridRows / 2);
+    return {
+      x: col - originCol,
+      y: row - originRow,
+    };
+  };
+
+  const coordToSlot = (x: number, y: number): number | null => {
+    const originCol = Math.floor(editorGridCols / 2);
+    const originRow = Math.floor(editorGridRows / 2);
+    const col = x + originCol;
+    const row = y + originRow;
+    if (col < 0 || col >= editorGridCols || row < 0 || row >= editorGridRows) {
+      return null;
+    }
+    return row * editorGridCols + col;
+  };
+
+  const rotateOffsetByQuarter = (offsetX: number, offsetY: number, rotateQuarter: 0 | 1 | 2 | 3): { x: number; y: number } => {
+    if (rotateQuarter === 0) {
+      return { x: offsetX, y: offsetY };
+    }
+    if (rotateQuarter === 1) {
+      return { x: -offsetY, y: offsetX };
+    }
+    if (rotateQuarter === 2) {
+      return { x: -offsetX, y: -offsetY };
+    }
+    return { x: offsetY, y: -offsetX };
+  };
+
+  const getComponentFootprintOffsets = (component: ComponentId, rotateQuarter: 0 | 1 | 2 | 3): Array<{ x: number; y: number }> => {
+    const stats = COMPONENTS[component];
+    if (stats.type !== "weapon") {
+      return [{ x: 0, y: 0 }];
+    }
+    if (stats.weaponClass === "heavy-shot") {
+      return [{ x: 0, y: 0 }, { x: 1, y: 0 }].map((offset) => rotateOffsetByQuarter(offset.x, offset.y, rotateQuarter));
+    }
+    return [{ x: 0, y: 0 }];
+  };
+
+  const getFootprintSlots = (anchorSlot: number, component: ComponentId, rotateQuarter: 0 | 1 | 2 | 3): number[] => {
+    const anchor = slotToCoord(anchorSlot);
+    const offsets = getComponentFootprintOffsets(component, rotateQuarter);
+    const slots: number[] = [];
+    for (const offset of offsets) {
+      const slot = coordToSlot(anchor.x + offset.x, anchor.y + offset.y);
+      if (slot === null) {
+        return [];
+      }
+      slots.push(slot);
+    }
+    return slots;
+  };
+
+  const clearFunctionalGroupAtSlot = (slot: number): boolean => {
+    const entry = editorFunctionalSlots[slot];
+    if (!entry) {
+      return false;
+    }
+    const groupId = entry.groupId;
+    editorFunctionalSlots = editorFunctionalSlots.map((item) => (item?.groupId === groupId ? null : item));
+    return true;
+  };
+
+  const resizeEditorGrid = (nextCols: number, nextRows: number): void => {
+    const clampedCols = Math.max(4, Math.min(EDITOR_GRID_MAX_COLS, Math.floor(nextCols)));
+    const clampedRows = Math.max(4, Math.min(EDITOR_GRID_MAX_ROWS, Math.floor(nextRows)));
+    if (clampedCols === editorGridCols && clampedRows === editorGridRows) {
+      return;
+    }
+
+    const oldCols = editorGridCols;
+    const oldRows = editorGridRows;
+    const oldOriginCol = Math.floor(oldCols / 2);
+    const oldOriginRow = Math.floor(oldRows / 2);
+    const nextOriginCol = Math.floor(clampedCols / 2);
+    const nextOriginRow = Math.floor(clampedRows / 2);
+
+    const oldStructure = editorStructureSlots.slice();
+    const oldFunctional = editorFunctionalSlots.slice();
+    const oldDisplay = editorDisplaySlots.slice();
+
+    const nextStructure = new Array<MaterialId | null>(EDITOR_GRID_MAX_SIZE).fill(null);
+    const nextFunctional = new Array<EditorFunctionalSlot>(EDITOR_GRID_MAX_SIZE).fill(null);
+    const nextDisplay = new Array<DisplayAttachmentTemplate["kind"] | null>(EDITOR_GRID_MAX_SIZE).fill(null);
+
+    for (let row = 0; row < oldRows; row += 1) {
+      for (let col = 0; col < oldCols; col += 1) {
+        const oldSlot = row * oldCols + col;
+        const coordX = col - oldOriginCol;
+        const coordY = row - oldOriginRow;
+        const nextCol = coordX + nextOriginCol;
+        const nextRow = coordY + nextOriginRow;
+        if (nextCol < 0 || nextCol >= clampedCols || nextRow < 0 || nextRow >= clampedRows) {
+          continue;
+        }
+        const newSlot = nextRow * clampedCols + nextCol;
+        nextStructure[newSlot] = oldStructure[oldSlot] ?? null;
+        nextFunctional[newSlot] = oldFunctional[oldSlot] ?? null;
+        nextDisplay[newSlot] = oldDisplay[oldSlot] ?? null;
+      }
+    }
+
+    editorGridCols = clampedCols;
+    editorGridRows = clampedRows;
+    editorStructureSlots = nextStructure;
+    editorFunctionalSlots = nextFunctional;
+    editorDisplaySlots = nextDisplay;
+    recalcEditorDraftFromSlots();
+  };
+
+  const getRotationSymbol = (): string => {
+    if (editorWeaponRotateQuarter === 0) {
+      return "->";
+    }
+    if (editorWeaponRotateQuarter === 1) {
+      return "v";
+    }
+    if (editorWeaponRotateQuarter === 2) {
+      return "<-";
+    }
+    return "^";
+  };
+
+  const isDirectionalComponent = (component: ComponentId): boolean => {
+    return COMPONENTS[component].directional === true;
+  };
+
+  const isCurrentEditorSelectionDirectional = (): boolean => {
+    if (editorLayer !== "functional" || !(editorSelection in COMPONENTS)) {
+      return false;
+    }
+    return isDirectionalComponent(editorSelection as ComponentId);
+  };
+
+  const getEditorCatalogItems = (): EditorCatalogItem[] => {
+    if (editorLayer === "structure") {
+      return Object.entries(MATERIALS).map(([id, stats]) => {
+        const materialId = id as MaterialId;
+        return {
+          value: materialId,
+          title: stats.label,
+          subtitle: materialId,
+          detail: `Mass ${stats.mass.toFixed(2)} | Armor ${stats.armor.toFixed(2)} | HP ${stats.hp.toFixed(0)} | Recover ${stats.recoverPerSecond.toFixed(1)}/s | Gas ${MATERIAL_GAS_COST[materialId]}`,
+          thumb: materialId.slice(0, 2).toUpperCase(),
+        };
+      });
+    }
+    if (editorLayer === "functional") {
+      return Object.entries(COMPONENTS).map(([id, stats]) => {
+        const baseGas = stats.type === "weapon" ? 11 : stats.type === "engine" ? 8 : stats.type === "loader" ? 7 : 6;
+        const rotateHint = stats.directional ? " | Supports 90deg rotate" : "";
+        return {
+          value: id,
+          title: id,
+          subtitle: stats.type,
+          detail: `Type ${stats.type} | Mass ${stats.mass.toFixed(2)} | HPx ${stats.hpMul.toFixed(2)} | Gas ${baseGas}${rotateHint}`,
+          thumb: id.slice(0, 2).toUpperCase(),
+        };
+      });
+    }
+    return EDITOR_DISPLAY_KINDS.map((kind) => ({
+      value: kind,
+      title: kind,
+      subtitle: "display",
+      detail: "Visual-only attachment. Must sit on a structure cell.",
+      thumb: kind.slice(0, 2).toUpperCase(),
+    }));
+  };
+
+  const ensureEditorSelectionForLayer = (): void => {
+    const items = getEditorCatalogItems();
+    if (!items.some((item) => item.value === editorSelection)) {
+      editorSelection = items[0]?.value ?? "";
+    }
+  };
+
+  const recalcEditorDraftFromSlots = (): void => {
+    const slotToCell = new Map<number, number>();
+    const structure = editorStructureSlots
+      .map((material, slotIndex) => ({ material, slotIndex }))
+      .filter((entry): entry is { material: MaterialId; slotIndex: number } => entry.material !== null)
+      .sort((a, b) => a.slotIndex - b.slotIndex);
+
+    editorDraft.structure = structure.map((entry, index) => {
+      slotToCell.set(entry.slotIndex, index);
+      const coord = slotToCoord(entry.slotIndex);
+      return { material: entry.material, x: coord.x, y: coord.y };
+    });
+
+    editorDraft.attachments = editorFunctionalSlots
+      .map((entry, slotIndex) => ({ entry, slotIndex }))
+      .filter((item): item is {
+        entry: { component: ComponentId; rotateQuarter: 0 | 1 | 2 | 3; groupId: number; isAnchor: boolean };
+        slotIndex: number;
+      } => item.entry !== null && item.entry.isAnchor && slotToCell.has(item.slotIndex))
+      .map((entry) => ({
+        component: entry.entry.component,
+        cell: slotToCell.get(entry.slotIndex) ?? 0,
+        x: slotToCoord(entry.slotIndex).x,
+        y: slotToCoord(entry.slotIndex).y,
+        rotateQuarter: entry.entry.rotateQuarter,
+      }));
+
+    editorDraft.display = editorDisplaySlots
+      .map((kind, slotIndex) => ({ kind, slotIndex }))
+      .filter((entry): entry is { kind: DisplayAttachmentTemplate["kind"]; slotIndex: number } => entry.kind !== null && slotToCell.has(entry.slotIndex))
+      .map((entry) => ({
+        kind: entry.kind,
+        cell: slotToCell.get(entry.slotIndex) ?? 0,
+        x: slotToCoord(entry.slotIndex).x,
+        y: slotToCoord(entry.slotIndex).y,
+      }));
+
+    const structureGas = editorDraft.structure.reduce((sum, cell) => sum + MATERIAL_GAS_COST[cell.material], 0);
+    const functionalGas = editorDraft.attachments.reduce((sum, attachment) => {
+      const type = COMPONENTS[attachment.component].type;
+      if (type === "weapon") {
+        return sum + 11;
+      }
+      if (type === "engine") {
+        return sum + 8;
+      }
+      if (type === "loader") {
+        return sum + 7;
+      }
+      return sum + 6;
+    }, 0);
+    const displayGas = (editorDraft.display ?? []).length * 2;
+    editorDraft.gasCost = Math.max(1, 8 + structureGas + functionalGas + displayGas);
+  };
+
+  const loadTemplateIntoEditorSlots = (template: UnitTemplate): void => {
+    editorStructureSlots = new Array<MaterialId | null>(EDITOR_GRID_MAX_SIZE).fill(null);
+    editorFunctionalSlots = new Array<EditorFunctionalSlot>(EDITOR_GRID_MAX_SIZE).fill(null);
+    editorDisplaySlots = new Array<DisplayAttachmentTemplate["kind"] | null>(EDITOR_GRID_MAX_SIZE).fill(null);
+
+    const startCoordX = -Math.floor(template.structure.length / 2);
+    const cellToSlot = new Map<number, number>();
+
+    for (let cellIndex = 0; cellIndex < template.structure.length; cellIndex += 1) {
+      const byCoord = template.structure[cellIndex]?.x !== undefined && template.structure[cellIndex]?.y !== undefined
+        ? coordToSlot(template.structure[cellIndex]?.x ?? 0, template.structure[cellIndex]?.y ?? 0)
+        : null;
+      const slot = byCoord ?? coordToSlot(startCoordX + cellIndex, 0);
+      if (slot === undefined || slot === null) {
+        continue;
+      }
+      editorStructureSlots[slot] = template.structure[cellIndex]?.material ?? "basic";
+      cellToSlot.set(cellIndex, slot);
+    }
+
+    for (const attachment of template.attachments) {
+      const slot = attachment.x !== undefined && attachment.y !== undefined
+        ? coordToSlot(attachment.x, attachment.y)
+        : cellToSlot.get(attachment.cell);
+      if (slot !== undefined && slot !== null) {
+        const rotateQuarter = typeof attachment.rotateQuarter === "number"
+          ? ((attachment.rotateQuarter % 4 + 4) % 4) as 0 | 1 | 2 | 3
+          : (attachment.rotate90 ? 1 : 0);
+        const normalizedRotate = isDirectionalComponent(attachment.component) ? rotateQuarter : 0;
+        const footprint = getFootprintSlots(slot, attachment.component, normalizedRotate);
+        if (footprint.length <= 0) {
+          continue;
+        }
+        if (footprint.some((occupiedSlot) => !editorStructureSlots[occupiedSlot])) {
+          continue;
+        }
+        const groupId = editorFunctionalGroupSeq;
+        editorFunctionalGroupSeq += 1;
+        for (const occupiedSlot of footprint) {
+          editorFunctionalSlots[occupiedSlot] = {
+            component: attachment.component,
+            rotateQuarter: normalizedRotate,
+            groupId,
+            isAnchor: occupiedSlot === slot,
+          };
+        }
+      }
+    }
+    for (const item of template.display ?? []) {
+      const slot = item.x !== undefined && item.y !== undefined
+        ? coordToSlot(item.x, item.y)
+        : cellToSlot.get(item.cell);
+      if (slot !== undefined && slot !== null) {
+        editorDisplaySlots[slot] = item.kind;
+      }
+    }
+    recalcEditorDraftFromSlots();
+  };
+
+  const getEditorMaterialBreakdown = (): string => {
+    const counts = new Map<MaterialId, number>();
+    for (const cell of editorDraft.structure) {
+      counts.set(cell.material, (counts.get(cell.material) ?? 0) + 1);
+    }
+    const tags = Array.from(counts.entries()).map(([material, count]) => `${material} x${count}`);
+    return tags.length > 0 ? tags.join(", ") : "none";
+  };
+
+  const getEditorCombatPreview = (): {
+    achievableSpeed: number;
+    weaponCounts: Record<"rapid-fire" | "heavy-shot" | "explosive" | "tracking" | "beam-precision" | "control-utility", number>;
+  } => {
+    let totalMass = 0;
+    for (const cell of editorDraft.structure) {
+      totalMass += MATERIALS[cell.material].mass;
+    }
+    let totalPower = 0;
+    let weightedSpeedCap = 0;
+    let capWeight = 0;
+    const weaponCounts: Record<"rapid-fire" | "heavy-shot" | "explosive" | "tracking" | "beam-precision" | "control-utility", number> = {
+      "rapid-fire": 0,
+      "heavy-shot": 0,
+      explosive: 0,
+      tracking: 0,
+      "beam-precision": 0,
+      "control-utility": 0,
+    };
+
+    for (const attachment of editorDraft.attachments) {
+      const stats = COMPONENTS[attachment.component];
+      totalMass += stats.mass;
+      if (stats.type === "engine") {
+        const enginePower = Math.max(0, stats.power ?? 0);
+        const engineSpeedCap = Math.max(1, stats.maxSpeed ?? 90);
+        totalPower += enginePower;
+        weightedSpeedCap += engineSpeedCap * Math.max(1, enginePower);
+        capWeight += Math.max(1, enginePower);
+      }
+      if (stats.type === "weapon") {
+        const weaponClass = stats.weaponClass ?? "rapid-fire";
+        weaponCounts[weaponClass] += 1;
+      }
+    }
+
+    totalMass = Math.max(14, totalMass);
+    let achievableSpeed = 0;
+    if (totalPower > 0) {
+      const speedCap = Math.max(1, weightedSpeedCap / Math.max(1, capWeight));
+      const speedScale = editorDraft.type === "ground" ? 74 : 82;
+      const rawSpeed = (totalPower / Math.max(16, totalMass)) * speedScale;
+      achievableSpeed = Math.max(0, Math.min(speedCap, rawSpeed));
+    }
+
+    return {
+      achievableSpeed,
+      weaponCounts,
+    };
+  };
+
+  const drawEditorCanvas = (): void => {
+    const context = canvas.getContext("2d");
+    if (!context) {
+      return;
+    }
+    context.clearRect(0, 0, canvas.width, canvas.height);
+    context.fillStyle = "rgba(13, 21, 31, 0.98)";
+    context.fillRect(0, 0, canvas.width, canvas.height);
+
+    const grid = getEditorGridRect();
+    context.fillStyle = "#dbe8f6";
+    context.font = "14px Trebuchet MS";
+    context.fillText(`Grid ${editorGridCols}x${editorGridRows} | Layer ${editorLayer.toUpperCase()} ${editorDeleteMode ? "| DELETE" : "| PLACE"}`, 18, 26);
+    context.fillText("Left-click: place | Left-drag: pan grid | Right-click: delete | Origin: (0,0).", 18, 46);
+
+    if (isCurrentEditorSelectionDirectional()) {
+      context.fillStyle = "rgba(28, 43, 61, 0.92)";
+      context.fillRect(canvas.width - 170, 14, 154, 40);
+      context.strokeStyle = "rgba(139, 172, 206, 0.8)";
+      context.strokeRect(canvas.width - 170, 14, 154, 40);
+      context.fillStyle = "#dbe8f6";
+      context.font = "12px Trebuchet MS";
+      context.fillText(`Dir: ${getRotationSymbol()}`, canvas.width - 160, 31);
+      context.fillText(`Q ccw | E cw`, canvas.width - 160, 47);
+    }
+
+    const validationIssues = getTemplateValidationIssues(editorDraft);
+    const issuesHeight = Math.max(30, 12 + Math.min(7, validationIssues.length) * 14);
+    const issuesWidth = 360;
+    const issuesX = canvas.width - issuesWidth - 16;
+    const issuesY = canvas.height - issuesHeight - 14;
+    context.fillStyle = "rgba(21, 31, 45, 0.94)";
+    context.fillRect(issuesX, issuesY, issuesWidth, issuesHeight);
+    context.strokeStyle = validationIssues.length > 0 ? "rgba(224, 145, 111, 0.96)" : "rgba(151, 214, 165, 0.92)";
+    context.lineWidth = 1;
+    context.strokeRect(issuesX, issuesY, issuesWidth, issuesHeight);
+    context.fillStyle = validationIssues.length > 0 ? "#ffd1c1" : "#bde6c6";
+    context.font = "12px Trebuchet MS";
+    if (validationIssues.length === 0) {
+      context.fillText("Validation issues: none", issuesX + 8, issuesY + 18);
+    } else {
+      context.fillText("Validation issues:", issuesX + 8, issuesY + 16);
+      const shown = validationIssues.slice(0, 6);
+      for (let i = 0; i < shown.length; i += 1) {
+        context.fillText(`- ${shown[i]}`, issuesX + 8, issuesY + 30 + i * 14);
+      }
+    }
+
+    for (let row = 0; row < editorGridRows; row += 1) {
+      for (let col = 0; col < editorGridCols; col += 1) {
+        const slot = row * editorGridCols + col;
+        const x = grid.x + col * grid.cell;
+        const y = grid.y + row * grid.cell;
+        const material = editorStructureSlots[slot];
+
+        context.fillStyle = material ? MATERIALS[material].color : "rgba(39, 56, 76, 0.42)";
+        context.globalAlpha = material ? 0.82 : 1;
+        context.fillRect(x + 2, y + 2, grid.cell - 4, grid.cell - 4);
+        context.globalAlpha = 1;
+        context.strokeStyle = material ? "rgba(224, 236, 251, 0.72)" : "rgba(121, 148, 180, 0.35)";
+        context.lineWidth = 1;
+        context.strokeRect(x + 1, y + 1, grid.cell - 2, grid.cell - 2);
+
+        const functional = editorFunctionalSlots[slot];
+        if (functional) {
+          context.fillStyle = "#f0b39f";
+          context.fillRect(x + 6, y + 6, 12, 12);
+          if (functional.isAnchor) {
+            context.fillStyle = "#fff5ef";
+            context.font = "9px Trebuchet MS";
+            context.fillText(functional.component.slice(0, 2).toUpperCase(), x + 6, y + 30);
+          }
+          if (functional.isAnchor && COMPONENTS[functional.component].directional) {
+            context.strokeStyle = "#ffe1d4";
+            context.lineWidth = 1.5;
+            context.beginPath();
+            if (functional.rotateQuarter === 0) {
+              context.moveTo(x + 18, y + 24);
+              context.lineTo(x + 34, y + 24);
+              context.lineTo(x + 30, y + 20);
+              context.moveTo(x + 34, y + 24);
+              context.lineTo(x + 30, y + 28);
+            } else if (functional.rotateQuarter === 1) {
+              context.moveTo(x + 24, y + 18);
+              context.lineTo(x + 24, y + 34);
+              context.lineTo(x + 20, y + 30);
+              context.moveTo(x + 24, y + 34);
+              context.lineTo(x + 28, y + 30);
+            } else if (functional.rotateQuarter === 2) {
+              context.moveTo(x + 34, y + 24);
+              context.lineTo(x + 18, y + 24);
+              context.lineTo(x + 22, y + 20);
+              context.moveTo(x + 18, y + 24);
+              context.lineTo(x + 22, y + 28);
+            } else {
+              context.moveTo(x + 24, y + 34);
+              context.lineTo(x + 24, y + 18);
+              context.lineTo(x + 20, y + 22);
+              context.moveTo(x + 24, y + 18);
+              context.lineTo(x + 28, y + 22);
+            }
+            context.stroke();
+          }
+        }
+
+        const display = editorDisplaySlots[slot];
+        if (display) {
+          context.fillStyle = "#98c8ff";
+          context.fillRect(x + grid.cell - 16, y + 6, 10, 10);
+          context.fillStyle = "#e6f2ff";
+          context.font = "8px Trebuchet MS";
+          context.fillText(display.slice(0, 1).toUpperCase(), x + grid.cell - 14, y + 24);
+        }
+
+        const coord = slotToCoord(slot);
+        context.fillStyle = "rgba(206, 220, 237, 0.55)";
+        context.font = "8px Trebuchet MS";
+        context.fillText(`(${coord.x},${coord.y})`, x + 4, y + grid.cell - 4);
+      }
+    }
+
+    const preview = getEditorCombatPreview();
+    const legend = `Wpn by class R:${preview.weaponCounts["rapid-fire"]} H:${preview.weaponCounts["heavy-shot"]} E:${preview.weaponCounts.explosive} T:${preview.weaponCounts.tracking} B:${preview.weaponCounts["beam-precision"]} C:${preview.weaponCounts["control-utility"]}`;
+    const speedText = `Achievable speed: ${preview.achievableSpeed.toFixed(1)}`;
+    const panelX = 16;
+    const panelY = canvas.height - 54;
+    context.fillStyle = "rgba(19, 30, 44, 0.94)";
+    context.fillRect(panelX, panelY, 530, 38);
+    context.strokeStyle = "rgba(128, 172, 206, 0.7)";
+    context.strokeRect(panelX, panelY, 530, 38);
+    context.fillStyle = "#dbe8f6";
+    context.font = "12px Trebuchet MS";
+    context.fillText(speedText, panelX + 8, panelY + 15);
+    context.fillText(legend, panelX + 8, panelY + 31);
+  };
+
+  const applyEditorCellAction = (mouseX: number, mouseY: number, forceDelete = false): void => {
+    const grid = getEditorGridRect();
+    const relX = mouseX - grid.x;
+    const relY = mouseY - grid.y;
+    if (relX < 0 || relY < 0 || relX >= grid.cell * editorGridCols || relY >= grid.cell * editorGridRows) {
+      return;
+    }
+    const col = Math.floor(relX / grid.cell);
+    const row = Math.floor(relY / grid.cell);
+    const slot = row * editorGridCols + col;
+    const deleteRequested = forceDelete || editorDeleteMode;
+
+    if (editorLayer === "structure") {
+      if (deleteRequested) {
+        const hadStructure = editorStructureSlots[slot] !== null;
+        clearFunctionalGroupAtSlot(slot);
+        editorStructureSlots[slot] = null;
+        editorDisplaySlots[slot] = null;
+        if (!hadStructure) {
+          addLog(`No structure cell at row ${row + 1}, col ${col + 1}`, "warn");
+        }
+      } else if (editorSelection in MATERIALS) {
+        editorStructureSlots[slot] = editorSelection as MaterialId;
+      }
+      recalcEditorDraftFromSlots();
+      return;
+    }
+
+    if (!editorStructureSlots[slot]) {
+      addLog("Select a structure cell first", "warn");
+      return;
+    }
+
+    if (editorLayer === "functional") {
+      if (deleteRequested) {
+        const hadFunctional = clearFunctionalGroupAtSlot(slot);
+        if (!hadFunctional) {
+          addLog(`No functional component at row ${row + 1}, col ${col + 1}`, "warn");
+        }
+      } else if (editorSelection in COMPONENTS) {
+        const component = editorSelection as ComponentId;
+        const rotateQuarter = COMPONENTS[component].directional ? editorWeaponRotateQuarter : 0;
+        const footprint = getFootprintSlots(slot, component, rotateQuarter);
+        if (footprint.length <= 0) {
+          addLog("Component footprint out of editor bounds", "warn");
+          return;
+        }
+        if (footprint.some((occupiedSlot) => !editorStructureSlots[occupiedSlot])) {
+          addLog("All occupied weapon blocks must sit on structure cells", "warn");
+          return;
+        }
+        if (component === "control") {
+          editorFunctionalSlots = editorFunctionalSlots.map((entry) => (entry?.component === "control" ? null : entry));
+        }
+        const occupiedGroupIds = new Set(
+          footprint
+            .map((occupiedSlot) => editorFunctionalSlots[occupiedSlot]?.groupId ?? null)
+            .filter((groupId): groupId is number => groupId !== null),
+        );
+        if (occupiedGroupIds.size > 0) {
+          editorFunctionalSlots = editorFunctionalSlots.map((entry) => {
+            if (!entry) {
+              return null;
+            }
+            return occupiedGroupIds.has(entry.groupId) ? null : entry;
+          });
+        }
+        const groupId = editorFunctionalGroupSeq;
+        editorFunctionalGroupSeq += 1;
+        for (const occupiedSlot of footprint) {
+          editorFunctionalSlots[occupiedSlot] = {
+            component,
+            rotateQuarter,
+            groupId,
+            isAnchor: occupiedSlot === slot,
+          };
+        }
+      }
+      recalcEditorDraftFromSlots();
+      return;
+    }
+
+    if (deleteRequested) {
+      const hadDisplay = editorDisplaySlots[slot] !== null;
+      editorDisplaySlots[slot] = null;
+      if (!hadDisplay) {
+        addLog(`No display component at row ${row + 1}, col ${col + 1}`, "warn");
+      }
+    } else if (EDITOR_DISPLAY_KINDS.includes(editorSelection as DisplayAttachmentTemplate["kind"])) {
+      editorDisplaySlots[slot] = editorSelection as DisplayAttachmentTemplate["kind"];
+    }
+    recalcEditorDraftFromSlots();
+  };
+
+  const renderPanels = (): void => {
+    updateMetaBar();
+
+    const buildQueueText = buildQueue.length > 0
+      ? buildQueue.map((job) => `<span class="tag">${formatBuildJob(job)}</span>`).join(" ")
+      : "None";
+
+    basePanel.innerHTML = `
+      <h3>Base</h3>
+      <div class="small">Area Lv.${base.areaLevel} | Refineries: ${base.refineries} | Workshops: ${base.workshops} | Labs: ${base.labs}</div>
+      <div class="small">Construction queue: ${buildQueueText}</div>
+      <div class="row">
+        <button id="btnBuildRefinery">Build Refinery (90 gas, ${buildRounds.refinery} round)</button>
+        <button id="btnExpandBase">Expand Base (120 gas, ${buildRounds.expand} rounds)</button>
+        <button id="btnBuildLab">Build Lab (110 gas, ${buildRounds.lab} rounds)</button>
+      </div>
+      <div class="small">Tech unlocks: ${Object.entries(tech).filter((entry) => entry[1]).map((entry) => `<span class="tag">${entry[0]}</span>`).join("") || "None"}</div>
+      <div class="row" style="margin-top:8px;">
+        <button id="btnUnlockReinforced">Unlock Reinforced (130 gas)</button>
+        <button id="btnUnlockCombined">Unlock Combined Box (180 gas)</button>
+        <button id="btnUnlockMediumWeapon">Unlock Explosive Cannon (170 gas)</button>
+      </div>
+    `;
+
+    mapPanel.innerHTML = `
+      <h3>Map</h3>
+      <div class="small">Choose where to fight from your base.</div>
+      ${battle.getState().active && !battle.getState().outcome ? `<div class="small warn">Battle resolves when you press Next Round.</div>` : ""}
+      ${mapNodes
+        .map((node) => {
+          const ownerClass = node.owner === "player" ? "good" : node.owner === "enemy" ? "bad" : "warn";
+          return `<div class="node-card">
+            <div><strong>${node.name}</strong> <span class="${ownerClass}">(${node.owner})</span></div>
+            <div class="small">Defense: ${node.defense.toFixed(2)} | Reward: ${node.reward} gas ${node.garrison ? "| Garrisoned" : ""}</div>
+            <div class="row"><button data-attack="${node.id}" class="nodeAttack">Launch Battle</button></div>
+          </div>`;
+        })
+        .join("")}
+      ${pendingOccupation ? `<div class="row"><button id="btnSettle">Station Garrison (upkeep 4 gas/round)</button></div>` : ""}
+    `;
+
+    battlePanel.innerHTML = `
+      <h3>Battle Ops</h3>
+      <div class="small">Call reinforcements using global gas. Active cap from commander skill.</div>
+      <div class="small">Turn-based: battle ends at end of round (press Next Round to resolve).</div>
+      <div class="row">${templates.map((template) => `<button data-deploy="${template.id}">${template.name} (${template.gasCost} gas)</button>`).join("")}</div>
+      <div class="row"><button id="btnToggleDisplay">Toggle Display Layer (${battle.isDisplayEnabled() ? "ON" : "OFF"})</button></div>
+      <div id="friendlyActive" class="small"></div>
+      ${battle.getState().outcome ? `<div class="row"><button id="btnBackToMap">Return to Map</button></div>` : ""}
+    `;
+
+    ensureEditorSelectionForLayer();
+    const templateOptions = templates
+      .map((template) => `<option value="${template.id}">${template.name} (${template.id})</option>`)
+      .join("");
+    editorPanel.innerHTML = `
+      <h3>Object Editor</h3>
+      <div class="small">Choose a layer, pick a component card on the right panel, then click the ${editorGridCols}x${editorGridRows} grid on canvas. Drag with left mouse to move the grid. Origin is (0,0), negative coordinates supported.</div>
+      <div class="row">
+        <label class="small">Load Existing
+          <select id="editorLoadTemplate">${templateOptions}</select>
+        </label>
+        <button id="btnLoadTemplate">Load</button>
+      </div>
+      <div class="row">
+        <button id="btnLayerStructure" class="${editorLayer === "structure" ? "active" : ""}">Structure</button>
+        <button id="btnLayerFunctional" class="${editorLayer === "functional" ? "active" : ""}">Functional</button>
+        <button id="btnLayerDisplay" class="${editorLayer === "display" ? "active" : ""}">Display</button>
+      </div>
+      <div class="row">
+        <label class="small">Name <input id="editorName" value="${editorDraft.name}" /></label>
+        <label class="small">ID <input id="editorId" value="${editorDraft.id}" /></label>
+      </div>
+      <div class="row">
+        <label class="small">Type
+          <select id="editorType">
+            <option value="ground" ${editorDraft.type === "ground" ? "selected" : ""}>Ground</option>
+            <option value="air" ${editorDraft.type === "air" ? "selected" : ""}>Air</option>
+          </select>
+        </label>
+        <span class="small">Auto Gas: ${editorDraft.gasCost}</span>
+      </div>
+      <div class="row">
+        <label class="small"><input id="editorDeleteMode" type="checkbox" ${editorDeleteMode ? "checked" : ""} /> Delete mode</label>
+        <span class="small">Selected: ${editorSelection || "none"}</span>
+      </div>
+      <div class="row">
+        <span class="small">${isCurrentEditorSelectionDirectional() ? `Direction: ${editorWeaponRotateQuarter * 90}deg (${getRotationSymbol()})` : "Direction: n/a (undirectional component)"}</span>
+      </div>
+      <div class="row">
+        <button id="btnNewDraft">New Draft</button>
+        <button id="btnClearGrid">Clear Grid</button>
+      </div>
+      <div class="row">
+        <button id="btnSaveDraft">Save User Object</button>
+      </div>
+    `;
+
+    updateBattleOpsInfo();
+    updateSelectedInfo();
+    updateWeaponHud();
+    bindPanelActions();
+  };
+
+  const spendGas = (amount: number): boolean => {
+    if (isUnlimitedResources()) {
+      return true;
+    }
+    if (gas < amount) {
+      return false;
+    }
+    gas -= amount;
+    return true;
+  };
+
+  const upgradeTemplateMaterials = (material: "reinforced" | "combined"): void => {
+    for (const template of templates) {
+      for (const cell of template.structure) {
+        cell.material = material;
+      }
+      template.gasCost += material === "combined" ? 8 : 4;
+    }
+  };
+
+  const bindPanelActions = (): void => {
+    getOptionalElement<HTMLButtonElement>("#btnBuildRefinery")?.addEventListener("click", () => {
+      if (!spendGas(90)) {
+        return;
+      }
+      buildQueue.push({ kind: "refinery", remainingRounds: buildRounds.refinery });
+      addLog(`Construction started: Refinery (${buildRounds.refinery} round${buildRounds.refinery === 1 ? "" : "s"})`, "good");
+      renderPanels();
+    });
+
+    getOptionalElement<HTMLButtonElement>("#btnExpandBase")?.addEventListener("click", () => {
+      if (!spendGas(120)) {
+        return;
+      }
+      buildQueue.push({ kind: "expand", remainingRounds: buildRounds.expand });
+      addLog(`Construction started: Base Expansion (${buildRounds.expand} rounds)`, "good");
+      renderPanels();
+    });
+
+    getOptionalElement<HTMLButtonElement>("#btnBuildLab")?.addEventListener("click", () => {
+      if (!spendGas(110)) {
+        return;
+      }
+      buildQueue.push({ kind: "lab", remainingRounds: buildRounds.lab });
+      addLog(`Construction started: Research Lab (${buildRounds.lab} rounds)`, "good");
+      renderPanels();
+    });
+
+    getOptionalElement<HTMLButtonElement>("#btnUnlockReinforced")?.addEventListener("click", () => {
+      if (tech.reinforced || base.labs < 1 || !spendGas(130)) {
+        return;
+      }
+      tech.reinforced = true;
+      upgradeTemplateMaterials("reinforced");
+      addLog("Unlocked Reinforced structure boxes", "good");
+      renderPanels();
+    });
+
+    getOptionalElement<HTMLButtonElement>("#btnUnlockCombined")?.addEventListener("click", () => {
+      if (tech.combined || base.labs < 1 || !spendGas(180)) {
+        return;
+      }
+      tech.combined = true;
+      upgradeTemplateMaterials("combined");
+      addLog("Unlocked Combined box material", "good");
+      renderPanels();
+    });
+
+    getOptionalElement<HTMLButtonElement>("#btnUnlockMediumWeapon")?.addEventListener("click", () => {
+      if (tech.mediumWeapons || base.labs < 1 || !spendGas(170)) {
+        return;
+      }
+      tech.mediumWeapons = true;
+      const tankTemplate = templates.find((template) => template.id === "tank-ground");
+      const weapon = tankTemplate?.attachments.find((attachment) => attachment.component === "heavyCannon");
+      if (weapon && tankTemplate) {
+        weapon.component = "explosiveShell";
+        tankTemplate.gasCost += 9;
+      }
+      addLog("Unlocked explosive cannon option", "good");
+      renderPanels();
+    });
+
+    document.querySelectorAll<HTMLButtonElement>("button.nodeAttack").forEach((button) => {
+      button.addEventListener("click", () => {
+        if (battle.getState().active && !battle.getState().outcome) {
+          addLog("Battle already active. Press Next Round to resolve.", "warn");
+          return;
+        }
+        const nodeId = button.getAttribute("data-attack");
+        if (!nodeId) {
+          return;
+        }
+        const node = mapNodes.find((entry) => entry.id === nodeId);
+        if (!node) {
+          return;
+        }
+        battle.start(node);
+        addLog(`Battle started at ${node.name}`);
+        setScreen("battle");
+        renderPanels();
+      });
+    });
+
+    getOptionalElement<HTMLButtonElement>("#btnSettle")?.addEventListener("click", () => {
+      if (!pendingOccupation) {
+        return;
+      }
+      if (settleNodeGarrison(mapNodes, pendingOccupation)) {
+        const settledNode = mapNodes.find((entry) => entry.id === pendingOccupation);
+        if (settledNode) {
+          addLog(`Garrison established at ${settledNode.name} (upkeep active)`);
+        }
+        pendingOccupation = null;
+      }
+      renderPanels();
+    });
+
+    document.querySelectorAll<HTMLButtonElement>("button[data-deploy]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const templateId = button.getAttribute("data-deploy");
+        if (!templateId) {
+          return;
+        }
+        battle.deployUnit(templateId);
+        renderPanels();
+      });
+    });
+
+    getOptionalElement<HTMLButtonElement>("#btnBackToMap")?.addEventListener("click", () => {
+      battle.resetToMapMode();
+      setScreen("map");
+      renderPanels();
+    });
+
+    getOptionalElement<HTMLButtonElement>("#btnToggleDisplay")?.addEventListener("click", () => {
+      battle.toggleDisplayLayer();
+      renderPanels();
+    });
+
+    getOptionalElement<HTMLButtonElement>("#btnLayerStructure")?.addEventListener("click", () => {
+      editorLayer = "structure";
+      hideEditorTooltip();
+      ensureEditorSelectionForLayer();
+      renderPanels();
+    });
+
+    getOptionalElement<HTMLButtonElement>("#btnLoadTemplate")?.addEventListener("click", () => {
+      const select = getOptionalElement<HTMLSelectElement>("#editorLoadTemplate");
+      const templateId = select?.value;
+      if (!templateId) {
+        return;
+      }
+      const source = templates.find((template) => template.id === templateId);
+      if (!source) {
+        return;
+      }
+      editorDraft = cloneTemplate(source);
+      loadTemplateIntoEditorSlots(editorDraft);
+      editorDeleteMode = false;
+      editorWeaponRotateQuarter = 0;
+      ensureEditorSelectionForLayer();
+      renderPanels();
+    });
+    getOptionalElement<HTMLButtonElement>("#btnLayerFunctional")?.addEventListener("click", () => {
+      editorLayer = "functional";
+      hideEditorTooltip();
+      ensureEditorSelectionForLayer();
+      renderPanels();
+    });
+    getOptionalElement<HTMLButtonElement>("#btnLayerDisplay")?.addEventListener("click", () => {
+      editorLayer = "display";
+      hideEditorTooltip();
+      ensureEditorSelectionForLayer();
+      renderPanels();
+    });
+
+    getOptionalElement<HTMLInputElement>("#editorDeleteMode")?.addEventListener("change", (event) => {
+      editorDeleteMode = (event.currentTarget as HTMLInputElement).checked;
+      renderPanels();
+    });
+    getOptionalElement<HTMLSelectElement>("#editorGridCols")?.addEventListener("change", (event) => {
+      const value = Number.parseInt((event.currentTarget as HTMLSelectElement).value, 10);
+      if (Number.isFinite(value)) {
+        resizeEditorGrid(value, editorGridRows);
+      }
+      renderPanels();
+    });
+    getOptionalElement<HTMLSelectElement>("#editorGridRows")?.addEventListener("change", (event) => {
+      const value = Number.parseInt((event.currentTarget as HTMLSelectElement).value, 10);
+      if (Number.isFinite(value)) {
+        resizeEditorGrid(editorGridCols, value);
+      }
+      renderPanels();
+    });
+    getOptionalElement<HTMLInputElement>("#editorName")?.addEventListener("input", (event) => {
+      editorDraft.name = (event.currentTarget as HTMLInputElement).value.trim() || "Custom Unit";
+      updateSelectedInfo();
+    });
+    getOptionalElement<HTMLInputElement>("#editorId")?.addEventListener("input", (event) => {
+      const raw = (event.currentTarget as HTMLInputElement).value.toLowerCase();
+      editorDraft.id = raw.replace(/[^a-z0-9-]/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "") || "custom-unit";
+      updateSelectedInfo();
+    });
+    getOptionalElement<HTMLSelectElement>("#editorType")?.addEventListener("change", (event) => {
+      const value = (event.currentTarget as HTMLSelectElement).value;
+      editorDraft.type = value === "air" ? "air" : "ground";
+      updateSelectedInfo();
+    });
+
+    getOptionalElement<HTMLButtonElement>("#btnClearGrid")?.addEventListener("click", () => {
+      editorStructureSlots = new Array<MaterialId | null>(EDITOR_GRID_MAX_SIZE).fill(null);
+      editorFunctionalSlots = new Array<EditorFunctionalSlot>(EDITOR_GRID_MAX_SIZE).fill(null);
+      editorDisplaySlots = new Array<DisplayAttachmentTemplate["kind"] | null>(EDITOR_GRID_MAX_SIZE).fill(null);
+      recalcEditorDraftFromSlots();
+      renderPanels();
+    });
+
+    getOptionalElement<HTMLButtonElement>("#btnNewDraft")?.addEventListener("click", () => {
+      editorDraft = {
+        id: `custom-${Date.now().toString().slice(-5)}`,
+        name: "Custom Unit",
+        type: "ground",
+        gasCost: 0,
+        structure: [],
+        attachments: [],
+        display: [],
+      };
+      editorDeleteMode = false;
+      editorLayer = "structure";
+      editorWeaponRotateQuarter = 0;
+      loadTemplateIntoEditorSlots({
+        ...editorDraft,
+        structure: [{ material: "basic" }, { material: "basic" }, { material: "basic" }],
+      });
+      ensureEditorSelectionForLayer();
+      renderPanels();
+    });
+    getOptionalElement<HTMLButtonElement>("#btnSaveDraft")?.addEventListener("click", async () => {
+      const snapshot = cloneTemplate(editorDraft);
+      const issues = getTemplateValidationIssues(snapshot);
+      if (issues.length > 0) {
+        for (const issue of issues) {
+          addLog(`Warning: ${issue}`, "warn");
+        }
+      }
+      const saved = await saveUserTemplateToStore(snapshot);
+      if (!saved) {
+        addLog("Failed to save user object", "bad");
+        return;
+      }
+      const existingIndex = templates.findIndex((template) => template.id === snapshot.id);
+      if (existingIndex >= 0) {
+        templates[existingIndex] = snapshot;
+      } else {
+        templates.push(snapshot);
+      }
+      addLog(`Saved user object: ${snapshot.name}`, "good");
+      renderPanels();
+    });
+  };
+
+  tabs.base.addEventListener("click", () => setScreen("base"));
+  tabs.map.addEventListener("click", () => setScreen("map"));
+  tabs.battle.addEventListener("click", () => setScreen("battle"));
+  tabs.editor.addEventListener("click", () => setScreen("editor"));
+
+  selectedInfo.addEventListener("mouseover", (event) => {
+    const target = event.target as HTMLElement;
+    const card = target.closest<HTMLButtonElement>("button.editor-comp-card[data-comp-value]");
+    if (!card) {
+      return;
+    }
+    const title = card.getAttribute("data-comp-title") ?? "";
+    const detail = card.getAttribute("data-comp-detail") ?? "";
+    const info = `${title}: ${detail}`;
+    const mouseEvent = event as MouseEvent;
+    showEditorTooltip(info, mouseEvent.clientX, mouseEvent.clientY);
+  });
+
+  selectedInfo.addEventListener("mousemove", (event) => {
+    const target = event.target as HTMLElement;
+    const card = target.closest<HTMLButtonElement>("button.editor-comp-card[data-comp-value]");
+    if (!card || editorTooltip.classList.contains("hidden")) {
+      return;
+    }
+    const mouseEvent = event as MouseEvent;
+    editorTooltip.style.left = `${mouseEvent.clientX + 14}px`;
+    editorTooltip.style.top = `${mouseEvent.clientY + 14}px`;
+  });
+
+  selectedInfo.addEventListener("mouseout", (event) => {
+    const target = event.target as HTMLElement;
+    if (!target.closest("button.editor-comp-card[data-comp-value]")) {
+      return;
+    }
+    const related = event.relatedTarget as HTMLElement | null;
+    if (related?.closest("button.editor-comp-card[data-comp-value]")) {
+      return;
+    }
+    hideEditorTooltip();
+  });
+
+  const selectEditorCard = (event: MouseEvent): void => {
+    const target = event.target as HTMLElement;
+    const card = target.closest<HTMLButtonElement>("button.editor-comp-card[data-comp-value]");
+    if (!card) {
+      return;
+    }
+    const value = card.getAttribute("data-comp-value") ?? "";
+    if (!value) {
+      return;
+    }
+    editorSelection = value;
+    hideEditorTooltip();
+    ensureEditorSelectionForLayer();
+    renderPanels();
+  };
+
+  selectedInfo.addEventListener("pointerdown", (event) => {
+    if (event.button !== 0) {
+      return;
+    }
+    selectEditorCard(event);
+  });
+
+  const applyDebugFlags = (): void => {
+    debugUnlimitedResources = debugResourcesChk.checked;
+    debugVisual = debugVisualChk.checked;
+    debugTargetLines = debugTargetLineChk.checked;
+    syncDebugServerState();
+    battle.setDebugDrawEnabled(isDebugVisual());
+    battle.setDebugTargetLineEnabled(isDebugTargetLines());
+    addLog(`Debug options: resources=${debugUnlimitedResources ? "on" : "off"}, visual=${debugVisual ? "on" : "off"}, targetLines=${debugTargetLines ? "on" : "off"}`, "warn");
+    renderPanels();
+  };
+
+  debugResourcesChk.addEventListener("change", applyDebugFlags);
+  debugVisualChk.addEventListener("change", applyDebugFlags);
+  debugTargetLineChk.addEventListener("change", applyDebugFlags);
+  debugResourcesChk.checked = true;
+  debugVisualChk.checked = true;
+  debugTargetLineChk.checked = true;
+  applyDebugFlags();
+
+  window.addEventListener("keydown", (event) => {
+    if (isTypingInFormField(event.target)) {
+      return;
+    }
+
+    if (screen === "editor") {
+      if (event.key === "q" || event.key === "Q") {
+        event.preventDefault();
+        editorWeaponRotateQuarter = ((editorWeaponRotateQuarter + 3) % 4) as 0 | 1 | 2 | 3;
+        renderPanels();
+        return;
+      }
+      if (event.key === "e" || event.key === "E") {
+        event.preventDefault();
+        editorWeaponRotateQuarter = ((editorWeaponRotateQuarter + 1) % 4) as 0 | 1 | 2 | 3;
+        renderPanels();
+        return;
+      }
+    }
+
+    if (screen !== "battle") {
+      return;
+    }
+
+    if (event.key === "a" || event.key === "A") keys.a = true;
+    if (event.key === "d" || event.key === "D") keys.d = true;
+    if (event.key === "w" || event.key === "W") keys.w = true;
+    if (event.key === "s" || event.key === "S") keys.s = true;
+    if (event.code === "Space") {
+      event.preventDefault();
+      battle.flipControlledDirection();
+      renderPanels();
+    }
+    if (event.code.startsWith("Digit")) {
+      const slot = Number.parseInt(event.code.replace("Digit", ""), 10) - 1;
+      if (!Number.isNaN(slot) && slot >= 0) {
+        if (event.shiftKey) {
+          event.preventDefault();
+          battle.toggleControlledWeaponAutoFire(slot);
+        } else {
+          battle.selectControlledWeapon(slot);
+        }
+        renderPanels();
+      }
+    }
+  });
+
+  window.addEventListener("keyup", (event) => {
+    if (isTypingInFormField(event.target) || screen !== "battle") {
+      return;
+    }
+    if (event.key === "a" || event.key === "A") keys.a = false;
+    if (event.key === "d" || event.key === "D") keys.d = false;
+    if (event.key === "w" || event.key === "W") keys.w = false;
+    if (event.key === "s" || event.key === "S") keys.s = false;
+  });
+
+  canvas.addEventListener("mousedown", (event) => {
+    if (event.button !== 0 && event.button !== 2) {
+      return;
+    }
+    const rect = canvas.getBoundingClientRect();
+    const x = (event.clientX - rect.left) * (canvas.width / rect.width);
+    const y = (event.clientY - rect.top) * (canvas.height / rect.height);
+    if (screen === "editor") {
+      const rightClickDelete = event.button === 2;
+      if (rightClickDelete) {
+        event.preventDefault();
+        applyEditorCellAction(x, y, true);
+        renderPanels();
+        return;
+      }
+      editorDragActive = true;
+      editorDragMoved = false;
+      editorDragStartClientX = event.clientX;
+      editorDragStartClientY = event.clientY;
+      editorDragLastClientX = event.clientX;
+      editorDragLastClientY = event.clientY;
+      editorPendingClickX = x;
+      editorPendingClickY = y;
+      return;
+    }
+    if (event.button === 2) {
+      battle.clearControlSelection();
+      renderPanels();
+      return;
+    }
+    battle.handleLeftPointerDown(x, y);
+    renderPanels();
+  });
+
+  canvas.addEventListener("contextmenu", (event) => {
+    if (screen === "editor" || screen === "battle") {
+      event.preventDefault();
+    }
+  });
+
+  window.addEventListener("mouseup", () => {
+    if (screen === "editor" && editorDragActive) {
+      if (!editorDragMoved) {
+        applyEditorCellAction(editorPendingClickX, editorPendingClickY);
+        renderPanels();
+      }
+      editorDragActive = false;
+      editorDragMoved = false;
+    }
+    battle.handlePointerUp();
+  });
+
+  canvas.addEventListener("mouseleave", () => {
+    if (screen === "editor") {
+      editorDragActive = false;
+      editorDragMoved = false;
+    }
+    battle.handlePointerUp();
+  });
+
+  canvas.addEventListener("mousemove", (event) => {
+    if (screen === "editor") {
+      if (editorDragActive) {
+        const dx = event.clientX - editorDragLastClientX;
+        const dy = event.clientY - editorDragLastClientY;
+        editorDragLastClientX = event.clientX;
+        editorDragLastClientY = event.clientY;
+        const movedDistance = Math.hypot(event.clientX - editorDragStartClientX, event.clientY - editorDragStartClientY);
+        if (movedDistance > 4) {
+          editorDragMoved = true;
+        }
+        if (editorDragMoved) {
+          editorGridPanX += dx * (canvas.width / canvas.getBoundingClientRect().width);
+          editorGridPanY += dy * (canvas.height / canvas.getBoundingClientRect().height);
+        }
+      }
+      return;
+    }
+    const rect = canvas.getBoundingClientRect();
+    const x = (event.clientX - rect.left) * (canvas.width / rect.width);
+    const y = (event.clientY - rect.top) * (canvas.height / rect.height);
+    battle.setAim(x, y);
+  });
+
+  loadTemplateIntoEditorSlots(editorDraft);
+  ensureEditorSelectionForLayer();
+  setScreen("base");
+  addLog("Campaign initialized");
+  renderPanels();
+  void refreshTemplatesFromStore().then(() => {
+    addLog("Loaded default and user object templates", "good");
+    renderPanels();
+  });
+  let panelBucket = -1;
+
+  const loop = new GameLoop(
+    (dt) => {
+      if (!running) {
+        return;
+      }
+      if (screen === "battle" && battle.getState().active) {
+        battle.update(dt, keys);
+      }
+    },
+    (_alpha, now) => {
+      if (screen === "editor") {
+        drawEditorCanvas();
+      } else {
+        battle.draw(now);
+      }
+      const nextBucket = Math.floor(now * 4);
+      if (nextBucket !== panelBucket) {
+        panelBucket = nextBucket;
+        updateMetaBar();
+        updateBattleOpsInfo();
+        updateSelectedInfo();
+        updateWeaponHud();
+      }
+    },
+  );
+  loop.start();
+}
+
+function getElement<T extends HTMLElement>(selector: string): T {
+  const element = document.querySelector<T>(selector);
+  if (!element) {
+    throw new Error(`Missing element: ${selector}`);
+  }
+  return element;
+}
+
+function getOptionalElement<T extends HTMLElement>(selector: string): T | null {
+  return document.querySelector<T>(selector);
+}

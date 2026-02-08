@@ -1,0 +1,22 @@
+{
+  "id": "scout-ground",
+  "name": "Scout Buggy",
+  "type": "ground",
+  "gasCost": 22,
+  "structure": [
+    { "material": "basic" },
+    { "material": "basic" },
+    { "material": "basic" }
+  ],
+  "attachments": [
+    { "component": "control", "cell": 1 },
+    { "component": "engineS", "cell": 0 },
+    { "component": "rapidGun", "cell": 2 },
+    { "component": "fuel", "cell": 0 }
+  ],
+  "display": [
+    { "kind": "panel", "cell": 0 },
+    { "kind": "panel", "cell": 1 },
+    { "kind": "stripe", "cell": 2 }
+  ]
+}

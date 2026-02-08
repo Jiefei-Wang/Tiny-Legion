@@ -1,0 +1,340 @@
+:root {
+  --bg: #10161f;
+  --panel: #182331;
+  --panel-soft: #213146;
+  --text: #e9f0f8;
+  --muted: #9db0c8;
+  --good: #59d08f;
+  --warn: #f1be5f;
+  --bad: #ef6d6d;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: "Trebuchet MS", "Segoe UI", sans-serif;
+  color: var(--text);
+  background: radial-gradient(circle at 20% 0%, #1c2b3f, var(--bg) 50%);
+  overflow: hidden;
+}
+
+#app,
+.app-shell {
+  height: 100vh;
+}
+
+.app-shell {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.topbar {
+  position: relative;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 18px;
+  background: rgba(8, 12, 19, 0.8);
+  border-bottom: 1px solid #2e4159;
+}
+
+.title {
+  font-weight: 700;
+  letter-spacing: 0.5px;
+}
+
+.meta {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.layout {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 300px 1fr 280px;
+  gap: 12px;
+  padding: 12px;
+}
+
+.card {
+  background: linear-gradient(180deg, var(--panel), var(--panel-soft));
+  border: 1px solid #324962;
+  border-radius: 10px;
+  padding: 10px;
+}
+
+.left-panel,
+.right-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.center-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.panel {
+  min-height: 180px;
+}
+
+.tabs {
+  display: flex;
+  gap: 8px;
+}
+
+button {
+  background: #304760;
+  border: 1px solid #476587;
+  color: var(--text);
+  border-radius: 7px;
+  padding: 7px 10px;
+  cursor: pointer;
+}
+
+select {
+  background: #304760;
+  border: 1px solid #476587;
+  color: var(--text);
+  border-radius: 7px;
+  padding: 7px 10px;
+}
+
+input {
+  background: #304760;
+  border: 1px solid #476587;
+  color: var(--text);
+  border-radius: 7px;
+  padding: 7px 10px;
+}
+
+.debug-menu {
+  position: absolute;
+  top: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 30;
+  background: #304760;
+  border: 1px solid #476587;
+  border-radius: 7px;
+  padding: 6px 10px;
+  min-width: 190px;
+}
+
+.debug-menu > summary {
+  cursor: pointer;
+  list-style: none;
+}
+
+.debug-menu > label {
+  display: block;
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--text);
+}
+
+button:hover {
+  background: #3a5775;
+}
+
+button.active {
+  background: #486c92;
+  border-color: #6c9ccf;
+}
+
+.small {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.hidden {
+  display: none;
+}
+
+#battleCanvas {
+  width: 100%;
+  flex: 1;
+  min-height: 0;
+  height: auto;
+  border-radius: 8px;
+  border: 1px solid #3d5572;
+  background: linear-gradient(180deg, #263954 0%, #1a283a 48%, #151f2d 100%);
+}
+
+.weapon-hud {
+  margin-top: 8px;
+  padding: 8px;
+  border: 1px solid #2f455f;
+  border-radius: 8px;
+  background: rgba(8, 14, 22, 0.55);
+  min-height: 96px;
+  max-height: 96px;
+  overflow-y: auto;
+}
+
+.weapon-row {
+  margin-top: 6px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.weapon-chip {
+  border: 1px solid #4e6788;
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-size: 12px;
+  color: #ccdcf0;
+}
+
+.weapon-chip.selected {
+  border-color: #8de4a9;
+  color: #8de4a9;
+}
+
+.ai-debug {
+  margin-top: 8px;
+  padding-top: 6px;
+  border-top: 1px dashed #3a4f67;
+}
+
+.log {
+  height: 190px;
+  overflow-y: auto;
+  font-size: 12px;
+  line-height: 1.35;
+  color: var(--muted);
+  background: rgba(5, 8, 13, 0.4);
+  border: 1px solid #2c425a;
+  border-radius: 7px;
+  padding: 8px;
+}
+
+.row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+
+.tag {
+  display: inline-block;
+  border-radius: 999px;
+  padding: 2px 8px;
+  border: 1px solid #466281;
+  font-size: 12px;
+  color: #c1d4ea;
+  margin-right: 5px;
+}
+
+.node-card {
+  margin: 8px 0;
+  padding: 8px;
+  border: 1px solid #3b536e;
+  border-radius: 8px;
+}
+
+.editor-comp-grid {
+  margin-top: 8px;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.editor-comp-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 74px;
+  padding: 6px;
+  border: 1px solid #486889;
+  border-radius: 8px;
+  background: rgba(26, 39, 55, 0.95);
+  color: #dce9f7;
+  cursor: pointer;
+}
+
+.editor-comp-card.selected {
+  border-color: #9ed8ff;
+  box-shadow: inset 0 0 0 1px rgba(158, 216, 255, 0.5);
+}
+
+.editor-comp-card.empty {
+  min-height: 74px;
+  border: 1px dashed rgba(96, 123, 151, 0.35);
+  background: rgba(20, 31, 45, 0.35);
+  cursor: default;
+}
+
+.editor-thumb {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 20px;
+  border: 1px solid #6f90b4;
+  border-radius: 4px;
+  background: linear-gradient(180deg, #3b5775, #2e4660);
+  font-size: 11px;
+  margin-bottom: 4px;
+}
+
+.editor-comp-name {
+  font-size: 11px;
+  line-height: 1.1;
+  text-align: center;
+}
+
+.editor-comp-sub {
+  color: #95abc3;
+  font-size: 10px;
+  text-transform: uppercase;
+}
+
+.editor-tooltip {
+  position: fixed;
+  z-index: 120;
+  max-width: 240px;
+  pointer-events: none;
+  background: rgba(8, 14, 22, 0.96);
+  border: 1px solid #5e7ea4;
+  border-radius: 8px;
+  padding: 6px 8px;
+  color: #dbe8f6;
+  font-size: 12px;
+  line-height: 1.3;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.34);
+}
+
+.good {
+  color: var(--good);
+}
+
+.warn {
+  color: var(--warn);
+}
+
+.bad {
+  color: var(--bad);
+}
+
+@media (max-width: 1200px) {
+  .layout {
+    grid-template-columns: 1fr;
+  }
+
+  #battleCanvas {
+    height: 420px;
+  }
+}

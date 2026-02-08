@@ -1,0 +1,18 @@
+{
+  "name": "arena",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "build:game": "tsc -p ../game/tsconfig.headless.json",
+    "build": "npm run build:game && tsc -p tsconfig.json",
+    "match": "npm run build && node .dist/cli.js match",
+    "train": "npm run build && node .dist/cli.js train",
+    "replay": "npm run build && node .dist/cli.js replay",
+    "serve": "npm run build && node .dist/server.js"
+  },
+  "devDependencies": {
+    "@types/node": "^24.1.0",
+    "typescript": "~5.9.3"
+  }
+}

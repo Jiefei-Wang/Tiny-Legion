@@ -1,0 +1,25 @@
+{
+  "id": "air-light",
+  "name": "Skylance",
+  "type": "air",
+  "gasCost": 44,
+  "structure": [
+    { "material": "basic" },
+    { "material": "basic" },
+    { "material": "basic" },
+    { "material": "basic" }
+  ],
+  "attachments": [
+    { "component": "control", "cell": 1 },
+    { "component": "engineS", "cell": 0 },
+    { "component": "trackingMissile", "cell": 2 },
+    { "component": "missileLoader", "cell": 1 },
+    { "component": "fuel", "cell": 3 }
+  ],
+  "display": [
+    { "kind": "panel", "cell": 0 },
+    { "kind": "glass", "cell": 1 },
+    { "kind": "panel", "cell": 2 },
+    { "kind": "stripe", "cell": 3 }
+  ]
+}
