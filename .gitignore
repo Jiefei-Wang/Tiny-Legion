@@ -2,3 +2,5 @@ arena/.arena-data/
 arena/.dist/
 */node_modules/
 game/.headless-dist/
+.tmp/
+arena-ui/dist/

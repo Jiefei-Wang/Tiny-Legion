@@ -75,6 +75,165 @@ function debugLogPlugin() {
   };
 }
 
+function debugProbePlugin() {
+  type DebugProbeQuery = Record<string, unknown>;
+  type DebugProbeRequest = {
+    id: string;
+    clientId: string;
+    createdAtMs: number;
+    queries: DebugProbeQuery[];
+  };
+  type DebugProbeResult = {
+    ok: boolean;
+    results?: unknown[];
+    errors?: string[];
+  };
+
+  const pendingByClientId = new Map<string, DebugProbeRequest[]>();
+  const requestsById = new Map<string, DebugProbeRequest>();
+  const resultsById = new Map<string, { completedAtMs: number; result: DebugProbeResult }>();
+  let seq = 1;
+
+  const json = (res: any, status: number, payload: unknown): void => {
+    res.statusCode = status;
+    res.setHeader("content-type", "application/json");
+    res.end(JSON.stringify(payload));
+  };
+
+  const readBody = (req: any, cb: (raw: string) => void): void => {
+    let body = "";
+    req.on("data", (chunk: any) => {
+      body += String(chunk);
+    });
+    req.on("end", () => cb(body));
+  };
+
+  const parseJsonBody = (req: any, res: any, cb: (parsed: any) => void): void => {
+    readBody(req, (raw) => {
+      try {
+        cb(JSON.parse(raw || "{}"));
+      } catch {
+        json(res, 400, { ok: false, reason: "bad_json" });
+      }
+    });
+  };
+
+  const getUrl = (req: any): URL => {
+    return new URL(req.url ?? "", "http://localhost");
+  };
+
+  const getPathSegments = (req: any): string[] => {
+    const rawUrl = req.url ?? "";
+    const path = rawUrl.split("?")[0] ?? "";
+    return path.split("/").filter(Boolean);
+  };
+
+  const allocateId = (): string => {
+    const ts = Date.now().toString(36);
+    const n = (seq++).toString(36);
+    return `p_${ts}_${n}`;
+  };
+
+  return {
+    name: "debug-probe",
+    configureServer(server: import("vite").ViteDevServer) {
+      server.middlewares.use("/__debug/probe", (req, res) => {
+        const method = req.method ?? "GET";
+        const segments = getPathSegments(req);
+
+        // POST /__debug/probe
+        if (segments.length === 0) {
+          if (method !== "POST") {
+            return json(res, 405, { ok: false, reason: "method_not_allowed" });
+          }
+          return parseJsonBody(req, res, (parsed) => {
+            const clientId = typeof parsed.clientId === "string" ? parsed.clientId.trim() : "";
+            const queries = Array.isArray(parsed.queries) ? parsed.queries : null;
+            if (!clientId || !queries) {
+              return json(res, 400, { ok: false, reason: "invalid_request" });
+            }
+            if (queries.length > 100) {
+              return json(res, 400, { ok: false, reason: "too_many_queries" });
+            }
+
+            const id = allocateId();
+            const probe: DebugProbeRequest = {
+              id,
+              clientId,
+              createdAtMs: Date.now(),
+              queries: queries as DebugProbeQuery[],
+            };
+            requestsById.set(id, probe);
+            const queue = pendingByClientId.get(clientId) ?? [];
+            queue.push(probe);
+            pendingByClientId.set(clientId, queue);
+            return json(res, 200, { ok: true, probeId: id });
+          });
+        }
+
+        // GET /__debug/probe/next?clientId=...
+        if (segments.length === 1 && segments[0] === "next") {
+          if (method !== "GET") {
+            return json(res, 405, { ok: false, reason: "method_not_allowed" });
+          }
+          const url = getUrl(req);
+          const clientId = url.searchParams.get("clientId")?.trim() ?? "";
+          if (!clientId) {
+            return json(res, 400, { ok: false, reason: "missing_clientId" });
+          }
+          const queue = pendingByClientId.get(clientId) ?? [];
+          const probe = queue.shift() ?? null;
+          pendingByClientId.set(clientId, queue);
+          return json(res, 200, { ok: true, probe });
+        }
+
+        // GET /__debug/probe/:probeId
+        // POST /__debug/probe/:probeId/response
+        if (segments.length >= 1) {
+          const probeId = segments[0] ?? "";
+          if (!probeId) {
+            return json(res, 400, { ok: false, reason: "missing_probeId" });
+          }
+
+          if (segments.length === 1) {
+            if (method !== "GET") {
+              return json(res, 405, { ok: false, reason: "method_not_allowed" });
+            }
+            const probe = requestsById.get(probeId) ?? null;
+            if (!probe) {
+              return json(res, 404, { ok: false, reason: "probe_not_found" });
+            }
+            const done = resultsById.get(probeId);
+            if (!done) {
+              return json(res, 200, { ok: true, status: "pending" });
+            }
+            return json(res, 200, { ok: true, status: "done", result: done.result, completedAtMs: done.completedAtMs });
+          }
+
+          if (segments.length === 2 && segments[1] === "response") {
+            if (method !== "POST") {
+              return json(res, 405, { ok: false, reason: "method_not_allowed" });
+            }
+            const probe = requestsById.get(probeId) ?? null;
+            if (!probe) {
+              return json(res, 404, { ok: false, reason: "probe_not_found" });
+            }
+            return parseJsonBody(req, res, (parsed) => {
+              const ok = Boolean(parsed.ok);
+              const results = Array.isArray(parsed.results) ? parsed.results : undefined;
+              const errors = Array.isArray(parsed.errors) ? parsed.errors.map((e) => String(e)) : undefined;
+              resultsById.set(probeId, { completedAtMs: Date.now(), result: { ok, results, errors } });
+              return json(res, 200, { ok: true });
+            });
+          }
+        }
+
+        return json(res, 404, { ok: false, reason: "not_found" });
+      });
+    },
+  };
+}
+
 function templateStorePlugin() {
   const rootDir = process.cwd();
   const defaultDir = resolve(rootDir, "templates", "default");
@@ -175,5 +334,5 @@ function templateStorePlugin() {
 }
 
 export default defineConfig({
-  plugins: [debugLogPlugin(), templateStorePlugin()],
+  plugins: [debugLogPlugin(), templateStorePlugin(), debugProbePlugin()],
 });

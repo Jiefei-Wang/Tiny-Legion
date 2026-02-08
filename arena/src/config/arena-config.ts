@@ -12,6 +12,8 @@ export type ArenaDefaults = {
   seeds?: number;
   generations?: number;
   population?: number;
+  spawnBurst?: number;
+  spawnMaxActive?: number;
 };
 
 function readJsonFile(path: string): unknown {
@@ -59,5 +61,7 @@ export function loadArenaDefaults(): ArenaDefaults {
     seeds: pick("seeds", "ARENA_SEEDS"),
     generations: pick("generations", "ARENA_GENERATIONS"),
     population: pick("population", "ARENA_POPULATION"),
+    spawnBurst: pick("spawnBurst", "ARENA_SPAWN_BURST"),
+    spawnMaxActive: pick("spawnMaxActive", "ARENA_SPAWN_MAX_ACTIVE"),
   };
 }

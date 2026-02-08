@@ -161,6 +161,52 @@ src/
     user/*.json
 ```
 
+Arena training/runtime package (implemented):
+
+```text
+arena/src/
+  ai/
+    ai-schema.ts
+    families.ts
+    families/
+      baseline.ts
+      range-bias.ts
+      evade-bias.ts
+      aggressive-rush.ts
+      adaptive-kite.ts
+      neural-linear.ts
+      base-rush.ts
+  eval/
+    evaluate-vs-baseline.ts
+  match/
+    match-types.ts
+    run-match.ts
+    run-single-match.ts
+  spawn/
+    spawn-schema.ts
+    families.ts
+    families/spawn-baseline.ts
+    families/spawn-weighted.ts
+  train/
+    run-training.ts
+    run-spawn-training.ts
+    fitness.ts
+    param-genetics.ts
+    model-store.ts
+  worker/
+    match-worker.ts
+  replay/
+    run-replay.ts
+    open-replay-ui.ts
+```
+
+Arena-specific architecture notes:
+
+- Training and evaluation run headless through `WorkerPool` + `match-worker.ts` for parallel CPU usage.
+- Model ranking now prioritizes `winRateLowerBound` then `winRate`, then `score`.
+- `cli.ts` includes an `eval` command for reproducible held-out benchmarking versus `baseline`.
+- Replay UI (`arena-ui/src/main.ts`) supports all arena AI families to preserve match/replay parity.
+
 Map node metadata supports test-only battle tuning via optional fields on `MapNode`:
 
 - `testEnemyMinActive` keeps a minimum enemy unit count active in battle.
@@ -330,6 +376,13 @@ Dev-server log endpoints (available via `vite.config.ts` middleware):
 
 - `POST /__debug/toggle` -> enable/disable file logging
 - `POST /__debug/log` -> append runtime log entries
+
+Dev-server debug probe RPC (dev-only, no eval; used by agents/scripts to fetch arbitrary state):
+
+- `POST /__debug/probe` -> enqueue probe queries
+- `GET /__debug/probe/next?clientId=...` -> client polls for work
+- `POST /__debug/probe/<probeId>/response` -> client returns results
+- `GET /__debug/probe/<probeId>` -> fetch probe status/results
 
 Runtime log file path:
 

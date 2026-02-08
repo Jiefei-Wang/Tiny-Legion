@@ -20,7 +20,8 @@ export class ModelStore {
   private readonly maxModels: number;
 
   constructor(rootDir: string, aiFamilyId: string, maxModels: number) {
-    this.dir = resolve(rootDir, "models", aiFamilyId);
+    const safeId = aiFamilyId.replace(/[^a-zA-Z0-9._-]+/g, "_");
+    this.dir = resolve(rootDir, "models", safeId);
     this.maxModels = Math.max(1, Math.floor(maxModels));
     if (!existsSync(this.dir)) {
       mkdirSync(this.dir, { recursive: true });
@@ -46,7 +47,17 @@ export class ModelStore {
   }
 
   public save(models: StoredModel[]): void {
-    const sorted = [...models].sort((a, b) => b.score - a.score).slice(0, this.maxModels);
+    const sorted = [...models]
+      .sort((a, b) => {
+        if (b.winRateLowerBound !== a.winRateLowerBound) {
+          return b.winRateLowerBound - a.winRateLowerBound;
+        }
+        if (b.winRate !== a.winRate) {
+          return b.winRate - a.winRate;
+        }
+        return b.score - a.score;
+      })
+      .slice(0, this.maxModels);
     writeFileSync(this.indexPath(), JSON.stringify(sorted, null, 2), "utf8");
   }
 }

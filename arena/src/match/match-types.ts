@@ -7,6 +7,13 @@ export type MatchAiSpec = {
   params: Params;
 };
 
+export type SpawnMode = "mirrored-random" | "ai";
+
+export type SpawnSpec = {
+  familyId: string;
+  params: Params;
+};
+
 export type MatchSpec = {
   seed: number;
   maxSimSeconds: number;
@@ -14,8 +21,13 @@ export type MatchSpec = {
   baseHp?: number;
   playerGas: number;
   enemyGas: number;
+  spawnBurst?: number;
+  spawnMaxActive?: number;
   aiPlayer: MatchAiSpec;
   aiEnemy: MatchAiSpec;
+  spawnMode?: SpawnMode;
+  spawnPlayer?: SpawnSpec;
+  spawnEnemy?: SpawnSpec;
 };
 
 export type SideOutcome = {
@@ -26,6 +38,7 @@ export type SideOutcome = {
   onFieldGasValueStart: number;
   onFieldGasValueEnd: number;
   gasWorthDelta: number;
+  score: number;
 };
 
 export type MatchResult = {

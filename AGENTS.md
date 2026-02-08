@@ -50,6 +50,19 @@ If you are a new coding agent/session, read this file first, then read:
   - `POST /__debug/log` with `{ "level": "info|warn|bad", "message": "..." }`
 - Log file path: `game/.debug/runtime.log`
 - Enable server-side logging at startup:
+### Debug probe RPC (dev-only)
+
+This repo includes a dev-only "debug probe" RPC so agents (and scripts) can request arbitrary state from the running browser game without adding fixed snapshot endpoints.
+
+- Server broker (Vite middleware in `game/vite.config.ts`):
+  - `POST /__debug/probe` with `{ "clientId": "...", "queries": [...] }` -> `{ ok: true, probeId }`
+  - `GET /__debug/probe/<probeId>` -> `{ ok: true, status: "pending"|"done", result? }`
+  - Client polling: `GET /__debug/probe/next?clientId=...` -> `{ ok: true, probe: { id, queries } | null }`
+  - Client response: `POST /__debug/probe/<probeId>/response` with `{ ok: true, results: [...], errors?: [...] }`
+- Safety: **no eval**. Queries are limited to `path`/`dump` (from explicit roots) and `dom` (selector-based). Payloads are size-capped.
+- Enablement: probe polling is active only when debug server logging is enabled (same toggle as `/__debug/log`, usually via in-app Debug Options).
+
+- Enable server-side logging at startup:
 
 ```bash
 DEBUG_LOG=1 npm --prefix game run dev
@@ -70,6 +83,7 @@ If shell does not support inline env assignment, set env var in shell first, the
 - Hard rule: if you change code structure (new modules, moving responsibilities, new data flows/types, new debug endpoints), update `SOFTWARE_ARCHITECTURE.md` in the same change.
 - If both apply, update both docs; prefer small, surgical doc edits over letting them drift.
 - Add durable agent instructions to this `AGENTS.md` so new sessions can discover workflow quickly.
+- Put temporary images and other temporary outputs under `.tmp/` instead of the project root.
 
 ## Mandatory Headless Verification
 

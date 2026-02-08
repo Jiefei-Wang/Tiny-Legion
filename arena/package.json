@@ -8,6 +8,7 @@
     "build": "npm run build:game && tsc -p tsconfig.json",
     "match": "npm run build && node .dist/cli.js match",
     "train": "npm run build && node .dist/cli.js train",
+    "train:spawn": "npm run build && node .dist/cli.js train-spawn",
     "replay": "npm run build && node .dist/cli.js replay",
     "serve": "npm run build && node .dist/server.js"
   },

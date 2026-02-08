@@ -58,6 +58,9 @@ export interface BattleAiController {
 export interface BattleSessionOptions {
   aiControllers?: Partial<Record<Side, BattleAiController>>;
   autoEnableAiWeaponAutoFire?: boolean;
+  disableAutoEnemySpawns?: boolean;
+  disableEnemyMinimumPresence?: boolean;
+  disableDefaultStarters?: boolean;
 }
 
 export class BattleSession {
@@ -67,6 +70,9 @@ export class BattleSession {
   private readonly templates: UnitTemplate[];
   private readonly aiControllers: Partial<Record<Side, BattleAiController>>;
   private readonly autoEnableAiWeaponAutoFire: boolean;
+  private readonly disableAutoEnemySpawns: boolean;
+  private readonly disableEnemyMinimumPresence: boolean;
+  private readonly disableDefaultStarters: boolean;
   private state: BattleState;
   private selectedUnitId: string | null;
   private playerControlledId: string | null;
@@ -88,6 +94,9 @@ export class BattleSession {
     this.templates = templates;
     this.aiControllers = options.aiControllers ?? {};
     this.autoEnableAiWeaponAutoFire = options.autoEnableAiWeaponAutoFire ?? false;
+    this.disableAutoEnemySpawns = options.disableAutoEnemySpawns ?? false;
+    this.disableEnemyMinimumPresence = options.disableEnemyMinimumPresence ?? false;
+    this.disableDefaultStarters = options.disableDefaultStarters ?? false;
     this.state = this.createEmptyBattle();
     this.selectedUnitId = null;
     this.playerControlledId = null;
@@ -258,16 +267,20 @@ export class BattleSession {
       this.state.enemyBase.hp = node.testBaseHpOverride;
     }
 
-    const starterA = instantiateUnit(this.templates, "scout-ground", "player", 140, 300, { deploymentGasCost: 0 });
-    const starterB = instantiateUnit(this.templates, "tank-ground", "player", 150, 430, { deploymentGasCost: 0 });
-    if (starterA) {
-      this.state.units.push(starterA);
+    if (!this.disableDefaultStarters) {
+      const starterA = instantiateUnit(this.templates, "scout-ground", "player", 140, 300, { deploymentGasCost: 0 });
+      const starterB = instantiateUnit(this.templates, "tank-ground", "player", 150, 430, { deploymentGasCost: 0 });
+      if (starterA) {
+        this.state.units.push(starterA);
+      }
+      if (starterB) {
+        this.state.units.push(starterB);
+      }
     }
-    if (starterB) {
-      this.state.units.push(starterB);
-    }
-    for (let i = 0; i < 2; i += 1) {
-      this.maybeSpawnEnemy();
+    if (!this.disableAutoEnemySpawns) {
+      for (let i = 0; i < 2; i += 1) {
+        this.maybeSpawnEnemy();
+      }
     }
 
     this.playerControlledId = null;
@@ -318,12 +331,16 @@ export class BattleSession {
       return;
     }
 
-    this.state.enemySpawnTimer -= dt;
-    if (this.state.enemySpawnTimer <= 0) {
-      this.state.enemySpawnTimer = 4.2 + Math.random() * 2.8;
-      this.maybeSpawnEnemy();
+    if (!this.disableAutoEnemySpawns) {
+      this.state.enemySpawnTimer -= dt;
+      if (this.state.enemySpawnTimer <= 0) {
+        this.state.enemySpawnTimer = 4.2 + Math.random() * 2.8;
+        this.maybeSpawnEnemy();
+      }
     }
-    this.ensureEnemyMinimumPresence();
+    if (!this.disableEnemyMinimumPresence) {
+      this.ensureEnemyMinimumPresence();
+    }
 
     for (const unit of this.state.units) {
       if (!unit.alive || !canOperate(unit)) {
@@ -675,6 +692,71 @@ export class BattleSession {
       return true;
     }
     return false;
+  }
+
+  public arenaDeploy(
+    side: Side,
+    templateId: string,
+    opts: { chargeGas?: boolean; y?: number; deploymentGasCost?: number; ignoreCap?: boolean; ignoreLowGasThreshold?: boolean } = {},
+  ): boolean {
+    if (!this.state.active || this.state.outcome) {
+      return false;
+    }
+    const template = this.templates.find((entry) => entry.id === templateId);
+    if (!template) {
+      return false;
+    }
+
+    const chargeGas = opts.chargeGas ?? true;
+    const ignoreCap = opts.ignoreCap ?? false;
+    if (side === "player") {
+      const friendlyActive = this.state.units.filter((unit) => unit.side === "player" && unit.alive).length;
+      if (!ignoreCap && friendlyActive >= armyCap(this.hooks.getCommanderSkill())) {
+        return false;
+      }
+      if (chargeGas && !this.hooks.spendPlayerGas(template.gasCost)) {
+        return false;
+      }
+    const y = typeof opts.y === "number" && Number.isFinite(opts.y)
+      ? opts.y
+      : template.type === "air"
+          ? AIR_MIN_Z + Math.random() * (AIR_MAX_Z - AIR_MIN_Z)
+          : GROUND_MIN_Y + Math.random() * (GROUND_MAX_Y - GROUND_MIN_Y);
+    const unit = instantiateUnit(this.templates, templateId, "player", 120, y, {
+      deploymentGasCost: typeof opts.deploymentGasCost === "number" && Number.isFinite(opts.deploymentGasCost) ? opts.deploymentGasCost : undefined,
+    });
+      if (!unit) {
+        return false;
+      }
+      this.state.units.push(unit);
+      return true;
+    }
+
+    const aliveEnemy = this.state.units.filter((unit) => unit.side === "enemy" && unit.alive).length;
+    if (!ignoreCap && aliveEnemy >= this.state.enemyCap) {
+      return false;
+    }
+    const hasGas = this.state.enemyGas >= template.gasCost;
+    const ignoreLowGasThreshold = opts.ignoreLowGasThreshold ?? false;
+    if (chargeGas && !this.state.enemyInfiniteGas && (!hasGas || (!ignoreLowGasThreshold && this.state.enemyGas < 20))) {
+      return false;
+    }
+    if (chargeGas && !this.state.enemyInfiniteGas) {
+      this.state.enemyGas -= template.gasCost;
+    }
+    const y = typeof opts.y === "number" && Number.isFinite(opts.y)
+      ? opts.y
+      : template.type === "air"
+          ? AIR_MIN_Z + Math.random() * (AIR_MAX_Z - AIR_MIN_Z)
+          : GROUND_MIN_Y + Math.random() * (GROUND_MAX_Y - GROUND_MIN_Y);
+    const enemy = instantiateUnit(this.templates, templateId, "enemy", this.canvas.width - 120, y, {
+      deploymentGasCost: typeof opts.deploymentGasCost === "number" && Number.isFinite(opts.deploymentGasCost) ? opts.deploymentGasCost : undefined,
+    });
+    if (!enemy) {
+      return false;
+    }
+    this.state.units.push(enemy);
+    return true;
   }
 
   private ensureEnemyMinimumPresence(): void {

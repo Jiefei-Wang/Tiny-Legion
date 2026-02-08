@@ -42,6 +42,12 @@ body {
   border-bottom: 1px solid #2e4159;
 }
 
+/* Arena replay spectator mode: hide campaign/debug UI. */
+.app-shell.arena-replay #debugMenu,
+.app-shell.arena-replay #metaBar {
+  display: none !important;
+}
+
 .title {
   font-weight: 700;
   letter-spacing: 0.5px;

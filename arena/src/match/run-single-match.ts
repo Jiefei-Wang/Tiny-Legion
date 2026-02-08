@@ -26,6 +26,8 @@ export async function runSingleMatch(opts: {
   maxSimSeconds: number;
   nodeDefense: number;
   baseHp: number | null;
+  spawnBurst: number;
+  spawnMaxActive: number;
   playerGas: number;
   enemyGas: number;
   outPath: string | null;
@@ -44,6 +46,8 @@ export async function runSingleMatch(opts: {
     maxSimSeconds: opts.maxSimSeconds,
     nodeDefense: opts.nodeDefense,
     ...(opts.baseHp ? { baseHp: opts.baseHp } : {}),
+    spawnBurst: opts.spawnBurst,
+    spawnMaxActive: opts.spawnMaxActive,
     playerGas: opts.playerGas,
     enemyGas: opts.enemyGas,
     aiPlayer: { familyId: familyA.id, params: paramsA },

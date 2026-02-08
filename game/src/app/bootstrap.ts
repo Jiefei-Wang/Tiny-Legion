@@ -8,14 +8,60 @@ import { canOperate } from "../simulation/units/control-unit-rules.ts";
 import { COMPONENTS } from "../config/balance/weapons.ts";
 import { MATERIALS } from "../config/balance/materials.ts";
 import { BattleSession } from "../gameplay/battle/battle-session.ts";
+import type { BattleSessionOptions } from "../gameplay/battle/battle-session.ts";
+import { BATTLE_SALVAGE_REFUND_FACTOR } from "../gameplay/battle/battle-session.ts";
 import { cloneTemplate, fetchDefaultTemplatesFromStore, fetchUserTemplatesFromStore, getTemplateValidationIssues, mergeTemplates, saveUserTemplateToStore } from "./template-store.ts";
 import type { ComponentId, DisplayAttachmentTemplate, GameBase, KeyState, MapNode, MaterialId, ScreenMode, TechState, UnitTemplate } from "../types.ts";
 
-export function bootstrap(): void {
+export type ArenaReplaySpec = {
+  seed: number;
+  maxSimSeconds: number;
+  nodeDefense: number;
+  baseHp?: number;
+  playerGas: number;
+  enemyGas: number;
+  spawnBurst?: number;
+  spawnMaxActive?: number;
+  aiPlayer: { familyId: string; params: Record<string, number | boolean> };
+  aiEnemy: { familyId: string; params: Record<string, number | boolean> };
+  spawnMode?: "mirrored-random" | "ai";
+  spawnPlayer?: { familyId: string; params: Record<string, number | boolean> };
+  spawnEnemy?: { familyId: string; params: Record<string, number | boolean> };
+};
+
+export type ArenaReplayDeciderCtx = {
+  side: "player" | "enemy";
+  gas: number;
+  capRemaining: number;
+  roster: string[];
+};
+
+export type ArenaReplayDecider = (ctx: ArenaReplayDeciderCtx) => { templateId: string | null; intervalS: number };
+
+export type BootstrapOptions = {
+  arenaReplay?: { spec: ArenaReplaySpec; deciders?: { player?: ArenaReplayDecider; enemy?: ArenaReplayDecider }; expected?: unknown };
+  battleSessionOptions?: BattleSessionOptions;
+};
+
+export function bootstrap(options: BootstrapOptions = {}): void {
   const root = document.querySelector<HTMLDivElement>("#app");
   if (!root) {
     throw new Error("App root not found");
   }
+
+  const replay = options.arenaReplay ?? null;
+  const replayMode = Boolean(replay);
+  const replayExpected = replay?.expected ?? null;
+
+  const battleSessionOptions: BattleSessionOptions | undefined = replayMode
+    ? {
+      ...(options.battleSessionOptions ?? {}),
+      // Arena replay should not inherit any default battle randomness.
+      disableAutoEnemySpawns: true,
+      disableEnemyMinimumPresence: true,
+      disableDefaultStarters: true,
+    }
+    : options.battleSessionOptions;
 
   root.innerHTML = `
     <div class="app-shell">
@@ -28,6 +74,13 @@ export function bootstrap(): void {
           <label><input id="debugTargetLineChk" type="checkbox" /> Draw Target Lines</label>
         </details>
         <div id="metaBar" class="meta"></div>
+        <div id="arenaReplayStats" class="meta small"></div>
+        <div class="meta" style="display:flex; align-items:center; gap:8px;">
+          <label class="small" style="display:flex; align-items:center; gap:6px;">Speed
+            <input id="timeScale" type="range" min="0.5" max="5" step="0.1" value="1" />
+          </label>
+          <span id="timeScaleLabel" class="small">1.0x</span>
+        </div>
       </header>
 
       <main class="layout">
@@ -81,6 +134,8 @@ export function bootstrap(): void {
     </div>
   `;
 
+  root.querySelector<HTMLElement>(".app-shell")?.classList.toggle("arena-replay", replayMode);
+
   const basePanel = getElement<HTMLDivElement>("#basePanel");
   const mapPanel = getElement<HTMLDivElement>("#mapPanel");
   const battlePanel = getElement<HTMLDivElement>("#battlePanel");
@@ -91,8 +146,20 @@ export function bootstrap(): void {
   const debugResourcesChk = getElement<HTMLInputElement>("#debugResourcesChk");
   const debugVisualChk = getElement<HTMLInputElement>("#debugVisualChk");
   const debugTargetLineChk = getElement<HTMLInputElement>("#debugTargetLineChk");
+  const debugMenu = getElement<HTMLElement>("#debugMenu");
   const metaBar = getElement<HTMLDivElement>("#metaBar");
+  const arenaReplayStats = getElement<HTMLDivElement>("#arenaReplayStats");
+  const timeScale = getElement<HTMLInputElement>("#timeScale");
+  const timeScaleLabel = getElement<HTMLSpanElement>("#timeScaleLabel");
   const canvas = getElement<HTMLCanvasElement>("#battleCanvas");
+
+  if (replayMode) {
+    // Match arena headless runner simulation dimensions for deterministic parity.
+    canvas.width = 1280;
+    canvas.height = 720;
+    debugMenu.style.display = "none";
+    metaBar.style.display = "none";
+  }
 
   const tabs = {
     base: getElement<HTMLButtonElement>("#tabBase"),
@@ -116,12 +183,12 @@ export function bootstrap(): void {
   let screen: ScreenMode = "base";
   let running = true;
   let round = 1;
-  let gas = 250;
+  let gas = replay?.spec.playerGas ?? 250;
   let commanderSkill = 1;
   let pendingOccupation: string | null = null;
-  let debugUnlimitedResources = true;
-  let debugVisual = true;
-  let debugTargetLines = true;
+  let debugUnlimitedResources = replayMode ? false : true;
+  let debugVisual = replayMode ? false : true;
+  let debugTargetLines = replayMode ? false : true;
   let debugServerEnabled = false;
   const EDITOR_GRID_MAX_COLS = 10;
   const EDITOR_GRID_MAX_ROWS = 10;
@@ -207,7 +274,216 @@ export function bootstrap(): void {
     });
   };
 
+  const debugProbeClientId = (() => {
+    const ts = Date.now().toString(36);
+    const rand = Math.random().toString(36).slice(2, 10);
+    return `client_${ts}_${rand}`;
+  })();
+
+  type DebugProbePathQuery = {
+    type: "path";
+    root: "app" | "battle";
+    path?: string;
+    options?: { maxDepth?: number; maxItems?: number; maxString?: number };
+  };
+  type DebugProbeDumpQuery = {
+    type: "dump";
+    root: "app" | "battle";
+    path?: string;
+    options?: { maxDepth?: number; maxItems?: number; maxString?: number };
+  };
+  type DebugProbeDomQuery = {
+    type: "dom";
+    selector: string;
+    options?: { maxNodes?: number; maxString?: number; fields?: Array<"rect" | "text" | "html" | "classes" | "attrs"> };
+  };
+  type DebugProbeQuery = DebugProbePathQuery | DebugProbeDumpQuery | DebugProbeDomQuery;
+
+  const clampInt = (value: unknown, min: number, max: number, fallback: number): number => {
+    if (typeof value !== "number" || !Number.isFinite(value)) {
+      return fallback;
+    }
+    return Math.max(min, Math.min(max, Math.floor(value)));
+  };
+
+  const getPathValue = (rootObj: unknown, rawPath: unknown): unknown => {
+    const path = typeof rawPath === "string" ? rawPath.trim() : "";
+    if (!path) {
+      return rootObj;
+    }
+    let cursor: any = rootObj;
+    let i = 0;
+
+    const readIdentifier = (): string | null => {
+      const start = i;
+      const first = path[i] ?? "";
+      if (!/[A-Za-z_$]/.test(first)) {
+        return null;
+      }
+      i += 1;
+      while (i < path.length && /[A-Za-z0-9_$]/.test(path[i] ?? "")) {
+        i += 1;
+      }
+      return path.slice(start, i);
+    };
+
+    const readBracket = (): string | number | null => {
+      // supports [0], ["key"], ['key']
+      if (path[i] !== "[") {
+        return null;
+      }
+      i += 1;
+      while (i < path.length && /\s/.test(path[i] ?? "")) {
+        i += 1;
+      }
+      const quote = path[i];
+      if (quote === "\"" || quote === "'") {
+        i += 1;
+        const start = i;
+        while (i < path.length && path[i] !== quote) {
+          i += 1;
+        }
+        if (path[i] !== quote) {
+          return null;
+        }
+        const key = path.slice(start, i);
+        i += 1;
+        while (i < path.length && /\s/.test(path[i] ?? "")) {
+          i += 1;
+        }
+        if (path[i] !== "]") {
+          return null;
+        }
+        i += 1;
+        return key;
+      }
+
+      const start = i;
+      while (i < path.length && /[0-9]/.test(path[i] ?? "")) {
+        i += 1;
+      }
+      const raw = path.slice(start, i);
+      while (i < path.length && /\s/.test(path[i] ?? "")) {
+        i += 1;
+      }
+      if (path[i] !== "]") {
+        return null;
+      }
+      i += 1;
+      const num = Number(raw);
+      if (!raw || !Number.isFinite(num)) {
+        return null;
+      }
+      return num;
+    };
+
+    while (i < path.length) {
+      while (i < path.length && /\s/.test(path[i] ?? "")) {
+        i += 1;
+      }
+      if (path[i] === ".") {
+        i += 1;
+        continue;
+      }
+
+      const bracketKey = readBracket();
+      if (bracketKey !== null) {
+        if (cursor == null) {
+          return undefined;
+        }
+        cursor = cursor[bracketKey as any];
+        continue;
+      }
+
+      const ident = readIdentifier();
+      if (!ident) {
+        return undefined;
+      }
+      if (cursor == null) {
+        return undefined;
+      }
+      cursor = cursor[ident];
+    }
+
+    return cursor;
+  };
+
+  const safeDump = (
+    value: unknown,
+    options: { maxDepth: number; maxItems: number; maxString: number },
+  ): unknown => {
+    const seen = new WeakSet<object>();
+
+    const dumpInner = (v: unknown, depth: number): unknown => {
+      if (v === null || v === undefined) {
+        return v;
+      }
+      if (typeof v === "string") {
+        return v.length > options.maxString ? `${v.slice(0, options.maxString)}…` : v;
+      }
+      if (typeof v === "number" || typeof v === "boolean") {
+        return v;
+      }
+      if (typeof v === "bigint") {
+        return `[bigint ${String(v)}]`;
+      }
+      if (typeof v === "function") {
+        return "[function]";
+      }
+      if (typeof v === "symbol") {
+        return "[symbol]";
+      }
+      if (depth >= options.maxDepth) {
+        return "[maxDepth]";
+      }
+      if (typeof v !== "object") {
+        return String(v);
+      }
+
+      const obj = v as object;
+      if (seen.has(obj)) {
+        return "[circular]";
+      }
+      seen.add(obj);
+
+      if (Array.isArray(v)) {
+        const out: unknown[] = [];
+        const max = Math.min(v.length, options.maxItems);
+        for (let i = 0; i < max; i += 1) {
+          out.push(dumpInner(v[i], depth + 1));
+        }
+        if (v.length > max) {
+          out.push(`[+${v.length - max} more]`);
+        }
+        return out;
+      }
+
+      const proto = Object.getPrototypeOf(v);
+      if (proto !== Object.prototype && proto !== null) {
+        const name = (v as any)?.constructor?.name;
+        return `[${typeof name === "string" && name ? name : "Object"}]`;
+      }
+
+      const keys = Object.keys(v as Record<string, unknown>);
+      const out: Record<string, unknown> = {};
+      const max = Math.min(keys.length, options.maxItems);
+      for (let i = 0; i < max; i += 1) {
+        const k = keys[i] ?? "";
+        out[k] = dumpInner((v as any)[k], depth + 1);
+      }
+      if (keys.length > max) {
+        out.__moreKeys = keys.length - max;
+      }
+      return out;
+    };
+
+    return dumpInner(value, 0);
+  };
+
   const syncDebugServerState = (): void => {
+    if (replayMode) {
+      return;
+    }
     const shouldEnable = debugUnlimitedResources || debugVisual;
     if (shouldEnable === debugServerEnabled) {
       return;
@@ -276,7 +552,481 @@ export function bootstrap(): void {
       },
     },
     templates,
+    battleSessionOptions,
   );
+
+  const startDebugProbeLoop = (): void => {
+    const pollEveryMs = 250;
+    let timer: number | null = null;
+    let inFlight = false;
+
+    const buildAppRoot = (): Record<string, unknown> => {
+      return {
+        screen,
+        running,
+        round,
+        gas,
+        commanderSkill,
+        debugUnlimitedResources,
+        debugVisual,
+        debugTargetLines,
+        replayMode,
+      };
+    };
+
+    const buildBattleRoot = (): Record<string, unknown> => {
+      return {
+        state: battle.getState(),
+        selection: battle.getSelection(),
+        displayEnabled: battle.isDisplayEnabled(),
+      };
+    };
+
+    const executeQuery = (query: DebugProbeQuery): unknown => {
+      if (query.type === "dom") {
+        const selector = typeof query.selector === "string" ? query.selector : "";
+        if (!selector) {
+          return { ok: false, reason: "missing_selector" };
+        }
+        const maxNodes = clampInt(query.options?.maxNodes, 1, 200, 40);
+        const maxString = clampInt(query.options?.maxString, 50, 50_000, 2_000);
+        const fields = Array.isArray(query.options?.fields) && query.options?.fields.length > 0
+          ? query.options?.fields
+          : ["rect", "text", "classes"];
+
+        const nodes = Array.from(document.querySelectorAll(selector)).slice(0, maxNodes);
+        return nodes.map((node) => {
+          const el = node as HTMLElement;
+          const out: Record<string, unknown> = { tag: el.tagName.toLowerCase() };
+          if (fields.includes("rect")) {
+            const r = el.getBoundingClientRect();
+            out.rect = { x: r.x, y: r.y, w: r.width, h: r.height };
+          }
+          if (fields.includes("classes")) {
+            out.classes = Array.from(el.classList);
+          }
+          if (fields.includes("text")) {
+            const text = (el.innerText ?? "").trim();
+            out.text = text.length > maxString ? `${text.slice(0, maxString)}…` : text;
+          }
+          if (fields.includes("html")) {
+            const html = (el.innerHTML ?? "").trim();
+            out.html = html.length > maxString ? `${html.slice(0, maxString)}…` : html;
+          }
+          if (fields.includes("attrs")) {
+            const attrs: Record<string, string> = {};
+            for (const attr of Array.from(el.attributes)) {
+              attrs[attr.name] = attr.value;
+            }
+            out.attrs = attrs;
+          }
+          return out;
+        });
+      }
+
+      const rootName = (query as DebugProbePathQuery | DebugProbeDumpQuery).root;
+      const rootObj = rootName === "battle" ? buildBattleRoot() : buildAppRoot();
+      const resolved = getPathValue(rootObj, (query as any).path);
+      const maxDepth = clampInt((query as any).options?.maxDepth, 1, 20, query.type === "path" ? 3 : 6);
+      const maxItems = clampInt((query as any).options?.maxItems, 1, 5_000, query.type === "path" ? 120 : 400);
+      const maxString = clampInt((query as any).options?.maxString, 50, 200_000, 5_000);
+      return safeDump(resolved, { maxDepth, maxItems, maxString });
+    };
+
+    const pollOnce = async (): Promise<void> => {
+      if (inFlight) {
+        return;
+      }
+      if (!debugServerEnabled || replayMode) {
+        return;
+      }
+      inFlight = true;
+      try {
+        const nextRes = await fetch(`/__debug/probe/next?clientId=${encodeURIComponent(debugProbeClientId)}`, {
+          method: "GET",
+          headers: { "accept": "application/json" },
+        });
+        const nextJson = await nextRes.json().catch(() => null);
+        const probe = nextJson && typeof nextJson === "object" ? (nextJson as any).probe : null;
+        if (!probe || typeof probe.id !== "string" || !Array.isArray(probe.queries)) {
+          return;
+        }
+
+        const results: unknown[] = [];
+        const errors: string[] = [];
+        for (let i = 0; i < probe.queries.length; i += 1) {
+          const raw = probe.queries[i];
+          try {
+            if (!raw || typeof raw !== "object") {
+              results.push(null);
+              errors.push(`query[${i}] invalid`);
+              continue;
+            }
+            const q = raw as Partial<DebugProbeQuery>;
+            const type = (q as any).type;
+            if (type !== "path" && type !== "dump" && type !== "dom") {
+              results.push(null);
+              errors.push(`query[${i}] unknown type`);
+              continue;
+            }
+            if (type !== "dom") {
+              const rootName = (q as any).root;
+              if (rootName !== "app" && rootName !== "battle") {
+                results.push(null);
+                errors.push(`query[${i}] invalid root`);
+                continue;
+              }
+            }
+            results.push(executeQuery(q as DebugProbeQuery));
+          } catch (e) {
+            results.push(null);
+            errors.push(`query[${i}] error: ${e instanceof Error ? e.message : String(e)}`);
+          }
+        }
+
+        await fetch(`/__debug/probe/${encodeURIComponent(probe.id)}/response`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ ok: true, results, errors: errors.length > 0 ? errors : undefined }),
+        }).catch(() => {
+          return;
+        });
+      } catch {
+        return;
+      } finally {
+        inFlight = false;
+      }
+    };
+
+    if (timer !== null) {
+      return;
+    }
+    timer = window.setInterval(() => {
+      void pollOnce();
+    }, pollEveryMs);
+  };
+
+  startDebugProbeLoop();
+
+  const refundFactor = BATTLE_SALVAGE_REFUND_FACTOR;
+  const computeOnFieldGasValue = (side: "player" | "enemy"): number => {
+    const s = battle.getState();
+    let sum = 0;
+    for (const unit of s.units) {
+      if (!unit || !unit.alive || unit.side !== side) {
+        continue;
+      }
+      const cost = typeof unit.deploymentGasCost === "number" ? unit.deploymentGasCost : 0;
+      const refundable = Math.floor(cost * refundFactor);
+      if (refundable > 0) {
+        sum += refundable;
+      }
+    }
+    return sum;
+  };
+
+  let gasStartPlayer = 0;
+  let gasStartEnemy = 0;
+  let onFieldStartPlayer = 0;
+  let onFieldStartEnemy = 0;
+
+  const blockUserInputForReplay = (): void => {
+    const stopAll = (event: Event): void => {
+      const target = event.target;
+      if (target instanceof HTMLElement && target.id === "timeScale") {
+        return;
+      }
+      event.preventDefault();
+      event.stopImmediatePropagation();
+    };
+    const targets: Array<[EventTarget, string]> = [
+      [document, "keydown"],
+      [document, "keyup"],
+      [document, "keypress"],
+      [document, "mousedown"],
+      [document, "mouseup"],
+      [document, "click"],
+      [document, "contextmenu"],
+      [canvas, "mousedown"],
+      [canvas, "mouseup"],
+      [canvas, "mousemove"],
+      [canvas, "click"],
+      [canvas, "contextmenu"],
+    ];
+    for (const [target, name] of targets) {
+      target.addEventListener(name, stopAll, { capture: true });
+    }
+    const interactive = root.querySelectorAll("button, input, select, textarea");
+    interactive.forEach((node) => {
+      if (node instanceof HTMLInputElement && node.id === "timeScale") {
+        return;
+      }
+      (node as HTMLButtonElement).disabled = true;
+    });
+    canvas.style.cursor = "default";
+  };
+
+  const startArenaReplay = (): void => {
+    if (!replay) {
+      return;
+    }
+    const spec = replay.spec;
+
+    // Replay determinism (browser):
+    // - route all randomness through a seeded PRNG during replay
+    // - advance the sim using fixed timesteps (not frame dt)
+    const makeSeededRng = (seed: number): (() => number) => {
+      let t = seed >>> 0;
+      return () => {
+        t += 0x6d2b79f5;
+        let x = t;
+        x = Math.imul(x ^ (x >>> 15), x | 1);
+        x ^= x + Math.imul(x ^ (x >>> 7), x | 61);
+        return ((x ^ (x >>> 14)) >>> 0) / 4294967296;
+      };
+    };
+    const math = Math as unknown as { random: () => number };
+    const originalMathRandom = math.random;
+    let restoredMathRandom = false;
+    const restoreMathRandom = (): void => {
+      if (restoredMathRandom) {
+        return;
+      }
+      restoredMathRandom = true;
+      math.random = originalMathRandom;
+    };
+    math.random = makeSeededRng(spec.seed);
+
+    const node: MapNode = {
+      id: "arena-replay",
+      name: "Arena Replay",
+      owner: "neutral",
+      garrison: false,
+      reward: 0,
+      defense: spec.nodeDefense,
+      ...(typeof spec.baseHp === "number" && Number.isFinite(spec.baseHp) && spec.baseHp > 0 ? { testBaseHpOverride: spec.baseHp } : {}),
+    };
+    battle.start(node);
+    battle.clearControlSelection();
+    battle.getState().enemyGas = spec.enemyGas;
+
+    // Symmetric starters.
+    const starters = ["scout-ground", "tank-ground"].filter((id) => templates.some((t) => t.id === id));
+    for (const id of starters) {
+      battle.arenaDeploy("player", id, { chargeGas: false, deploymentGasCost: 0, y: 300 });
+      battle.arenaDeploy("enemy", id, { chargeGas: false, deploymentGasCost: 0, y: 300 });
+    }
+
+    setScreen("battle");
+    renderPanels();
+    addLog(`Arena replay started (seed=${spec.seed})`, "good");
+
+    // Replay macro loop state.
+    const rosterPreference = ["scout-ground", "tank-ground", "air-light"];
+    const availableTemplateIds = new Set<string>(templates.map((t) => t.id));
+    let roster = rosterPreference.filter((id) => availableTemplateIds.has(id));
+    if (roster.length === 0) {
+      roster = templates.slice(0, 6).map((t) => t.id);
+    }
+
+    const spawnRng = makeSeededRng((spec.seed ^ 0x2f7a1d) >>> 0);
+
+    let simT = 0;
+    let spawnTimer = 0;
+    let spawnIntervalS = 1.8;
+    const spawnBurst = Math.max(1, Math.floor(spec.spawnBurst ?? 1));
+    const spawnMaxActive = Math.max(1, Math.floor(spec.spawnMaxActive ?? 5));
+
+    gasStartPlayer = gas;
+    gasStartEnemy = battle.getState().enemyGas;
+    onFieldStartPlayer = computeOnFieldGasValue("player");
+    onFieldStartEnemy = computeOnFieldGasValue("enemy");
+
+    const pickMirrored = (): { templateId: string | null; y: number } => {
+      if (roster.length === 0) {
+        return { templateId: null, y: 0 };
+      }
+      const idx = Math.floor(spawnRng() * roster.length);
+      const templateId = roster[Math.max(0, Math.min(roster.length - 1, idx))] ?? null;
+      const y = 220 + spawnRng() * 260;
+      return { templateId, y };
+    };
+
+    const decide = (side: "player" | "enemy"): { templateId: string | null; intervalS: number; y?: number } => {
+      const s = battle.getState();
+      const alive = s.units.filter((u) => u.alive && u.side === side).length;
+      const capRemaining = side === "enemy"
+        ? Math.max(0, Math.min(s.enemyCap, spawnMaxActive) - alive)
+        : Math.max(0, spawnMaxActive - alive);
+      const ctx: ArenaReplayDeciderCtx = { side, gas: side === "enemy" ? s.enemyGas : gas, capRemaining, roster };
+      const fn = replay.deciders?.[side];
+      if (fn) {
+        const d = fn(ctx);
+        return { templateId: d.templateId, intervalS: d.intervalS };
+      }
+      return { templateId: null, intervalS: spawnIntervalS };
+    };
+
+    let previousUpdate: ((dt: number) => void) | null = null;
+    let restoredLoopUpdate = false;
+    const restoreLoopUpdate = (): void => {
+      if (restoredLoopUpdate) {
+        return;
+      }
+      restoredLoopUpdate = true;
+      if (previousUpdate) {
+        loopUpdate = previousUpdate;
+      }
+    };
+
+    const fixedDt = 1 / 60;
+    const noKeys: KeyState = { a: false, d: false, w: false, s: false, space: false };
+
+    const stepReplay = (): void => {
+      if (battle.getState().outcome) {
+        restoreMathRandom();
+        restoreLoopUpdate();
+        return;
+      }
+      if (!battle.getState().active) {
+        return;
+      }
+      simT += fixedDt;
+      spawnTimer += fixedDt;
+      if (spawnTimer >= spawnIntervalS) {
+        spawnTimer = 0;
+        if ((spec.spawnMode ?? "mirrored-random") === "mirrored-random") {
+          const s = battle.getState();
+          const alivePlayer = s.units.filter((u) => u.alive && u.side === "player").length;
+          const aliveEnemy = s.units.filter((u) => u.alive && u.side === "enemy").length;
+          let capRemainingPlayer = Math.max(0, spawnMaxActive - alivePlayer);
+          let capRemainingEnemy = Math.max(0, Math.min(s.enemyCap, spawnMaxActive) - aliveEnemy);
+          for (let i = 0; i < spawnBurst; i += 1) {
+            const { templateId, y } = pickMirrored();
+            if (templateId) {
+              const template = templates.find((t) => t.id === templateId);
+              const cost = template ? template.gasCost : 0;
+              if (capRemainingPlayer <= 0 || capRemainingEnemy <= 0) {
+                continue;
+              }
+              if (gas < cost || s.enemyGas < cost) {
+                continue;
+              }
+              const a = battle.arenaDeploy("player", templateId, { chargeGas: true, y, ignoreCap: true });
+              const b = battle.arenaDeploy("enemy", templateId, { chargeGas: true, y, ignoreCap: true, ignoreLowGasThreshold: true });
+              if (a && b) {
+                capRemainingPlayer -= 1;
+                capRemainingEnemy -= 1;
+              }
+            }
+          }
+        } else {
+          let minInterval = spawnIntervalS;
+          for (let i = 0; i < spawnBurst; i += 1) {
+            const p = decide("player");
+            const e = decide("enemy");
+            minInterval = Math.min(minInterval, p.intervalS, e.intervalS);
+            if (p.templateId) {
+              battle.arenaDeploy("player", p.templateId, { chargeGas: true, ignoreCap: true });
+            }
+            if (e.templateId) {
+              battle.arenaDeploy("enemy", e.templateId, { chargeGas: true, ignoreCap: true, ignoreLowGasThreshold: true });
+            }
+          }
+          spawnIntervalS = Math.max(0.5, Math.min(6.0, minInterval));
+        }
+      }
+
+      battle.update(fixedDt, noKeys);
+
+      if (simT >= spec.maxSimSeconds && battle.getState().active && !battle.getState().outcome) {
+        const state = battle.getState();
+        const victory = state.enemyBase.hp <= state.playerBase.hp;
+        battle.forceEnd(victory, "Arena deadline reached");
+      }
+
+      if (battle.getState().outcome) {
+        // Verify replay stats against expected.
+        const final = battle.getState();
+        const gasEndPlayer = gas;
+        const gasEndEnemy = final.enemyGas;
+        const onFieldEndPlayer = computeOnFieldGasValue("player");
+        const onFieldEndEnemy = computeOnFieldGasValue("enemy");
+        const worthDeltaPlayer = (gasEndPlayer + onFieldEndPlayer) - (gasStartPlayer + onFieldStartPlayer);
+        const worthDeltaEnemy = (gasEndEnemy + onFieldEndEnemy) - (gasStartEnemy + onFieldStartEnemy);
+        const tie = String(final.outcome?.reason ?? "").toLowerCase().includes("deadline");
+        const playerOutcome: "win" | "tie" | "loss" = tie ? "tie" : Boolean(final.outcome?.victory) ? "win" : "loss";
+        const enemyOutcome: "win" | "tie" | "loss" = tie ? "tie" : Boolean(final.outcome?.victory) ? "loss" : "win";
+        const playerScore = (playerOutcome === "win" ? 2 : playerOutcome === "tie" ? 1 : 0) * 1_000_000 + worthDeltaPlayer;
+        const enemyScore = (enemyOutcome === "win" ? 2 : enemyOutcome === "tie" ? 1 : 0) * 1_000_000 + worthDeltaEnemy;
+        const actual = {
+          simSecondsElapsed: simT,
+          outcome: { playerVictory: Boolean(final.outcome?.victory), reason: String(final.outcome?.reason ?? "") },
+          sides: {
+            player: {
+              gasStart: gasStartPlayer,
+              gasEnd: gasEndPlayer,
+              onFieldGasValueStart: onFieldStartPlayer,
+              onFieldGasValueEnd: onFieldEndPlayer,
+              gasWorthDelta: worthDeltaPlayer,
+              score: playerScore,
+            },
+            enemy: {
+              gasStart: gasStartEnemy,
+              gasEnd: gasEndEnemy,
+              onFieldGasValueStart: onFieldStartEnemy,
+              onFieldGasValueEnd: onFieldEndEnemy,
+              gasWorthDelta: worthDeltaEnemy,
+              score: enemyScore,
+            },
+          },
+        };
+
+        const expected = replayExpected as any;
+        if (expected && expected.outcome && expected.sides) {
+          const epsT = 1e-6;
+          const tOk = Math.abs((expected.simSecondsElapsed ?? 0) - actual.simSecondsElapsed) < epsT;
+          const outcomeOk = Boolean(expected.outcome.playerVictory) === actual.outcome.playerVictory && String(expected.outcome.reason ?? "") === actual.outcome.reason;
+          const sidesOk = (side: "player" | "enemy"): boolean => {
+            const e = expected.sides?.[side];
+            const a = (actual as any).sides?.[side];
+            if (!e || !a) return false;
+            return (
+              e.gasStart === a.gasStart &&
+              e.gasEnd === a.gasEnd &&
+              e.onFieldGasValueStart === a.onFieldGasValueStart &&
+              e.onFieldGasValueEnd === a.onFieldGasValueEnd &&
+              e.gasWorthDelta === a.gasWorthDelta &&
+              e.score === a.score
+            );
+          };
+          const ok = tOk && outcomeOk && sidesOk("player") && sidesOk("enemy");
+          addLog(`[replay-verify] ${ok ? "PASS" : "FAIL"} | outcome=${outcomeOk} time=${tOk} sides=${sidesOk("player") && sidesOk("enemy")}`, ok ? "good" : "bad");
+        } else {
+          addLog("[replay-verify] No expected stats in artifact", "warn");
+        }
+        restoreMathRandom();
+        restoreLoopUpdate();
+      }
+    };
+
+    // Hook into main loop by overriding keys and injecting macro decisions.
+    const originalRunning = running;
+    running = true;
+    previousUpdate = loopUpdate;
+    loopUpdate = (_dt: number) => {
+      // Deterministic: fixed ticks per rendered frame. Speed slider controls wall-clock speed only.
+      const speedValue = Number(timeScale.value);
+      const speed = Number.isFinite(speedValue) ? speedValue : 1;
+      const ticksPerFrame = Math.max(1, Math.round(speed * 2));
+      for (let i = 0; i < ticksPerFrame; i += 1) {
+        stepReplay();
+      }
+      void previousUpdate;
+    };
+    void originalRunning;
+  };
+
 
   const refreshTemplatesFromStore = async (): Promise<void> => {
     const defaultTemplates = await fetchDefaultTemplatesFromStore();
@@ -355,8 +1105,26 @@ export function bootstrap(): void {
     const gasLabel = isUnlimitedResources() ? "INF" : `${Math.floor(gas)}`;
     const capLabel = isUnlimitedResources() ? "INF" : `${armyCap(getCommanderSkillForCap())}`;
     const battleLabel = battle.getState().active && !battle.getState().outcome ? " | Battle: active" : "";
-    metaBar.innerHTML = `Round: ${round} | Gas: ${gasLabel} | Commander Skill: ${commanderSkill} | Army Cap: ${capLabel}${battleLabel} <button id="btnNextRound">Next Round</button>`;
-    getOptionalElement<HTMLButtonElement>("#btnNextRound")?.addEventListener("click", () => endRound());
+    if (!replayMode) {
+      metaBar.innerHTML = `Round: ${round} | Gas: ${gasLabel} | Commander Skill: ${commanderSkill} | Army Cap: ${capLabel}${battleLabel} <button id="btnNextRound">Next Round</button>`;
+      getOptionalElement<HTMLButtonElement>("#btnNextRound")?.addEventListener("click", () => endRound());
+    }
+
+    if (!replayMode) {
+      arenaReplayStats.textContent = "";
+      return;
+    }
+    const state = battle.getState();
+    const onFieldPlayer = computeOnFieldGasValue("player");
+    const onFieldEnemy = computeOnFieldGasValue("enemy");
+    const worthDeltaPlayer = (gas + onFieldPlayer) - (gasStartPlayer + onFieldStartPlayer);
+    const worthDeltaEnemy = (state.enemyGas + onFieldEnemy) - (gasStartEnemy + onFieldStartEnemy);
+    const tie = state.outcome?.reason?.toLowerCase().includes("deadline") ?? false;
+    const playerOutcome: "win" | "tie" | "loss" = !state.outcome ? "loss" : tie ? "tie" : state.outcome.victory ? "win" : "loss";
+    const enemyOutcome: "win" | "tie" | "loss" = !state.outcome ? "loss" : tie ? "tie" : state.outcome.victory ? "loss" : "win";
+    const playerScore = (playerOutcome === "win" ? 2 : playerOutcome === "tie" ? 1 : 0) * 1_000_000 + worthDeltaPlayer;
+    const enemyScore = (enemyOutcome === "win" ? 2 : enemyOutcome === "tie" ? 1 : 0) * 1_000_000 + worthDeltaEnemy;
+    arenaReplayStats.textContent = `Replay | P gas=${Math.floor(gas)} field=${Math.floor(onFieldPlayer)} dWorth=${Math.floor(worthDeltaPlayer)} score=${Math.floor(playerScore)} | E gas=${Math.floor(state.enemyGas)} field=${Math.floor(onFieldEnemy)} dWorth=${Math.floor(worthDeltaEnemy)} score=${Math.floor(enemyScore)}`;
   };
 
   const setScreen = (next: ScreenMode): void => {
@@ -1558,6 +2326,14 @@ export function bootstrap(): void {
   });
 
   const applyDebugFlags = (): void => {
+    if (replayMode) {
+      debugUnlimitedResources = false;
+      debugVisual = false;
+      debugTargetLines = false;
+      battle.setDebugDrawEnabled(false);
+      battle.setDebugTargetLineEnabled(false);
+      return;
+    }
     debugUnlimitedResources = debugResourcesChk.checked;
     debugVisual = debugVisualChk.checked;
     debugTargetLines = debugTargetLineChk.checked;
@@ -1571,9 +2347,9 @@ export function bootstrap(): void {
   debugResourcesChk.addEventListener("change", applyDebugFlags);
   debugVisualChk.addEventListener("change", applyDebugFlags);
   debugTargetLineChk.addEventListener("change", applyDebugFlags);
-  debugResourcesChk.checked = true;
-  debugVisualChk.checked = true;
-  debugTargetLineChk.checked = true;
+  debugResourcesChk.checked = replayMode ? false : true;
+  debugVisualChk.checked = replayMode ? false : true;
+  debugTargetLineChk.checked = replayMode ? false : true;
   applyDebugFlags();
 
   window.addEventListener("keydown", (event) => {
@@ -1728,14 +2504,18 @@ export function bootstrap(): void {
   });
   let panelBucket = -1;
 
-  const loop = new GameLoop(
-    (dt) => {
+  let loopUpdate = (dt: number): void => {
       if (!running) {
         return;
       }
       if (screen === "battle" && battle.getState().active) {
         battle.update(dt, keys);
       }
+    };
+
+  const loop = new GameLoop(
+    (dt) => {
+      loopUpdate(dt);
     },
     (_alpha, now) => {
       if (screen === "editor") {
@@ -1753,7 +2533,23 @@ export function bootstrap(): void {
       }
     },
   );
+  const applyTimeScale = (): void => {
+    const value = Number(timeScale.value);
+    const next = Number.isFinite(value) ? value : 1;
+    timeScaleLabel.textContent = `${next.toFixed(1)}x`;
+    loop.setTimeScale(next);
+  };
+  timeScale.addEventListener("input", () => applyTimeScale());
+  applyTimeScale();
   loop.start();
+
+  if (replayMode) {
+    blockUserInputForReplay();
+    // Ensure we use MVP templates from the server endpoints before starting replay.
+    void refreshTemplatesFromStore().then(() => {
+      startArenaReplay();
+    });
+  }
 }
 
 function getElement<T extends HTMLElement>(selector: string): T {
