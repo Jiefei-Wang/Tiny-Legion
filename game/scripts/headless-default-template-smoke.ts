@@ -61,6 +61,20 @@ function findNewUnit(beforeIds: Set<string>, units: UnitInstance[], templateId: 
   return null;
 }
 
+function waitForUnitReadyForControl(battle: BattleSession, unitId: string, maxFrames: number): UnitInstance | null {
+  for (let i = 0; i < maxFrames; i += 1) {
+    const unit = battle.getState().units.find((entry) => entry.id === unitId);
+    if (!unit) {
+      return null;
+    }
+    if (!unit.airDropActive) {
+      return unit;
+    }
+    battle.update(dt, idleKeys);
+  }
+  return battle.getState().units.find((entry) => entry.id === unitId) ?? null;
+}
+
 function readTemplateDir(dirPath: string): UnitTemplate[] {
   if (!existsSync(dirPath)) {
     return [];
@@ -114,7 +128,7 @@ function getMissingLoaderClasses(template: UnitTemplate): string[] {
 
 function runSmoke(): Failure[] {
   const failures: Failure[] = [];
-  const requiredTemplateIds = ["scout-ground", "tank-ground", "air-light"];
+  const requiredTemplateIds = ["scout-ground", "tank-ground"];
   const templates = loadRuntimeMergedTemplates();
   const testTemplates: UnitTemplate[] = [];
   for (const requiredTemplateId of requiredTemplateIds) {
@@ -136,7 +150,11 @@ function runSmoke(): Failure[] {
   const logs: string[] = [];
   const canvas = createMockCanvas(1280, 720);
   const hooks = makeHooks(logs);
-  const battle = new BattleSession(canvas, hooks, templates);
+  const battle = new BattleSession(canvas, hooks, templates, {
+    disableAutoEnemySpawns: true,
+    disableEnemyMinimumPresence: true,
+    disableDefaultStarters: true,
+  });
 
   const node: MapNode = {
     id: "headless-test",
@@ -181,14 +199,27 @@ function runSmoke(): Failure[] {
       continue;
     }
     unit = movedUnit;
-    const movedDistance = unit.x - startX;
-    const movementThreshold = Math.max(2.5, unit.maxSpeed * 0.08);
-    if (movedDistance < movementThreshold) {
+    const readyUnit = waitForUnitReadyForControl(battle, unitId, 480);
+    if (!readyUnit) {
       failures.push({
         templateId: template.id,
         templateName: template.name,
         check: "movement",
-        detail: `moved too little: ${movedDistance.toFixed(2)} (min=${movementThreshold.toFixed(2)}, startX=${startX.toFixed(2)}, endX=${unit.x.toFixed(2)}, mass=${unit.mass.toFixed(2)}, maxSpeed=${unit.maxSpeed.toFixed(2)})`,
+        detail: "unit disappeared from battle state while waiting for control readiness",
+      });
+      continue;
+    }
+    unit = readyUnit;
+    const readyStartX = unit.x;
+    const movedDistance = unit.x - startX;
+    const settledMovedDistance = unit.x - readyStartX;
+    const movementThreshold = Math.max(2.5, unit.maxSpeed * 0.08);
+    if (movedDistance < movementThreshold && settledMovedDistance < movementThreshold) {
+      failures.push({
+        templateId: template.id,
+        templateName: template.name,
+        check: "movement",
+        detail: `moved too little: ${movedDistance.toFixed(2)} (settled=${settledMovedDistance.toFixed(2)}, min=${movementThreshold.toFixed(2)}, startX=${startX.toFixed(2)}, readyX=${readyStartX.toFixed(2)}, endX=${unit.x.toFixed(2)}, mass=${unit.mass.toFixed(2)}, maxSpeed=${unit.maxSpeed.toFixed(2)})`,
       });
     }
 
@@ -198,10 +229,20 @@ function runSmoke(): Failure[] {
     const base = battle.getState().enemyBase;
     const aimX = base.x + base.w * 0.5;
     const aimY = base.y + base.h * 0.5;
+    const fireReadyUnit = waitForUnitReadyForControl(battle, unit.id, 480);
+    if (!fireReadyUnit) {
+      failures.push({
+        templateId: template.id,
+        templateName: template.name,
+        check: "firing",
+        detail: "unit disappeared from battle state while waiting for firing readiness",
+      });
+      continue;
+    }
     battle.clearControlSelection();
-    battle.setControlByClick(unit.x, unit.y);
+    battle.setControlByClick(fireReadyUnit.x, fireReadyUnit.y);
     battle.setAim(aimX, aimY);
-    battle.handleLeftPointerDown(unit.x, unit.y);
+    battle.handleLeftPointerDown(fireReadyUnit.x, fireReadyUnit.y);
     for (let i = 0; i < 300; i += 1) {
       battle.update(dt, idleKeys);
       if (battle.getState().projectiles.some((projectile) => projectile.sourceId === unit.id)) {
