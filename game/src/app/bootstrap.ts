@@ -73,13 +73,15 @@ export function bootstrap(options: BootstrapOptions = {}): void {
           <label><input id="debugVisualChk" type="checkbox" /> Draw Path + Hitbox</label>
           <label><input id="debugTargetLineChk" type="checkbox" /> Draw Target Lines</label>
         </details>
-        <div id="metaBar" class="meta"></div>
-        <div id="arenaReplayStats" class="meta small"></div>
-        <div class="meta" style="display:flex; align-items:center; gap:8px;">
-          <label class="small" style="display:flex; align-items:center; gap:6px;">Speed
-            <input id="timeScale" type="range" min="0.5" max="5" step="0.1" value="1" />
-          </label>
-          <span id="timeScaleLabel" class="small">1.0x</span>
+        <div class="topbar-status">
+          <div id="metaBar" class="meta"></div>
+          <div id="arenaReplayStats" class="meta small"></div>
+          <div class="meta" style="display:flex; align-items:center; gap:8px;">
+            <label class="small" style="display:flex; align-items:center; gap:6px;">Speed
+              <input id="timeScale" type="range" min="0.5" max="5" step="0.1" value="1" />
+            </label>
+            <span id="timeScaleLabel" class="small">1.0x</span>
+          </div>
         </div>
       </header>
 

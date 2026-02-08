@@ -42,6 +42,16 @@ body {
   border-bottom: 1px solid #2e4159;
 }
 
+.topbar-status {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+#metaBar {
+  text-align: right;
+}
+
 /* Arena replay spectator mode: hide campaign/debug UI. */
 .app-shell.arena-replay #debugMenu,
 .app-shell.arena-replay #metaBar {
