@@ -77,12 +77,13 @@ Current implementation includes an in-app `Editor` mode where the player can:
 - Editor canvas uses a resizable grid up to `10x10` with left-drag panning.
 - Battle rendering and hitboxes now honor stored structure/display/functional coordinates instead of compacting to a fixed index grid.
 - Part composition focuses on physical/functional stats; per-part gas contribution is not used in current editor stage.
-- Save custom objects to user storage and deploy them in battle.
+- Save templates from editor to user storage (`Save`) or to default storage (`Save to Default`) and deploy them in battle.
 - Save is allowed even with validation issues.
 - Validation is split into `Error` and `Warning` categories:
   - `Error`: severe issues (for example missing control module, air unit cannot hold altitude).
   - `Warning`: spawn-allowed but suboptimal setup (for example no engine for ground unit, no weapon).
 - Runtime deployment/spawn gate: templates with any `Error` are blocked from spawning in battle.
+- Enemy auto-spawn selection samples from the current loaded template set (default + user overrides), not a fixed hardcoded shortlist.
 
 ## 4.1 Structure Layer (Outer)
 

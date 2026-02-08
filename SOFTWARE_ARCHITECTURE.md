@@ -338,6 +338,7 @@ Frame budget target at 60 FPS:
 Template persistence middleware (dev server via `vite.config.ts`):
 
 - `GET /__templates/default` -> read default object templates from `game/templates/default`
+- `PUT /__templates/default/:id` -> save/overwrite one default object template JSON
 - `GET /__templates/user` -> read user object templates from `game/templates/user`
 - `PUT /__templates/user/:id` -> save/overwrite one user object template JSON
 - `DELETE /__templates/user/:id` -> remove one user object template JSON
@@ -351,6 +352,7 @@ Editor UX implementation details:
 - Active layer (`structure`, `functional`, `display`) is switched from right-panel controls above the part palette.
 - Per-part gas contribution is not used in current editor stage; part cards and placement logic focus on gameplay stats/constraints.
 - Editor `Open` window lists all templates; clicking a template row opens it directly, and one-click `Copy` creates an editable clone (`-copy` suffix).
+- Editor has `Save` (persist to user templates) and `Save to Default` (persist to default templates); both paths run the same template normalization before writing JSON.
 - Template ID is internal/auto-managed for new and copied templates (no manual ID field in editor UI).
 - Editor templates persist coordinates per placed part (`x`,`y`, origin `(0,0)`; negatives allowed).
 - Weapon functional entries may carry `rotateQuarter` metadata (0..3, each step = 90deg).

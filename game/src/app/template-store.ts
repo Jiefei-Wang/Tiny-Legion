@@ -49,3 +49,16 @@ export async function saveUserTemplateToStore(template: UnitTemplate): Promise<b
     return false;
   }
 }
+
+export async function saveDefaultTemplateToStore(template: UnitTemplate): Promise<boolean> {
+  try {
+    const response = await fetch(`/__templates/default/${template.id}`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(template),
+    });
+    return response.ok;
+  } catch {
+    return false;
+  }
+}

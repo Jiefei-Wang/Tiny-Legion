@@ -280,14 +280,48 @@ function templateStorePlugin() {
     name: "template-store",
     configureServer(server: import("vite").ViteDevServer) {
       server.middlewares.use("/__templates/default", (req, res) => {
-        if (req.method !== "GET") {
+        if (req.method === "GET") {
+          const templates = readTemplatesInDir(defaultDir);
+          res.setHeader("content-type", "application/json");
+          res.end(JSON.stringify({ templates }));
+          return;
+        }
+        if (req.method !== "PUT") {
           res.statusCode = 405;
           res.end("method not allowed");
           return;
         }
-        const templates = readTemplatesInDir(defaultDir);
-        res.setHeader("content-type", "application/json");
-        res.end(JSON.stringify({ templates }));
+        const rawUrl = req.url ?? "";
+        const idSegment = rawUrl.split("/").filter(Boolean).at(-1) ?? "";
+        const id = safeId(idSegment);
+        if (!id) {
+          res.statusCode = 400;
+          res.end("invalid template id");
+          return;
+        }
+        ensureDir(defaultDir);
+        let body = "";
+        req.on("data", (chunk) => {
+          body += chunk;
+        });
+        req.on("end", () => {
+          try {
+            const parsed = JSON.parse(body || "{}");
+            const normalized = parseTemplate(parsed, { injectLoaders: true, sanitizePlacement: true });
+            if (!normalized) {
+              res.statusCode = 400;
+              res.end("invalid template payload");
+              return;
+            }
+            const filePath = resolve(defaultDir, `${id}.json`);
+            writeFileSync(filePath, `${JSON.stringify(normalized, null, 2)}\n`, "utf8");
+            res.setHeader("content-type", "application/json");
+            res.end(JSON.stringify({ ok: true }));
+          } catch {
+            res.statusCode = 400;
+            res.end("bad request");
+          }
+        });
       });
 
       server.middlewares.use("/__templates/user", (req, res) => {

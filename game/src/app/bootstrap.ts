@@ -10,7 +10,7 @@ import { MATERIALS } from "../config/balance/materials.ts";
 import { BattleSession } from "../gameplay/battle/battle-session.ts";
 import type { BattleSessionOptions } from "../gameplay/battle/battle-session.ts";
 import { BATTLE_SALVAGE_REFUND_FACTOR } from "../gameplay/battle/battle-session.ts";
-import { cloneTemplate, fetchDefaultTemplatesFromStore, fetchUserTemplatesFromStore, mergeTemplates, saveUserTemplateToStore, validateTemplateDetailed } from "./template-store.ts";
+import { cloneTemplate, fetchDefaultTemplatesFromStore, fetchUserTemplatesFromStore, mergeTemplates, saveDefaultTemplateToStore, saveUserTemplateToStore, validateTemplateDetailed } from "./template-store.ts";
 import type { ComponentId, DisplayAttachmentTemplate, GameBase, KeyState, MapNode, MaterialId, ScreenMode, TechState, UnitTemplate } from "../types.ts";
 
 export type ArenaReplaySpec = {
@@ -1035,6 +1035,11 @@ export function bootstrap(options: BootstrapOptions = {}): void {
   const refreshTemplatesFromStore = async (): Promise<void> => {
     const defaultTemplates = await fetchDefaultTemplatesFromStore();
     const userTemplates = await fetchUserTemplatesFromStore();
+    const mergedStore = mergeTemplates(defaultTemplates, userTemplates);
+    if (mergedStore.length > 0) {
+      templates.splice(0, templates.length, ...mergedStore);
+      return;
+    }
     const merged = mergeTemplates(templates, mergeTemplates(defaultTemplates, userTemplates));
     templates.splice(0, templates.length, ...merged);
   };
@@ -2069,7 +2074,8 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         <button id="btnClearGrid">Clear Grid</button>
       </div>
       <div class="row">
-        <button id="btnSaveDraft">Save User Object</button>
+        <button id="btnSaveDraft">Save</button>
+        <button id="btnSaveDraftDefault">Save to Default</button>
       </div>
     `;
 
@@ -2320,7 +2326,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       ensureEditorSelectionForLayer();
       renderPanels();
     });
-    getOptionalElement<HTMLButtonElement>("#btnSaveDraft")?.addEventListener("click", async () => {
+    const saveEditorDraft = async (target: "user" | "default"): Promise<void> => {
       const snapshot = cloneTemplate(editorDraft);
       const validation = validateTemplateDetailed(snapshot);
       if (validation.errors.length > 0) {
@@ -2333,19 +2339,23 @@ export function bootstrap(options: BootstrapOptions = {}): void {
           addLog(`Warning: ${issue}`, "warn");
         }
       }
-      const saved = await saveUserTemplateToStore(snapshot);
+      const saved = target === "default"
+        ? await saveDefaultTemplateToStore(snapshot)
+        : await saveUserTemplateToStore(snapshot);
       if (!saved) {
-        addLog("Failed to save user object", "bad");
+        addLog(`Failed to save ${target} object`, "bad");
         return;
       }
-      const existingIndex = templates.findIndex((template) => template.id === snapshot.id);
-      if (existingIndex >= 0) {
-        templates[existingIndex] = snapshot;
-      } else {
-        templates.push(snapshot);
-      }
-      addLog(`Saved user object: ${snapshot.name}`, "good");
+      await refreshTemplatesFromStore();
+      addLog(`Saved ${target} object: ${snapshot.name}`, "good");
       renderPanels();
+    };
+
+    getOptionalElement<HTMLButtonElement>("#btnSaveDraft")?.addEventListener("click", async () => {
+      await saveEditorDraft("user");
+    });
+    getOptionalElement<HTMLButtonElement>("#btnSaveDraftDefault")?.addEventListener("click", async () => {
+      await saveEditorDraft("default");
     });
   };
 

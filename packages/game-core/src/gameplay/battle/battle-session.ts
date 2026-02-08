@@ -683,18 +683,24 @@ export class BattleSession {
     if (aliveEnemy >= this.state.enemyCap) {
       return false;
     }
-    const pickList = ["scout-ground", "tank-ground", "air-jet", "air-propeller"];
-    const pick = pickList[Math.floor(Math.random() * pickList.length)];
-    const template = this.templates.find((entry) => entry.id === pick);
+    const candidates = this.templates.filter((template) => {
+      const validation = validateTemplateDetailed(template);
+      if (validation.errors.length > 0) {
+        return false;
+      }
+      if (this.state.enemyInfiniteGas) {
+        return true;
+      }
+      if (this.state.enemyGas < 20) {
+        return false;
+      }
+      return this.state.enemyGas >= template.gasCost;
+    });
+    if (candidates.length <= 0) {
+      return false;
+    }
+    const template = candidates[Math.floor(Math.random() * candidates.length)] ?? null;
     if (!template) {
-      return false;
-    }
-    const validation = validateTemplateDetailed(template);
-    if (validation.errors.length > 0) {
-      return false;
-    }
-    const hasGas = this.state.enemyGas >= template.gasCost;
-    if (!this.state.enemyInfiniteGas && (!hasGas || this.state.enemyGas < 20)) {
       return false;
     }
 
