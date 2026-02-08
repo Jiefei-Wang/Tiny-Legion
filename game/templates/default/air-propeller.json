@@ -4,24 +4,91 @@
   "type": "air",
   "gasCost": 54,
   "structure": [
-    { "material": "basic", "x": -1, "y": 0 },
-    { "material": "basic", "x": 0, "y": 0 },
-    { "material": "basic", "x": 1, "y": 0 },
-    { "material": "basic", "x": -1, "y": 1 },
-    { "material": "basic", "x": 0, "y": 1 },
-    { "material": "basic", "x": 1, "y": 1 }
+    {
+      "material": "basic",
+      "x": -1,
+      "y": 0
+    },
+    {
+      "material": "basic",
+      "x": 0,
+      "y": 0
+    },
+    {
+      "material": "basic",
+      "x": 1,
+      "y": 0
+    },
+    {
+      "material": "basic",
+      "x": -1,
+      "y": 1
+    },
+    {
+      "material": "basic",
+      "x": 0,
+      "y": 1
+    },
+    {
+      "material": "basic",
+      "x": 1,
+      "y": 1
+    }
   ],
   "attachments": [
-    { "component": "control", "cell": 4, "x": 0, "y": 1 },
-    { "component": "propeller", "cell": 1, "x": 0, "y": 0, "rotateQuarter": 3 },
-    { "component": "trackingMissile", "cell": 2, "x": 1, "y": 0, "rotateQuarter": 0 },
-    { "component": "missileLoader", "cell": 4, "x": 0, "y": 1 },
-    { "component": "fuel", "cell": 3, "x": -1, "y": 1 }
+    {
+      "component": "control",
+      "cell": 4,
+      "x": 0,
+      "y": 1,
+      "rotateQuarter": 0
+    },
+    {
+      "component": "propeller",
+      "cell": 1,
+      "x": 0,
+      "y": 0,
+      "rotateQuarter": 3
+    },
+    {
+      "component": "trackingMissile",
+      "cell": 2,
+      "x": 1,
+      "y": 0,
+      "rotateQuarter": 0
+    },
+    {
+      "component": "fuel",
+      "cell": 3,
+      "x": -1,
+      "y": 1,
+      "rotateQuarter": 0
+    }
   ],
   "display": [
-    { "kind": "stripe", "cell": 0, "x": -1, "y": 0 },
-    { "kind": "panel", "cell": 1, "x": 0, "y": 0 },
-    { "kind": "stripe", "cell": 2, "x": 1, "y": 0 },
-    { "kind": "panel", "cell": 4, "x": 0, "y": 1 }
+    {
+      "kind": "stripe",
+      "cell": 0,
+      "x": -1,
+      "y": 0
+    },
+    {
+      "kind": "panel",
+      "cell": 1,
+      "x": 0,
+      "y": 0
+    },
+    {
+      "kind": "stripe",
+      "cell": 2,
+      "x": 1,
+      "y": 0
+    },
+    {
+      "kind": "panel",
+      "cell": 4,
+      "x": 0,
+      "y": 1
+    }
   ]
 }

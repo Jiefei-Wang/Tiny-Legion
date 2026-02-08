@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { BattleSession } from "../src/gameplay/battle/battle-session.ts";
 import { COMPONENTS } from "../src/config/balance/weapons.ts";
 import { createInitialTemplates } from "../src/simulation/units/unit-builder.ts";
@@ -69,11 +69,20 @@ function readTemplateDir(dirPath: string): UnitTemplate[] {
   const templates: UnitTemplate[] = [];
   for (const fileName of files) {
     try {
-      const raw = readFileSync(`${dirPath}/${fileName}`, "utf8");
+      const filePath = `${dirPath}/${fileName}`;
+      const raw = readFileSync(filePath, "utf8");
       const parsed = JSON.parse(raw) as unknown;
-      const template = parseTemplate(parsed);
-      if (template) {
-        templates.push(template);
+      const normalized = parseTemplate(parsed, { injectLoaders: false, sanitizePlacement: true });
+      if (!normalized) {
+        continue;
+      }
+      const normalizedRaw = `${JSON.stringify(normalized, null, 2)}\n`;
+      if (raw !== normalizedRaw) {
+        writeFileSync(filePath, normalizedRaw, "utf8");
+      }
+      const runtimeTemplate = parseTemplate(normalized, { injectLoaders: true, sanitizePlacement: true });
+      if (runtimeTemplate) {
+        templates.push(runtimeTemplate);
       }
     } catch {
       continue;

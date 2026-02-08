@@ -13,6 +13,11 @@ const LEGACY_COMPONENT_MAP: Partial<Record<string, ComponentId>> = {
   gunLoader: "cannonLoader",
 };
 
+type ParseTemplateOptions = {
+  injectLoaders?: boolean;
+  sanitizePlacement?: boolean;
+};
+
 function isUnitType(value: unknown): value is UnitType {
   return value === "ground" || value === "air";
 }
@@ -42,6 +47,110 @@ function readOptionalInt(value: unknown): number | undefined {
     return undefined;
   }
   return Math.floor(value);
+}
+
+function rotateOffsetByQuarter(offsetX: number, offsetY: number, rotateQuarter: 0 | 1 | 2 | 3): { x: number; y: number } {
+  if (rotateQuarter === 0) {
+    return { x: offsetX, y: offsetY };
+  }
+  if (rotateQuarter === 1) {
+    return { x: -offsetY, y: offsetX };
+  }
+  if (rotateQuarter === 2) {
+    return { x: -offsetX, y: -offsetY };
+  }
+  return { x: offsetY, y: -offsetX };
+}
+
+function getComponentFootprintOffsets(component: ComponentId, rotateQuarter: 0 | 1 | 2 | 3): Array<{ x: number; y: number }> {
+  const stats = COMPONENTS[component];
+  const placementOffsets = stats.placement?.footprintOffsets;
+  if (placementOffsets && placementOffsets.length > 0) {
+    return placementOffsets.map((offset) => rotateOffsetByQuarter(offset.x, offset.y, rotateQuarter));
+  }
+  if (stats.type === "weapon" && stats.weaponClass === "heavy-shot") {
+    return [{ x: 0, y: 0 }, { x: 1, y: 0 }].map((offset) => rotateOffsetByQuarter(offset.x, offset.y, rotateQuarter));
+  }
+  return [{ x: 0, y: 0 }];
+}
+
+export function sanitizeTemplatePlacement(template: UnitTemplate): UnitTemplate {
+  const next = cloneTemplate(template);
+  const structureCoords = new Set<string>();
+  const cellCoords = new Map<number, { x: number; y: number }>();
+  for (let i = 0; i < next.structure.length; i += 1) {
+    const cell = next.structure[i];
+    if (cell?.x === undefined || cell?.y === undefined) {
+      continue;
+    }
+    structureCoords.add(`${cell.x},${cell.y}`);
+    cellCoords.set(i, { x: cell.x, y: cell.y });
+  }
+
+  const occupiedSlots = new Set<number>();
+  const occupiedFootprint = new Set<string>();
+  const attachments: UnitTemplate["attachments"] = [];
+  for (const attachment of next.attachments) {
+    if (!Number.isInteger(attachment.cell) || attachment.cell < 0 || attachment.cell >= next.structure.length) {
+      continue;
+    }
+    const rotateQuarterRaw = attachment.rotateQuarter ?? (attachment.rotate90 ? 1 : 0);
+    const rotateQuarter = ((rotateQuarterRaw % 4 + 4) % 4) as 0 | 1 | 2 | 3;
+
+    const stats = COMPONENTS[attachment.component];
+    const normalizedRotate = stats.directional ? rotateQuarter : 0;
+    const anchor = attachment.x !== undefined && attachment.y !== undefined
+      ? { x: attachment.x, y: attachment.y }
+      : cellCoords.get(attachment.cell);
+
+    const footprintOffsets = getComponentFootprintOffsets(attachment.component, normalizedRotate);
+    const footprintKeys = anchor
+      ? footprintOffsets.map((offset) => `${anchor.x + offset.x},${anchor.y + offset.y}`)
+      : [];
+
+    const placement = stats.placement;
+    if (placement && anchor) {
+      if (placement.requireStructureBelowAnchor) {
+        const supportKey = `${anchor.x},${anchor.y + 1}`;
+        if (!structureCoords.has(supportKey)) {
+          continue;
+        }
+      }
+      const requireStructureOnFootprint = placement.requireStructureOnFootprint ?? true;
+      if (requireStructureOnFootprint && footprintKeys.some((key) => !structureCoords.has(key))) {
+        continue;
+      }
+      const requiredEmptyOffsets = placement.requireEmptyOffsets ?? [];
+      const blocked = requiredEmptyOffsets
+        .map((offset) => rotateOffsetByQuarter(offset.x, offset.y, normalizedRotate))
+        .map((offset) => `${anchor.x + offset.x},${anchor.y + offset.y}`)
+        .some((key) => structureCoords.has(key));
+      if (blocked) {
+        continue;
+      }
+    }
+
+    if (anchor) {
+      if (footprintKeys.some((key) => occupiedFootprint.has(key))) {
+        continue;
+      }
+    } else if (occupiedSlots.has(attachment.cell)) {
+      continue;
+    }
+
+    occupiedSlots.add(attachment.cell);
+    for (const key of footprintKeys) {
+      occupiedFootprint.add(key);
+    }
+    attachments.push({
+      ...attachment,
+      rotateQuarter: normalizedRotate,
+    });
+  }
+
+  next.attachments = attachments;
+  next.display = (next.display ?? []).filter((item) => Number.isInteger(item.cell) && item.cell >= 0 && item.cell < next.structure.length);
+  return next;
 }
 
 function ensureLoaderCoverage(attachments: UnitTemplate["attachments"]): UnitTemplate["attachments"] {
@@ -128,7 +237,7 @@ export function validateTemplate(template: UnitTemplate): { valid: boolean; reas
   return { valid: true, reason: null };
 }
 
-export function parseTemplate(input: unknown): UnitTemplate | null {
+export function parseTemplate(input: unknown, options: ParseTemplateOptions = {}): UnitTemplate | null {
   if (!input || typeof input !== "object") {
     return null;
   }
@@ -213,19 +322,27 @@ export function parseTemplate(input: unknown): UnitTemplate | null {
     }
   }
 
+  const injectLoaders = options.injectLoaders ?? true;
+  const sanitizePlacement = options.sanitizePlacement ?? true;
+
   const template: UnitTemplate = {
     id: data.id.trim(),
     name: data.name.trim(),
     type: data.type,
     gasCost: typeof data.gasCost === "number" ? Math.max(0, Math.floor(data.gasCost)) : 0,
     structure,
-    attachments: ensureLoaderCoverage(attachments),
+    attachments,
     display,
   };
   if (template.structure.length <= 0) {
     return null;
   }
-  return template;
+
+  const placementNormalized = sanitizePlacement ? sanitizeTemplatePlacement(template) : template;
+  const loaderNormalized = injectLoaders
+    ? { ...placementNormalized, attachments: ensureLoaderCoverage(placementNormalized.attachments) }
+    : placementNormalized;
+  return loaderNormalized;
 }
 
 export function mergeTemplates(baseTemplates: UnitTemplate[], incomingTemplates: UnitTemplate[]): UnitTemplate[] {

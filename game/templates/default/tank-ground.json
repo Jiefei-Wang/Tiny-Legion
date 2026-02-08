@@ -4,24 +4,59 @@
   "type": "ground",
   "gasCost": 38,
   "structure": [
-    { "material": "basic" },
-    { "material": "basic" },
-    { "material": "basic" },
-    { "material": "basic" },
-    { "material": "basic" }
+    {
+      "material": "basic"
+    },
+    {
+      "material": "basic"
+    },
+    {
+      "material": "basic"
+    },
+    {
+      "material": "basic"
+    },
+    {
+      "material": "basic"
+    }
   ],
   "attachments": [
-    { "component": "control", "cell": 2 },
-    { "component": "engineM", "cell": 1 },
-    { "component": "heavyCannon", "cell": 3 },
-    { "component": "cannonLoader", "cell": 2 },
-    { "component": "ammo", "cell": 2 }
+    {
+      "component": "control",
+      "cell": 2,
+      "rotateQuarter": 0
+    },
+    {
+      "component": "engineM",
+      "cell": 1,
+      "rotateQuarter": 0
+    },
+    {
+      "component": "heavyCannon",
+      "cell": 3,
+      "rotateQuarter": 0
+    }
   ],
   "display": [
-    { "kind": "panel", "cell": 0 },
-    { "kind": "panel", "cell": 1 },
-    { "kind": "glass", "cell": 2 },
-    { "kind": "panel", "cell": 3 },
-    { "kind": "stripe", "cell": 4 }
+    {
+      "kind": "panel",
+      "cell": 0
+    },
+    {
+      "kind": "panel",
+      "cell": 1
+    },
+    {
+      "kind": "glass",
+      "cell": 2
+    },
+    {
+      "kind": "panel",
+      "cell": 3
+    },
+    {
+      "kind": "stripe",
+      "cell": 4
+    }
   ]
 }
