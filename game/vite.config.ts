@@ -1,6 +1,7 @@
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { defineConfig } from "vite";
+import { parseTemplate } from "../packages/game-core/src/templates/template-schema.ts";
 
 function debugLogPlugin() {
   const logDir = resolve(process.cwd(), ".debug");
@@ -255,10 +256,19 @@ function templateStorePlugin() {
     const files = readdirSync(dirPath).filter((name) => name.endsWith(".json"));
     const results: unknown[] = [];
     for (const fileName of files) {
+      const filePath = resolve(dirPath, fileName);
       try {
-        const raw = readFileSync(resolve(dirPath, fileName), "utf8");
+        const raw = readFileSync(filePath, "utf8");
         const parsed = JSON.parse(raw);
-        results.push(parsed);
+        const normalized = parseTemplate(parsed, { injectLoaders: false, sanitizePlacement: true });
+        if (!normalized) {
+          continue;
+        }
+        const normalizedRaw = `${JSON.stringify(normalized, null, 2)}\n`;
+        if (raw !== normalizedRaw) {
+          writeFileSync(filePath, normalizedRaw, "utf8");
+        }
+        results.push(normalized);
       } catch {
         continue;
       }
@@ -319,8 +329,14 @@ function templateStorePlugin() {
         req.on("end", () => {
           try {
             const parsed = JSON.parse(body || "{}");
+            const normalized = parseTemplate(parsed, { injectLoaders: false, sanitizePlacement: true });
+            if (!normalized) {
+              res.statusCode = 400;
+              res.end("invalid template payload");
+              return;
+            }
             const filePath = resolve(userDir, `${id}.json`);
-            writeFileSync(filePath, JSON.stringify(parsed, null, 2), "utf8");
+            writeFileSync(filePath, `${JSON.stringify(normalized, null, 2)}\n`, "utf8");
             res.setHeader("content-type", "application/json");
             res.end(JSON.stringify({ ok: true }));
           } catch {

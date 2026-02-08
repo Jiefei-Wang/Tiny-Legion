@@ -182,6 +182,8 @@ Display layer provides optional visual mesh/sprite styling and silhouette polish
 - Player-created object designs are stored separately under `game/templates/user/`.
 - On startup, game loads templates from both folders (user templates override same-id defaults).
 - Template parse/validation/merge rules are shared in `packages/game-core/src/templates/template-schema.ts` so game UI and arena tooling use identical template behavior.
+- File-backed template load normalizes placement first (invalid/overlapping functional placements are skipped), and normalized JSON is written back to disk so editor and headless checks read the same corrected shape.
+- Loader auto-injection is runtime parse behavior only and is intentionally independent from validation warning/error semantics.
 - Detailed template validation severity logic is isolated in `packages/game-core/src/templates/template-validation.ts`.
 - Headless smoke includes default-template validation to ensure all system default templates are warning/error free.
 
