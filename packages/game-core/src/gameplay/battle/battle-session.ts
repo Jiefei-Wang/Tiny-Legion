@@ -31,8 +31,10 @@ const AIR_MAX_Z = 220;
 const AIR_TARGET_Z_TOLERANCE = 22;
 
 export const BATTLE_SALVAGE_REFUND_FACTOR = 0.6;
+const AIR_MIN_LIFT_SPEED = 100;
 const AIR_HOLD_GRAVITY = 110;
 const AIR_DROP_GRAVITY = 210;
+const AIR_DROP_SPEED_CAP = 260;
 const AIR_THRUST_ACCEL_SCALE = 70;
 
 export interface BattleHooks {
@@ -456,6 +458,11 @@ export class BattleSession {
         continue;
       }
       this.refreshUnitMobility(unit);
+      if (unit.type === "air" && !unit.airDropActive && unit.maxSpeed < AIR_MIN_LIFT_SPEED) {
+        unit.airDropActive = true;
+        unit.airDropTargetY = GROUND_MIN_Y + Math.random() * (GROUND_MAX_Y - GROUND_MIN_Y);
+        unit.aiDebugDecisionPath = "air-no-lift-drop";
+      }
       this.updateAirDropState(unit, dt);
       if (unit.controlImpairTimer > 0) {
         unit.controlImpairTimer = Math.max(0, unit.controlImpairTimer - dt);
@@ -477,8 +484,9 @@ export class BattleSession {
         unit.vy *= unit.controlImpairFactor;
       }
 
-      unit.vx = clamp(unit.vx, -unit.maxSpeed, unit.maxSpeed);
-      unit.vy = clamp(unit.vy, -unit.maxSpeed * 0.75, unit.maxSpeed * 0.75);
+      const speedCap = unit.airDropActive ? Math.max(unit.maxSpeed, AIR_DROP_SPEED_CAP) : unit.maxSpeed;
+      unit.vx = clamp(unit.vx, -speedCap, speedCap);
+      unit.vy = clamp(unit.vy, -speedCap * 0.75, speedCap * 0.75);
       unit.x += unit.vx * dt;
       unit.y += unit.vy * dt;
 
@@ -1146,13 +1154,13 @@ export class BattleSession {
       : null;
     const weaponCellSize = Math.max(8, Math.min(14, unit.radius * 1.7 * 0.24));
     const weaponOffset = attachment.shootingOffset
-      ? this.getCoordOffset(
+      ? this.getCoordOffsetWorld(
           unit,
           attachment.x + attachment.shootingOffset.x,
           attachment.y + attachment.shootingOffset.y,
           weaponCellSize,
         )
-      : this.getCellOffset(unit, attachment.cell, weaponCellSize);
+      : this.getCellOffsetWorld(unit, attachment.cell, weaponCellSize);
     const weaponOriginX = unit.x + weaponOffset.x;
     const weaponOriginY = unit.y + weaponOffset.y;
     const dx = targetX - weaponOriginX;
@@ -1525,6 +1533,19 @@ export class BattleSession {
     return accel;
   }
 
+  private hasPropellerEngine(unit: UnitInstance): boolean {
+    for (const attachment of unit.attachments) {
+      if (!attachment.alive) {
+        continue;
+      }
+      if (attachment.component !== "propeller") {
+        continue;
+      }
+      return true;
+    }
+    return false;
+  }
+
   private applyAirThrustMovement(unit: UnitInstance, dt: number, inputX: number, inputY: number, allowDescend: boolean): void {
     const clampedX = clamp(inputX, -1.4, 1.4);
     const clampedY = clamp(inputY, -1.4, 1.4);
@@ -1569,7 +1590,6 @@ export class BattleSession {
         unit.airDropTargetY = GROUND_MIN_Y + Math.random() * (GROUND_MAX_Y - GROUND_MIN_Y);
         unit.aiDebugDecisionPath = "air-no-lift-drop";
       }
-      unit.vy += AIR_DROP_GRAVITY * dt;
     }
   }
 
@@ -1577,7 +1597,31 @@ export class BattleSession {
     if (!unit.airDropActive) {
       return;
     }
-    unit.vy += AIR_DROP_GRAVITY * dt;
+    const base = unit.side === "player" ? this.state.playerBase : this.state.enemyBase;
+    const baseCenterX = base.x + base.w / 2;
+    const dx = baseCenterX - unit.x;
+    const dirX = Math.abs(dx) < 1 ? 0 : Math.sign(dx);
+    if (dirX !== 0) {
+      unit.facing = dirX < 0 ? -1 : 1;
+    }
+
+    const horizontalAccel = dirX !== 0 ? this.computeDirectedAirAccel(unit, dirX, 0) : 0;
+    const horizontalSpeedRatio = clamp(horizontalAccel / Math.max(1, AIR_HOLD_GRAVITY), 0, 1);
+    unit.vx = dirX * unit.maxSpeed * horizontalSpeedRatio;
+
+    unit.vy = Math.max(0, unit.vy);
+    let fallAccel = AIR_DROP_GRAVITY;
+    if (this.hasPropellerEngine(unit)) {
+      const liftAccel = this.computeDirectedAirAccel(unit, 0, -1);
+      const spareLift = Math.max(0, liftAccel - horizontalAccel);
+      fallAccel = Math.max(0, AIR_DROP_GRAVITY - spareLift);
+    }
+    unit.vy += fallAccel * dt;
+
+    if (this.isUnitInsideBase(unit, base)) {
+      this.onUnitReturnedToBase(unit);
+      return;
+    }
     if (unit.y >= unit.airDropTargetY - 2) {
       this.onAirDropImpact(unit);
     }
@@ -2138,7 +2182,7 @@ export class BattleSession {
     this.ctx.beginPath();
 
     for (const cell of aliveCells) {
-      const offset = this.getCellOffset(unit, cell.id, cellSize);
+      const offset = this.getCellOffsetLocal(unit, cell.id, cellSize);
       const left = offset.x - cellSize / 2 - pad;
       const right = offset.x + cellSize / 2 + pad;
       const top = offset.y - cellSize / 2 - pad;
@@ -2202,7 +2246,7 @@ export class BattleSession {
       if (!cell || cell.destroyed) {
         continue;
       }
-      const offset = this.getCellOffset(unit, item.cell, cellSize);
+      const offset = this.getCellOffsetLocal(unit, item.cell, cellSize);
       if (item.kind === "panel") {
         this.ctx.fillStyle = "rgba(134, 158, 183, 0.72)";
         this.ctx.fillRect(offset.x - cellSize * 0.4, offset.y - cellSize * 0.4, cellSize * 0.8, cellSize * 0.8);
@@ -2227,7 +2271,7 @@ export class BattleSession {
     }
 
     for (const cell of unit.structure) {
-      const offset = this.getCellOffset(unit, cell.id, cellSize);
+      const offset = this.getCellOffsetLocal(unit, cell.id, cellSize);
       this.ctx.strokeStyle = cell.destroyed ? "rgba(160, 94, 94, 0.55)" : "rgba(184, 202, 224, 0.9)";
       this.ctx.lineWidth = 1;
       this.ctx.strokeRect(offset.x - cellSize / 2, offset.y - cellSize / 2, cellSize, cellSize);
@@ -2252,7 +2296,7 @@ export class BattleSession {
       if (!attachment.alive) {
         continue;
       }
-      const offset = this.getCellOffset(unit, attachment.cell, cellSize);
+      const offset = this.getCellOffsetLocal(unit, attachment.cell, cellSize);
       const component = COMPONENTS[attachment.component];
       this.ctx.fillStyle = component.type === "weapon" ? "#f0b39f" : component.type === "control" ? "#9dd7ff" : "#a7c9a3";
       this.ctx.fillRect(offset.x - 2, offset.y - 2, 4, 4);
@@ -2283,21 +2327,38 @@ export class BattleSession {
     return { minX, maxX, minY, maxY };
   }
 
-  private getCellOffset(unit: UnitInstance, cellId: number, cellSize: number): { x: number; y: number } {
+  private getCellOffsetLocal(unit: UnitInstance, cellId: number, cellSize: number): { x: number; y: number } {
     const cell = unit.structure.find((entry) => entry.id === cellId);
     if (!cell) {
       return { x: 0, y: 0 };
     }
-    return this.getCoordOffset(unit, cell.x, cell.y, cellSize);
+    return this.getCoordOffsetLocal(unit, cell.x, cell.y, cellSize);
   }
 
-  private getCoordOffset(unit: UnitInstance, coordX: number, coordY: number, cellSize: number): { x: number; y: number } {
+  private getCoordOffsetLocal(unit: UnitInstance, coordX: number, coordY: number, cellSize: number): { x: number; y: number } {
     const bounds = this.getUnitLayoutBounds(unit);
     const width = (bounds.maxX - bounds.minX + 1) * cellSize;
     const height = (bounds.maxY - bounds.minY + 1) * cellSize;
     return {
       x: (coordX - bounds.minX) * cellSize - width / 2 + cellSize / 2,
       y: (coordY - bounds.minY) * cellSize - height / 2 + cellSize / 2,
+    };
+  }
+
+  private getCellOffsetWorld(unit: UnitInstance, cellId: number, cellSize: number): { x: number; y: number } {
+    const cell = unit.structure.find((entry) => entry.id === cellId);
+    if (!cell) {
+      return { x: 0, y: 0 };
+    }
+    return this.getCoordOffsetWorld(unit, cell.x, cell.y, cellSize);
+  }
+
+  private getCoordOffsetWorld(unit: UnitInstance, coordX: number, coordY: number, cellSize: number): { x: number; y: number } {
+    const local = this.getCoordOffsetLocal(unit, coordX, coordY, cellSize);
+    const facing = unit.facing === -1 ? -1 : 1;
+    return {
+      x: local.x * facing,
+      y: local.y,
     };
   }
 
@@ -2308,7 +2369,7 @@ export class BattleSession {
       if (cell.destroyed) {
         continue;
       }
-      const offset = this.getCellOffset(unit, cell.id, cellSize);
+      const offset = this.getCellOffsetWorld(unit, cell.id, cellSize);
       rects.push({
         id: cell.id,
         x: unit.x + offset.x - cellSize / 2,
@@ -2426,7 +2487,7 @@ export class BattleSession {
       if (!cell.destroyed || beforeDestroyed.has(cell.id)) {
         continue;
       }
-      const offset = this.getCellOffset(unit, cell.id, cellSize);
+      const offset = this.getCellOffsetWorld(unit, cell.id, cellSize);
       const materialColor = MATERIALS[cell.material].color;
       this.state.debris.push({
         x: unit.x + offset.x,
@@ -2445,7 +2506,7 @@ export class BattleSession {
       if (attachment.alive || !beforeAliveAttachments.has(attachment.id)) {
         continue;
       }
-      const offset = this.getCellOffset(unit, attachment.cell, cellSize);
+      const offset = this.getCellOffsetWorld(unit, attachment.cell, cellSize);
       const component = COMPONENTS[attachment.component];
       const color = component.type === "weapon"
         ? "#f0b39f"

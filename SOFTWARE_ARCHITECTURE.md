@@ -397,7 +397,7 @@ Editor UX implementation details:
 - Runtime mobility also applies per-engine max-speed caps; multiple-engine cap is computed as a power-weighted average, then used as a hard upper bound on computed speed.
 - Air units compute lift from air propulsion thrust (`jetEngine` omni, `propeller` directional cone) and compare against gravity hold.
 - Air movement reserves thrust for vertical hold first, then spends remaining thrust for horizontal/intentional altitude movement.
-- If lift becomes critically low, units transition into an air-drop crash path.
+- If lift becomes critically low, units transition into an air-drop crash path, pushing horizontally toward base; propeller aircraft can use remaining lift to slow descent during the crash, otherwise they fall at full crash gravity.
 - Loader subsystem added for selected weapon classes (heavy-shot/explosive/tracking):
 - Loader components (`cannonLoader`, `missileLoader`) are functional modules with per-loader capabilities.
   - Each loader services one weapon at a time via per-unit loader state.

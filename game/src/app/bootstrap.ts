@@ -4036,7 +4036,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
   debugVisualChk.checked = replayMode ? false : true;
   debugTargetLineChk.checked = replayMode ? false : true;
   debugDisplayLayerChk.checked = false;
-  debugPartHpChk.checked = false;
+  debugPartHpChk.checked = true;
   applyDebugFlags();
 
   window.addEventListener("keydown", (event) => {

@@ -11,6 +11,9 @@ Original prompt: for user controlled unit, default to control all weapons togeth
 - Run verification (`test:headless`, plus web-game skill checks if available).
 
 ## Progress
+- Updated air-drop crash behavior: aircraft now push horizontally toward base during lift failure, use any remaining propeller lift to slow descent, and can recover gas if they reach base before crashing.
+- Ran `npm --prefix game run test:headless` (PASS).
+- Tried Playwright loop via `web_game_playwright_client.js` against `http://localhost:5174`, but `playwright` package is missing (`ERR_MODULE_NOT_FOUND`).
 - Added `weaponManualControl: boolean[]` to `UnitInstance` and defaulted all weapon slots to `true` in unit construction.
 - Added `toggleControlledWeaponManualControl()` in battle session and switched number-key semantics to per-slot manual-control toggling.
 - Updated manual fire to fire all slots with manual control enabled.

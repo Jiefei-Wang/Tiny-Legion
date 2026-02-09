@@ -288,6 +288,7 @@ Recommended starter values:
   - If upward thrust is below gravity, aircraft lose altitude with fall acceleration based on thrust deficit.
   - Unless the player requests descent, flight control prioritizes maintaining altitude and uses spare thrust for horizontal movement.
   - Air movement is thrust-speed driven (direct speed from thrust), not acceleration-ramp driven.
+  - When lift becomes critically low, aircraft enter a crash state: they push horizontally toward their base, then use any remaining lift (propellers only) to slow descent; otherwise they fall at full crash gravity and are destroyed on ground impact unless they reach base in time.
 - Altitude affects:
   - weapon effectiveness
   - bomb accuracy
