@@ -1,4 +1,5 @@
 import { armyCap } from "../config/balance/commander.ts";
+import { BATTLEFIELD_HEIGHT, BATTLEFIELD_WIDTH } from "../config/balance/battlefield.ts";
 import { applyStrategicEconomyTick } from "../gameplay/map/garrison-upkeep.ts";
 import { createMapNodes } from "../gameplay/map/node-graph.ts";
 import { settleGarrison as settleNodeGarrison, setNodeOwner } from "../gameplay/map/occupation.ts";
@@ -75,6 +76,19 @@ export function bootstrap(options: BootstrapOptions = {}): void {
   const replayMode = Boolean(replay);
   const replayExpected = replay?.expected ?? null;
 
+  // Suppress browser-native mouse gestures within the app shell.
+  // This keeps right-click and double-click available for game interactions.
+  const suppressBrowserMouseDefaults = (event: MouseEvent): void => {
+    if (!(event.target instanceof Node) || !root.contains(event.target)) {
+      return;
+    }
+    if (event.type === "contextmenu" || event.type === "dblclick") {
+      event.preventDefault();
+    }
+  };
+  root.addEventListener("contextmenu", suppressBrowserMouseDefaults, { capture: true });
+  root.addEventListener("dblclick", suppressBrowserMouseDefaults, { capture: true });
+
   const battleSessionOptions: BattleSessionOptions | undefined = replayMode
     ? {
       ...(options.battleSessionOptions ?? {}),
@@ -131,7 +145,9 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         </section>
 
         <section class="center-panel card">
-          <canvas id="battleCanvas" width="980" height="520"></canvas>
+          <div id="battleCanvasViewport" class="battle-canvas-viewport">
+            <canvas id="battleCanvas" width="${BATTLEFIELD_WIDTH}" height="${BATTLEFIELD_HEIGHT}"></canvas>
+          </div>
           <div id="weaponHud" class="weapon-hud small"></div>
         </section>
 
@@ -150,6 +166,9 @@ export function bootstrap(options: BootstrapOptions = {}): void {
               - Click a friendly unit to control it<br />
               - Move mouse to aim selected unit<br />
               - Hold left click: fire all manually controlled weapons<br />
+              - Arrow keys: pan battlefield viewport<br />
+              - Right-click drag: pan battlefield viewport<br />
+              - Mouse wheel: zoom battlefield viewport (wheel up=in, down=out)<br />
               - WASD: move selected unit<br />
               - Space: flip selected unit direction<br />
               - 1..9: toggle manual control for that weapon slot<br />
@@ -185,12 +204,16 @@ export function bootstrap(options: BootstrapOptions = {}): void {
   const arenaReplayStats = getElement<HTMLDivElement>("#arenaReplayStats");
   const timeScale = getElement<HTMLInputElement>("#timeScale");
   const timeScaleLabel = getElement<HTMLSpanElement>("#timeScaleLabel");
+  const canvasViewport = getElement<HTMLDivElement>("#battleCanvasViewport");
   const canvas = getElement<HTMLCanvasElement>("#battleCanvas");
 
+  // Keep battle simulation dimensions deterministic in all runtime modes.
+  canvas.width = BATTLEFIELD_WIDTH;
+  canvas.height = BATTLEFIELD_HEIGHT;
+  canvas.style.width = `${canvas.width}px`;
+  canvas.style.height = `${canvas.height}px`;
+
   if (replayMode) {
-    // Match arena headless runner simulation dimensions for deterministic parity.
-    canvas.width = 1280;
-    canvas.height = 720;
     debugMenu.style.display = "none";
     metaBar.style.display = "none";
   }
@@ -294,6 +317,15 @@ export function bootstrap(options: BootstrapOptions = {}): void {
   let editorDragLastClientY = 0;
   let editorPendingClickX = 0;
   let editorPendingClickY = 0;
+  let battleViewOffsetX = 0;
+  let battleViewOffsetY = 0;
+  let battleViewScale = 1;
+  let battleViewDragActive = false;
+  let battleViewDragMoved = false;
+  let battleViewDragStartClientX = 0;
+  let battleViewDragStartClientY = 0;
+  let battleViewDragLastClientX = 0;
+  let battleViewDragLastClientY = 0;
   let editorStructureSlots: Array<MaterialId | null> = new Array<MaterialId | null>(EDITOR_GRID_MAX_SIZE).fill(null);
   let editorFunctionalSlots: EditorFunctionalSlot[] = new Array<EditorFunctionalSlot>(EDITOR_GRID_MAX_SIZE).fill(null);
   let editorDisplaySlots: Array<DisplayAttachmentTemplate["kind"] | null> = new Array<DisplayAttachmentTemplate["kind"] | null>(EDITOR_GRID_MAX_SIZE).fill(null);
@@ -334,6 +366,76 @@ export function bootstrap(options: BootstrapOptions = {}): void {
   const isUnlimitedResources = (): boolean => debugUnlimitedResources;
   const isDebugVisual = (): boolean => debugVisual;
   const isDebugTargetLines = (): boolean => debugTargetLines;
+
+  const clampBattleViewOffsets = (): void => {
+    const viewportWidth = Math.max(0, canvasViewport.clientWidth);
+    const viewportHeight = Math.max(0, canvasViewport.clientHeight);
+    const scaledCanvasWidth = canvas.width * battleViewScale;
+    const scaledCanvasHeight = canvas.height * battleViewScale;
+    const VIEW_MARGIN = 80;
+
+    let minOffsetX = 0;
+    let maxOffsetX = 0;
+    if (scaledCanvasWidth > viewportWidth) {
+      minOffsetX = viewportWidth - scaledCanvasWidth - VIEW_MARGIN;
+      maxOffsetX = VIEW_MARGIN;
+    } else {
+      const centered = (viewportWidth - scaledCanvasWidth) * 0.5;
+      minOffsetX = centered - VIEW_MARGIN;
+      maxOffsetX = centered + VIEW_MARGIN;
+    }
+
+    let minOffsetY = 0;
+    let maxOffsetY = 0;
+    if (scaledCanvasHeight > viewportHeight) {
+      minOffsetY = viewportHeight - scaledCanvasHeight - VIEW_MARGIN;
+      maxOffsetY = VIEW_MARGIN;
+    } else {
+      const centered = (viewportHeight - scaledCanvasHeight) * 0.5;
+      minOffsetY = centered - VIEW_MARGIN;
+      maxOffsetY = centered + VIEW_MARGIN;
+    }
+
+    battleViewOffsetX = Math.max(minOffsetX, Math.min(maxOffsetX, battleViewOffsetX));
+    battleViewOffsetY = Math.max(minOffsetY, Math.min(maxOffsetY, battleViewOffsetY));
+  };
+
+  const applyBattleViewTransform = (): void => {
+    if (!isBattleScreen()) {
+      canvas.style.transform = "translate(0px, 0px) scale(1)";
+      return;
+    }
+    clampBattleViewOffsets();
+    canvas.style.transform = `translate(${battleViewOffsetX}px, ${battleViewOffsetY}px) scale(${battleViewScale})`;
+  };
+
+  const panBattleViewBy = (dx: number, dy: number): void => {
+    if (!isBattleScreen()) {
+      return;
+    }
+    battleViewOffsetX += dx;
+    battleViewOffsetY += dy;
+    applyBattleViewTransform();
+  };
+
+  const adjustBattleViewScaleAtClientPoint = (nextScale: number, clientX: number, clientY: number): void => {
+    if (!isBattleScreen()) {
+      return;
+    }
+    const clampedScale = Math.max(0.45, Math.min(2.4, nextScale));
+    if (Math.abs(clampedScale - battleViewScale) < 0.0001) {
+      return;
+    }
+    const rect = canvasViewport.getBoundingClientRect();
+    const localX = clientX - rect.left;
+    const localY = clientY - rect.top;
+    const worldX = (localX - battleViewOffsetX) / battleViewScale;
+    const worldY = (localY - battleViewOffsetY) / battleViewScale;
+    battleViewScale = clampedScale;
+    battleViewOffsetX = localX - worldX * battleViewScale;
+    battleViewOffsetY = localY - worldY * battleViewScale;
+    applyBattleViewTransform();
+  };
   const getCommanderSkillForCap = (): number => (isUnlimitedResources() ? 999 : commanderSkill);
   const editorTooltip = document.createElement("div");
   editorTooltip.className = "editor-tooltip hidden";
@@ -1288,6 +1390,60 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     tabs.partEditor.classList.toggle("active", next === "partEditor");
     if (!isEditorScreen()) {
       hideEditorTooltip();
+    }
+    if (!battleViewDragActive) {
+      canvas.style.cursor = isBattleScreen() ? "grab" : "default";
+    }
+    applyBattleViewTransform();
+  };
+
+  const followSelectedUnitWithCamera = (): void => {
+    if (!isBattleScreen() || battleViewDragActive) {
+      return;
+    }
+    const selection = battle.getSelection();
+    const trackedId = selection.playerControlledId ?? selection.selectedUnitId;
+    if (!trackedId) {
+      return;
+    }
+    const tracked = battle.getState().units.find((unit) => unit.id === trackedId && unit.alive);
+    if (!tracked) {
+      return;
+    }
+    const viewportWidth = canvasViewport.clientWidth;
+    if (viewportWidth <= 0) {
+      return;
+    }
+    const viewportHeight = canvasViewport.clientHeight;
+    const BORDER_MARGIN = 72;
+    const screenX = battleViewOffsetX + tracked.x * battleViewScale;
+    const screenY = battleViewOffsetY + tracked.y * battleViewScale;
+
+    let dx = 0;
+    let dy = 0;
+    if (tracked.facing === 1) {
+      const rightFacingThreshold = viewportWidth * 0.5;
+      if (screenX > rightFacingThreshold) {
+        dx = rightFacingThreshold - screenX;
+      }
+    } else {
+      const leftFacingThreshold = viewportWidth * 0.5;
+      if (screenX < leftFacingThreshold) {
+        dx = leftFacingThreshold - screenX;
+      }
+    }
+    if (screenX < BORDER_MARGIN) {
+      dx = Math.max(dx, BORDER_MARGIN - screenX);
+    } else if (screenX > viewportWidth - BORDER_MARGIN) {
+      dx = Math.min(dx, (viewportWidth - BORDER_MARGIN) - screenX);
+    }
+    if (screenY < BORDER_MARGIN) {
+      dy = BORDER_MARGIN - screenY;
+    } else if (screenY > viewportHeight - BORDER_MARGIN) {
+      dy = (viewportHeight - BORDER_MARGIN) - screenY;
+    }
+    if (Math.abs(dx) > 0.01 || Math.abs(dy) > 0.01) {
+      panBattleViewBy(dx, dy);
     }
   };
 
@@ -4066,6 +4222,27 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       return;
     }
 
+    if (event.key === "ArrowLeft") {
+      event.preventDefault();
+      panBattleViewBy(44, 0);
+      return;
+    }
+    if (event.key === "ArrowRight") {
+      event.preventDefault();
+      panBattleViewBy(-44, 0);
+      return;
+    }
+    if (event.key === "ArrowUp") {
+      event.preventDefault();
+      panBattleViewBy(0, 44);
+      return;
+    }
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      panBattleViewBy(0, -44);
+      return;
+    }
+
     if (event.key === "a" || event.key === "A") keys.a = true;
     if (event.key === "d" || event.key === "D") keys.d = true;
     if (event.key === "w" || event.key === "W") keys.w = true;
@@ -4124,9 +4301,15 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       editorPendingClickY = y;
       return;
     }
-    if (event.button === 2) {
-      battle.clearControlSelection();
-      renderPanels();
+    if (isBattleScreen() && event.button === 2) {
+      event.preventDefault();
+      battleViewDragActive = true;
+      battleViewDragMoved = false;
+      battleViewDragStartClientX = event.clientX;
+      battleViewDragStartClientY = event.clientY;
+      battleViewDragLastClientX = event.clientX;
+      battleViewDragLastClientY = event.clientY;
+      canvas.style.cursor = "grabbing";
       return;
     }
     battle.handleLeftPointerDown(x, y);
@@ -4147,6 +4330,15 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       }
       editorDragActive = false;
       editorDragMoved = false;
+    }
+    if (battleViewDragActive) {
+      if (!battleViewDragMoved && isBattleScreen()) {
+        battle.clearControlSelection();
+        renderPanels();
+      }
+      battleViewDragActive = false;
+      battleViewDragMoved = false;
+      canvas.style.cursor = isBattleScreen() ? "grab" : "default";
     }
     battle.handlePointerUp();
   });
@@ -4177,17 +4369,48 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       }
       return;
     }
+    if (battleViewDragActive) {
+      return;
+    }
     const rect = canvas.getBoundingClientRect();
     const x = (event.clientX - rect.left) * (canvas.width / rect.width);
     const y = (event.clientY - rect.top) * (canvas.height / rect.height);
     battle.setAim(x, y);
   });
 
+  window.addEventListener("mousemove", (event) => {
+    if (!battleViewDragActive || !isBattleScreen()) {
+      return;
+    }
+    const dx = event.clientX - battleViewDragLastClientX;
+    const dy = event.clientY - battleViewDragLastClientY;
+    battleViewDragLastClientX = event.clientX;
+    battleViewDragLastClientY = event.clientY;
+    if (Math.hypot(event.clientX - battleViewDragStartClientX, event.clientY - battleViewDragStartClientY) > 3) {
+      battleViewDragMoved = true;
+    }
+    panBattleViewBy(dx, dy);
+  });
+
+  window.addEventListener("resize", () => {
+    applyBattleViewTransform();
+  });
+
+  canvasViewport.addEventListener("wheel", (event) => {
+    if (!isBattleScreen()) {
+      return;
+    }
+    event.preventDefault();
+    const scaleFactor = event.deltaY < 0 ? 1.12 : 1 / 1.12;
+    adjustBattleViewScaleAtClientPoint(battleViewScale * scaleFactor, event.clientX, event.clientY);
+  }, { passive: false });
+
   loadTemplateIntoEditorSlots(editorDraft);
   partDesignerSelectedId = partDesignerDraft.id;
   loadPartIntoDesignerSlots(partDesignerDraft);
   ensureEditorSelectionForLayer();
   setScreen("base");
+  applyBattleViewTransform();
   addLog("Campaign initialized");
   renderPanels();
   void refreshPartsFromStore()
@@ -4213,6 +4436,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       }
       if (isBattleScreen() && battle.getState().active) {
         battle.update(dt, keys);
+        followSelectedUnitWithCamera();
       }
     };
 

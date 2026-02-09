@@ -275,6 +275,7 @@ Recommended starter values:
 - 2D battlefield with left-to-right front.
   - Left: player side/base
   - Right: enemy side/base/buildings
+- Battle simulation uses a fixed logical battlefield size (`1280x720`) shared by browser runtime and headless/arena runs; browser resizing only changes display scale.
 - Ground units move freely on X and Y axes inside the ground combat zone.
 - Ground maneuver is continuous positioning (flank, intercept, disengage), not discrete lane switching.
 
@@ -299,6 +300,10 @@ Recommended starter values:
 
 - Mouse controls player aim target in battle.
 - Hold left mouse is the primary fire action; controlled unit keeps firing all manual-controlled weapon slots toward current mouse aim target.
+- Battle viewport keeps the battlefield's original aspect ratio and hides native scrollbars.
+- Battle viewport panning controls: keyboard arrow keys and right-click drag.
+- Battle viewport supports mouse-wheel zoom (wheel up to zoom in, wheel down to zoom out).
+- When a unit is selected/controlled, camera follow nudges the viewport as the unit approaches borders and keeps more look-ahead space in the facing direction.
 - Projectiles spawn from the firing weapon module location instead of unit center.
 - Unit selection highlight follows outer structure silhouette (not a rectangular bounding box).
 - Tracking missile homing reacquires the nearest valid enemy around its intended aim point when needed.
@@ -308,6 +313,7 @@ Recommended starter values:
 - Number keys `1..9` toggle per-slot manual weapon control for the currently controlled unit (default `ON` for every weapon slot).
 - `Shift+1..9` toggles per-slot auto-fire state.
 - Slots under manual control temporarily suppress auto fire without mutating the auto-fire toggle state; auto fire resumes once manual control is disabled for that slot.
+- Browser-native `contextmenu` and `dblclick` behaviors are suppressed anywhere inside the game app shell; static UI text in the shell is also non-selectable to prevent double-click highlight effects (form fields remain selectable/editable).
 - Keyboard Space flips controlled unit facing direction instantly (forward/backward orientation swap).
 - Ground vs ground attacks use Y-axis tolerance (`abs(y1 - y2) <= tolerance`) so exact alignment is not required.
 - Air targets are treated as same Y axis for hit eligibility checks.

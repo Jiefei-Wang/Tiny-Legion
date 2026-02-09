@@ -30,6 +30,15 @@ body {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.app-shell input,
+.app-shell textarea,
+.app-shell [contenteditable="true"] {
+  user-select: text;
+  -webkit-user-select: text;
 }
 
 .topbar {
@@ -196,10 +205,24 @@ button.active {
 }
 
 #battleCanvas {
-  width: 100%;
+  width: auto;
+  height: auto;
+  max-width: none;
+  max-height: none;
+  display: block;
+  border-radius: 8px;
+  border: none;
+  background: linear-gradient(180deg, #263954 0%, #1a283a 48%, #151f2d 100%);
+  transform-origin: top left;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.battle-canvas-viewport {
+  position: relative;
   flex: 1;
   min-height: 0;
-  height: auto;
+  overflow: hidden;
   border-radius: 8px;
   border: 1px solid #3d5572;
   background: linear-gradient(180deg, #263954 0%, #1a283a 48%, #151f2d 100%);
@@ -374,7 +397,7 @@ button.active {
     grid-template-columns: 1fr;
   }
 
-  #battleCanvas {
+  .battle-canvas-viewport {
     height: 420px;
   }
 }

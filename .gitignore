@@ -18,3 +18,4 @@ packages/*/dist/
 packages/*/build/
 game/.headless-dist/
 arena/.dist/
+.DS_Store

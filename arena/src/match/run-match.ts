@@ -7,6 +7,7 @@ import {
   BATTLE_SALVAGE_REFUND_FACTOR,
   BattleSession,
 } from "../../../packages/game-core/src/gameplay/battle/battle-session.ts";
+import { BATTLEFIELD_HEIGHT, BATTLEFIELD_WIDTH } from "../../../packages/game-core/src/config/balance/battlefield.ts";
 import { evaluateCombatDecisionTree } from "../../../packages/game-core/src/ai/decision-tree/combat-decision-tree.ts";
 import { structureIntegrity } from "../../../packages/game-core/src/simulation/units/structure-grid.ts";
 
@@ -358,7 +359,7 @@ export async function runMatch(spec: MatchSpec): Promise<MatchResult> {
     throw new Error(`Unsupported AI family in runner: ${kind}`);
   };
 
-  const canvas = createMockCanvas(1280, 720);
+  const canvas = createMockCanvas(BATTLEFIELD_WIDTH, BATTLEFIELD_HEIGHT);
   const battle = new BattleSession(canvas, hooks, templates, {
     aiControllers: {
       player: aiForSide("player"),

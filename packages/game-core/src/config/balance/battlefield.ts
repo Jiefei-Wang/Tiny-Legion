@@ -1,0 +1,2 @@
+export const BATTLEFIELD_WIDTH = 1280;
+export const BATTLEFIELD_HEIGHT = 720;

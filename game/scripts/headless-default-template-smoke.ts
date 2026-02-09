@@ -1,5 +1,6 @@
 import { existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { BattleSession } from "../src/gameplay/battle/battle-session.ts";
+import { BATTLEFIELD_HEIGHT, BATTLEFIELD_WIDTH } from "../src/config/balance/battlefield.ts";
 import { COMPONENTS } from "../src/config/balance/weapons.ts";
 import { createInitialTemplates } from "../src/simulation/units/unit-builder.ts";
 import { mergeTemplates, parseTemplate, validateTemplateDetailed } from "../src/app/template-store.ts";
@@ -197,7 +198,7 @@ function runSmoke(): Failure[] {
     return failures;
   }
   const logs: string[] = [];
-  const canvas = createMockCanvas(1280, 720);
+  const canvas = createMockCanvas(BATTLEFIELD_WIDTH, BATTLEFIELD_HEIGHT);
   const hooks = makeHooks(logs);
   const battle = new BattleSession(canvas, hooks, templates, { partCatalog });
 

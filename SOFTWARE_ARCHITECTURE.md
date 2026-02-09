@@ -31,6 +31,7 @@ Implemented gameplay architecture highlights:
 - `Test Arena` is a dedicated top-level tab for debug battles (not part of the map node list)
 - Display layer visibility is debug-controlled (top-bar `Debug Options`) and defaults to OFF in battle runtime
 - In-app debug options plus local runtime log pipeline (`/__debug/*` -> `game/.debug/runtime.log`)
+- Battle simulation dimensions are centralized in shared balance config (`BATTLEFIELD_WIDTH=1280`, `BATTLEFIELD_HEIGHT=720`) and reused by browser + headless/arena paths
 - Strategic layer is turn-based: **Next Round** advances gas economy, construction, and resolves campaign battles (Test Arena skips round resolution)
 
 ## 1. Target Stack
