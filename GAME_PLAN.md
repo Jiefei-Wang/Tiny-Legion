@@ -569,12 +569,20 @@ The current playable implementation already includes:
   - Loader `storeCapacity` allows charge overfill (burst behavior), with minimum burst interval floor of `0.5s`.
   - Fire commands sent to a cooling/reloading weapon slot are ignored (no projectile and no recoil/knockback side effects).
 - Projectile gravity, range-limited lifetime, and debris persistence.
-- AI split into targeting, movement, ballistic shooting, and weapon policy modules.
-- AI combat orchestration now runs through a decision tree (`game/src/ai/decision-tree/combat-decision-tree.ts`) that evaluates target, movement, weapon slot, firing geometry, and predictive lead per tick.
+- AI split into targeting, movement, and shooting modules with a shared composite interface in `packages/game-core/src/ai/composite/`.
+- Baseline combat AI now runs through `createCompositeAiController(...)` (target -> movement -> shoot), and the legacy decision-tree entrypoint is kept as a compatibility wrapper.
+- Target module returns ranked targets (sorted by importance); movement consumes ranked targets + battlefield state; shooting consumes ranked targets + movement intent + weapon readiness.
+- Arena now supports composite module wiring (`target/movement/shoot`) so each module can be replaced and trained independently.
+- Composite training roadmap is implemented as phased sequence:
+  - Phase 1: no-base 1v1 (shoot/movement only)
+  - Phase 2: no-base NvN
+  - Phase 3: full battlefield with bases
+- Test Arena now supports independent AI preset selection for player and enemy (`baseline`, `composite baseline`, `composite neural new`, `latest trained composite`).
+- Training automation script `train_ai.sh` provides module-specific training (`shoot`/`movement`/`target`) and full compose training (`compose`) with per-module neural depth/hidden-size controls and trained/new component source selection.
 
 Current gaps still being iterated:
 
-- Further balancing of decision-tree aggressiveness vs survivability.
+- Further balancing of baseline composite aggressiveness vs survivability.
 - More advanced anticipation for abrupt target acceleration changes.
 - Further balancing of AI burst cadence vs player cadence.
 

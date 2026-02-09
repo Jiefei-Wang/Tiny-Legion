@@ -20,7 +20,9 @@ Implemented gameplay architecture highlights:
 - Air propulsion split: `jetEngine` (omni thrust) + `propeller` (directional thrust with placement constraints)
 - Unit layers: `structure + functional + display`
 - AI modules split by concern:
-  - `src/ai/decision-tree/combat-decision-tree.ts` (combat orchestrator)
+  - `src/ai/composite/composite-ai.ts` (shared composite interface)
+  - `src/ai/composite/baseline-modules.ts` (baseline target/movement/shoot modules)
+  - `src/ai/decision-tree/combat-decision-tree.ts` (legacy compatibility wrapper)
   - `src/ai/targeting/target-selector.ts`
   - `src/ai/shooting/ballistic-aim.ts`
   - `src/ai/movement/threat-movement.ts`
@@ -171,6 +173,7 @@ Arena training/runtime package (implemented):
 arena/src/
   ai/
     ai-schema.ts
+    composite-controller.ts
     families.ts
     families/
       baseline.ts
@@ -192,6 +195,7 @@ arena/src/
     families/spawn-baseline.ts
     families/spawn-weighted.ts
   train/
+    run-composite-training.ts
     run-training.ts
     run-spawn-training.ts
     fitness.ts
@@ -209,8 +213,19 @@ Arena-specific architecture notes:
 - Arena runtime imports battle/simulation/template domain code directly from `packages/game-core/src/*` (no dynamic loading from `game/.headless-dist`).
 - Training and evaluation run headless through `WorkerPool` + `match-worker.ts` for parallel CPU usage.
 - Model ranking now prioritizes `winRateLowerBound` then `winRate`, then `score`.
+- Arena composite AI path can supply per-side `{ target, movement, shoot }` module specs that instantiate game-core `createCompositeAiController(...)`.
+- `run-composite-training.ts` trains modules in staged order (`shoot -> movement -> target`) with phase scenarios:
+  - no-base 1v1,
+  - no-base NvN,
+  - full base battle.
+- `train-composite` CLI now supports:
+  - scoped module training (`--scope shoot|movement|target|all`),
+  - per-module source selection (`baseline|new|trained:<path>`),
+  - per-module architecture locks (`*Layers`, `*Hidden`),
+  - optional seed composite loading (`--seedComposite`).
 - `cli.ts` includes an `eval` command for reproducible held-out benchmarking versus `baseline`.
 - Replay UI (`arena-ui/src/main.ts`) still uses game interface bootstrap (`game/src/app/bootstrap.ts`) while consuming AI/simulation primitives from `packages/game-core`.
+- Game dev server exposes `/__arena/composite/latest` for Test Arena to load latest trained composite spec from `arena/.arena-data/runs/*/best-composite.json`.
 
 Map node metadata supports test-only battle tuning via optional fields on `MapNode`:
 

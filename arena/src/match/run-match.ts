@@ -10,6 +10,7 @@ import {
 import { BATTLEFIELD_HEIGHT, BATTLEFIELD_WIDTH } from "../../../packages/game-core/src/config/balance/battlefield.ts";
 import { evaluateCombatDecisionTree } from "../../../packages/game-core/src/ai/decision-tree/combat-decision-tree.ts";
 import { structureIntegrity } from "../../../packages/game-core/src/simulation/units/structure-grid.ts";
+import { makeCompositeAiController } from "../ai/composite-controller.ts";
 
 type GameBattleHooks = {
   addLog: (text: string, tone?: any) => void;
@@ -57,6 +58,10 @@ function sigmoid(x: number): number {
   return 1 / (1 + Math.exp(-x));
 }
 
+function aliveCount(units: any[], side: "player" | "enemy"): number {
+  return units.filter((unit: any) => unit.alive && unit.side === side).length;
+}
+
 export async function runMatch(spec: MatchSpec): Promise<MatchResult> {
   setMathRandomSeed(spec.seed);
   const templates = await loadRuntimeMergedTemplates();
@@ -88,6 +93,10 @@ export async function runMatch(spec: MatchSpec): Promise<MatchResult> {
 
   const aiForSide = (side: "player" | "enemy"): any => {
     const aiSpec = side === "player" ? spec.aiPlayer : spec.aiEnemy;
+    const composite = makeCompositeAiController(aiSpec);
+    if (composite) {
+      return composite;
+    }
     const kind = aiSpec.familyId;
 
     if (kind === "baseline") {
@@ -371,6 +380,7 @@ export async function runMatch(spec: MatchSpec): Promise<MatchResult> {
     disableDefaultStarters: true,
   });
 
+  const scenario = spec.scenario ?? { withBase: true, initialUnitsPerSide: 2 };
   const node: Parameters<BattleSession["start"]>[0] = {
     id: "arena",
     name: "Arena",
@@ -378,8 +388,10 @@ export async function runMatch(spec: MatchSpec): Promise<MatchResult> {
     garrison: false,
     reward: 0,
     defense: spec.nodeDefense,
-    ...(typeof spec.baseHp === "number" && Number.isFinite(spec.baseHp) && spec.baseHp > 0
+    ...((scenario.withBase && typeof spec.baseHp === "number" && Number.isFinite(spec.baseHp) && spec.baseHp > 0)
       ? { testBaseHpOverride: spec.baseHp }
+      : !scenario.withBase
+        ? { testBaseHpOverride: 5_000_000 }
       : {}),
   };
   battle.start(node);
@@ -394,16 +406,38 @@ export async function runMatch(spec: MatchSpec): Promise<MatchResult> {
     }
   }
 
-  // Symmetric starters (free and non-refundable, like headless smoke test semantics).
-  const starterTemplates = rosterPreference.filter((id) => availableTemplateIds.has(id)).slice(0, 2);
-  for (const templateId of starterTemplates) {
-    battle.arenaDeploy("player", templateId, { chargeGas: false, deploymentGasCost: 0, y: 300 });
-    battle.arenaDeploy("enemy", templateId, { chargeGas: false, deploymentGasCost: 0, y: 300 });
+  const spawnRng = mulberry32((spec.seed ^ 0x2f7a1d) >>> 0);
+
+  if (scenario.withBase) {
+    // Symmetric starters (free and non-refundable, like headless smoke test semantics).
+    const starterTemplates = rosterPreference.filter((id) => availableTemplateIds.has(id)).slice(0, 2);
+    for (const templateId of starterTemplates) {
+      battle.arenaDeploy("player", templateId, { chargeGas: false, deploymentGasCost: 0, y: 300 });
+      battle.arenaDeploy("enemy", templateId, { chargeGas: false, deploymentGasCost: 0, y: 300 });
+    }
+  } else {
+    const unitsPerSide = Math.max(1, Math.floor(scenario.initialUnitsPerSide));
+    for (let i = 0; i < unitsPerSide; i += 1) {
+      if (roster.length === 0) {
+        break;
+      }
+      const idx = Math.floor(spawnRng() * roster.length);
+      const templateId = roster[Math.max(0, Math.min(roster.length - 1, idx))] ?? null;
+      if (!templateId) {
+        continue;
+      }
+      const y = 220 + spawnRng() * 260;
+      battle.arenaDeploy("player", templateId, { chargeGas: false, deploymentGasCost: 0, y });
+      battle.arenaDeploy("enemy", templateId, { chargeGas: false, deploymentGasCost: 0, y });
+    }
   }
 
   // Override enemy gas if requested.
   const state0 = battle.getState();
-  state0.enemyGas = spec.enemyGas;
+  state0.enemyGas = scenario.withBase ? spec.enemyGas : 0;
+  if (!scenario.withBase) {
+    playerGas = 0;
+  }
 
   const playerGasStart = playerGas;
   const enemyGasStart = state0.enemyGas;
@@ -417,7 +451,7 @@ export async function runMatch(spec: MatchSpec): Promise<MatchResult> {
   const spawnMode = spec.spawnMode ?? "mirrored-random";
   const spawnBurst = Math.max(1, Math.floor(spec.spawnBurst ?? 1));
   const spawnMaxActive = Math.max(1, Math.floor(spec.spawnMaxActive ?? 5));
-  const spawnRng = mulberry32((spec.seed ^ 0x2f7a1d) >>> 0);
+  const allowSpawns = scenario.withBase;
   let spawnTimer = 0;
   let spawnIntervalS = 1.8;
 
@@ -497,19 +531,40 @@ export async function runMatch(spec: MatchSpec): Promise<MatchResult> {
   };
 
   while (battle.getState().active && !battle.getState().outcome && t < spec.maxSimSeconds) {
-    spawnTimer += dt;
-    if (spawnTimer >= spawnIntervalS) {
-      spawnTimer = 0;
-      stepSpawn();
+    if (allowSpawns) {
+      spawnTimer += dt;
+      if (spawnTimer >= spawnIntervalS) {
+        spawnTimer = 0;
+        stepSpawn();
+      }
     }
     battle.update(dt, noKeys);
     t += dt;
+    if (!scenario.withBase) {
+      const s = battle.getState();
+      const alivePlayer = aliveCount(s.units, "player");
+      const aliveEnemy = aliveCount(s.units, "enemy");
+      if (alivePlayer === 0 || aliveEnemy === 0) {
+        battle.forceEnd(alivePlayer > aliveEnemy, "Unit elimination");
+        break;
+      }
+    }
   }
 
   const state1 = battle.getState();
   if (state1.active && !state1.outcome) {
-    const victory = state1.enemyBase.hp <= state1.playerBase.hp;
-    battle.forceEnd(victory, "Arena deadline reached");
+    if (scenario.withBase) {
+      const victory = state1.enemyBase.hp <= state1.playerBase.hp;
+      battle.forceEnd(victory, "Arena deadline reached");
+    } else {
+      const alivePlayer = aliveCount(state1.units, "player");
+      const aliveEnemy = aliveCount(state1.units, "enemy");
+      if (alivePlayer === aliveEnemy) {
+        battle.forceEnd(false, "Arena deadline reached (no-base tie)");
+      } else {
+        battle.forceEnd(alivePlayer > aliveEnemy, "Arena deadline reached (no-base)");
+      }
+    }
   }
 
   const finalState = battle.getState();
@@ -524,7 +579,9 @@ export async function runMatch(spec: MatchSpec): Promise<MatchResult> {
   const worth0Enemy = enemyGasStart + onFieldEnemyStart;
   const worth1Enemy = enemyGasEnd + onFieldEnemyEnd;
 
-  const tie = outcome.reason.toLowerCase().includes("deadline") || outcome.reason.toLowerCase().includes("round deadline");
+  const reasonLower = String(outcome.reason).toLowerCase();
+  const tie = reasonLower.includes("tie")
+    || reasonLower.includes("round deadline");
 
   const playerOutcome: "win" | "tie" | "loss" = tie ? "tie" : Boolean(outcome.victory) ? "win" : "loss";
   const enemyOutcome: "win" | "tie" | "loss" = tie ? "tie" : Boolean(outcome.victory) ? "loss" : "win";

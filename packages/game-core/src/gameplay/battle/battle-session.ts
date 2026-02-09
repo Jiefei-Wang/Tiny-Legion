@@ -18,10 +18,10 @@ import { instantiateUnit } from "../../simulation/units/unit-builder.ts";
 import { selectBestTarget } from "../../ai/targeting/target-selector.ts";
 import { solveBallisticAim } from "../../ai/shooting/ballistic-aim.ts";
 import { adjustAimForWeaponPolicy } from "../../ai/shooting/weapon-ai-policy.ts";
-import { evaluateCombatDecisionTree } from "../../ai/decision-tree/combat-decision-tree.ts";
+import { createBaselineCompositeAiController } from "../../ai/composite/baseline-modules.ts";
 import { validateTemplateDetailed } from "../../templates/template-validation.ts";
 import { createDefaultPartDefinitions, mergePartCatalogs } from "../../parts/part-schema.ts";
-import type { CombatDecision } from "../../ai/decision-tree/combat-decision-tree.ts";
+import type { BattleAiController, CombatDecision } from "../../ai/composite/composite-ai.ts";
 import type { BattleState, CommandResult, FireBlockDetail, FireRequest, KeyState, MapNode, PartDefinition, Side, UnitCommand, UnitInstance, UnitTemplate } from "../../types.ts";
 
 const GROUND_MIN_Y = 250;
@@ -46,19 +46,7 @@ export interface BattleHooks {
   onBattleOver: (victory: boolean, nodeId: string, reason: string) => void;
 }
 
-export interface BattleAiInput {
-  unit: UnitInstance;
-  state: BattleState;
-  dt: number;
-  desiredRange: number;
-  baseTarget: { x: number; y: number };
-  canShootAtAngle: (componentId: keyof typeof COMPONENTS, dx: number, dy: number, shootAngleDegOverride?: number) => boolean;
-  getEffectiveWeaponRange: (baseRange: number) => number;
-}
-
-export interface BattleAiController {
-  decide: (input: BattleAiInput) => CombatDecision;
-}
+export type { BattleAiController, BattleAiInput, CombatDecision } from "../../ai/composite/composite-ai.ts";
 
 export interface BattleSessionOptions {
   aiControllers?: Partial<Record<Side, BattleAiController>>;
@@ -74,7 +62,7 @@ export class BattleSession {
   private readonly ctx: CanvasRenderingContext2D;
   private readonly hooks: BattleHooks;
   private readonly templates: UnitTemplate[];
-  private readonly aiControllers: Partial<Record<Side, BattleAiController>>;
+  private aiControllers: Partial<Record<Side, BattleAiController>>;
   private readonly autoEnableAiWeaponAutoFire: boolean;
   private readonly disableAutoEnemySpawns: boolean;
   private readonly disableEnemyMinimumPresence: boolean;
@@ -91,6 +79,7 @@ export class BattleSession {
   private debugTargetLineEnabled: boolean;
   private debugPartHpEnabled: boolean;
   private controlledUnitInvincible: boolean;
+  private readonly baselineController: BattleAiController;
 
   constructor(canvas: HTMLCanvasElement, hooks: BattleHooks, templates: UnitTemplate[], options: BattleSessionOptions = {}) {
     const context = canvas.getContext("2d");
@@ -120,6 +109,7 @@ export class BattleSession {
     this.debugTargetLineEnabled = false;
     this.debugPartHpEnabled = false;
     this.controlledUnitInvincible = false;
+    this.baselineController = createBaselineCompositeAiController();
   }
 
   public getState(): BattleState {
@@ -128,6 +118,10 @@ export class BattleSession {
 
   public getSelection(): { selectedUnitId: string | null; playerControlledId: string | null } {
     return { selectedUnitId: this.selectedUnitId, playerControlledId: this.playerControlledId };
+  }
+
+  public setAiControllers(aiControllers: Partial<Record<Side, BattleAiController>>): void {
+    this.aiControllers = aiControllers;
   }
 
   public isDisplayEnabled(): boolean {
@@ -516,15 +510,15 @@ export class BattleSession {
               canShootAtAngle: (componentId, dx, dy, shootAngleDegOverride) => this.canShootAtAngle(unit, componentId, dx, dy, shootAngleDegOverride),
               getEffectiveWeaponRange: (baseRange) => this.getEffectiveWeaponRange(unit, baseRange),
             })
-          : evaluateCombatDecisionTree(
+          : this.baselineController.decide({
               unit,
-              this.state,
+              state: this.state,
               dt,
               desiredRange,
               baseTarget,
-              (componentId, dx, dy, shootAngleDegOverride) => this.canShootAtAngle(unit, componentId, dx, dy, shootAngleDegOverride),
-              (baseRange) => this.getEffectiveWeaponRange(unit, baseRange),
-            );
+              canShootAtAngle: (componentId, dx, dy, shootAngleDegOverride) => this.canShootAtAngle(unit, componentId, dx, dy, shootAngleDegOverride),
+              getEffectiveWeaponRange: (baseRange) => this.getEffectiveWeaponRange(unit, baseRange),
+            });
         command = this.aiDecisionToCommand(unit, decision);
       } else if (unit.type === "air") {
         if (!unit.airDropActive) {

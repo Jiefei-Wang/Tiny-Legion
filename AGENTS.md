@@ -14,6 +14,8 @@ If you are a new coding agent/session, read this file first, then read:
 - Shared game logic: `packages/game-core/`
 - Legacy prototype: `webgame/` (reference only)
 - Command reference: `game_command.md`
+- Composite AI arena training command: `npm --prefix arena run train:composite -- --phaseSeeds 16 --nUnits 4`
+- Unified training wrapper script: `./train_ai.sh help` (module-only and full composite training with per-module network size/depth and source selection)
 
 ## Current Runtime/Feature Reality
 

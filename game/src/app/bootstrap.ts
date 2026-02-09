@@ -10,7 +10,9 @@ import { COMPONENTS } from "../config/balance/weapons.ts";
 import { MATERIALS } from "../config/balance/materials.ts";
 import { BattleSession } from "../gameplay/battle/battle-session.ts";
 import type { BattleSessionOptions } from "../gameplay/battle/battle-session.ts";
+import type { BattleAiController } from "../gameplay/battle/battle-session.ts";
 import { BATTLE_SALVAGE_REFUND_FACTOR } from "../gameplay/battle/battle-session.ts";
+import { createBaselineCompositeAiController } from "../ai/composite/baseline-modules.ts";
 import { cloneTemplate, fetchDefaultTemplatesFromStore, fetchUserTemplatesFromStore, mergeTemplates, saveDefaultTemplateToStore, saveUserTemplateToStore, validateTemplateDetailed } from "./template-store.ts";
 import {
   clonePartDefinition,
@@ -23,6 +25,8 @@ import {
   saveDefaultPartToStore,
   validatePartDefinitionDetailed,
 } from "./part-store.ts";
+import { makeCompositeAiController } from "../../../arena/src/ai/composite-controller.ts";
+import type { MatchAiSpec } from "../../../arena/src/match/match-types.ts";
 import type {
   ComponentId,
   DisplayAttachmentTemplate,
@@ -45,8 +49,8 @@ export type ArenaReplaySpec = {
   enemyGas: number;
   spawnBurst?: number;
   spawnMaxActive?: number;
-  aiPlayer: { familyId: string; params: Record<string, number | boolean> };
-  aiEnemy: { familyId: string; params: Record<string, number | boolean> };
+  aiPlayer: MatchAiSpec;
+  aiEnemy: MatchAiSpec;
   spawnMode?: "mirrored-random" | "ai";
   spawnPlayer?: { familyId: string; params: Record<string, number | boolean> };
   spawnEnemy?: { familyId: string; params: Record<string, number | boolean> };
@@ -255,6 +259,10 @@ export function bootstrap(options: BootstrapOptions = {}): void {
   let testArenaEnemyCount = 2;
   let testArenaSpawnTemplateId: string | null = null;
   let testArenaInvinciblePlayer = false;
+  type TestArenaAiPreset = "baseline" | "composite-baseline" | "composite-neural-default" | "composite-latest-trained";
+  let testArenaPlayerAiPreset: TestArenaAiPreset = "baseline";
+  let testArenaEnemyAiPreset: TestArenaAiPreset = "baseline";
+  let latestCompositeSpec: MatchAiSpec | null = null;
   const isTemplateEditorScreen = (): boolean => screen === "templateEditor";
   const isPartEditorScreen = (): boolean => screen === "partEditor";
   const isEditorScreen = (): boolean => isTemplateEditorScreen() || isPartEditorScreen();
@@ -712,6 +720,55 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     }
   };
 
+  const fetchLatestCompositeSpec = async (): Promise<void> => {
+    try {
+      const res = await fetch("/__arena/composite/latest", { method: "GET" });
+      if (!res.ok) {
+        return;
+      }
+      const parsed = await res.json().catch(() => null) as { found?: boolean; spec?: MatchAiSpec } | null;
+      if (parsed?.found && parsed.spec && parsed.spec.familyId === "composite") {
+        latestCompositeSpec = parsed.spec;
+      }
+    } catch {
+      // Ignore endpoint errors in environments without local arena data.
+    }
+  };
+
+  const buildAiControllerFromPreset = (preset: TestArenaAiPreset): BattleAiController | null => {
+    if (preset === "baseline") {
+      return null;
+    }
+    if (preset === "composite-baseline") {
+      return createBaselineCompositeAiController();
+    }
+    if (preset === "composite-neural-default") {
+      const spec: MatchAiSpec = {
+        familyId: "composite",
+        params: {},
+        composite: {
+          target: { familyId: "neural-target", params: {} },
+          movement: { familyId: "neural-movement", params: {} },
+          shoot: { familyId: "neural-shoot", params: {} },
+        },
+      };
+      return makeCompositeAiController(spec);
+    }
+    if (!latestCompositeSpec) {
+      return null;
+    }
+    return makeCompositeAiController(latestCompositeSpec);
+  };
+
+  const applyTestArenaAiControllers = (): void => {
+    const playerController = buildAiControllerFromPreset(testArenaPlayerAiPreset);
+    const enemyController = buildAiControllerFromPreset(testArenaEnemyAiPreset);
+    battle.setAiControllers({
+      ...(playerController ? { player: playerController } : {}),
+      ...(enemyController ? { enemy: enemyController } : {}),
+    });
+  };
+
   const battle = new BattleSession(
     canvas,
     {
@@ -764,6 +821,9 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         : parts,
     },
   );
+  void fetchLatestCompositeSpec().then(() => {
+    renderPanels();
+  });
 
   const startDebugProbeLoop = (): void => {
     const pollEveryMs = 250;
@@ -2962,6 +3022,14 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     const enemyTemplateOptions = templates
       .map((template) => `<option value="${template.id}" ${template.id === testArenaSpawnTemplateId ? "selected" : ""}>${template.name}</option>`)
       .join("");
+    const aiPresetOptions = (selected: TestArenaAiPreset): string => [
+      { value: "baseline", label: "Baseline (default battle AI)" },
+      { value: "composite-baseline", label: "Composite Baseline" },
+      { value: "composite-neural-default", label: "Composite Neural (new)" },
+      { value: "composite-latest-trained", label: latestCompositeSpec ? "Composite Latest Trained" : "Composite Latest Trained (not found)" },
+    ]
+      .map((entry) => `<option value="${entry.value}" ${selected === entry.value ? "selected" : ""} ${entry.value === "composite-latest-trained" && !latestCompositeSpec ? "disabled" : ""}>${entry.label}</option>`)
+      .join("");
     const enemyCountLabel = Math.max(0, Math.floor(testArenaEnemyCount));
     const enemyCountActive = isTestArenaActive
       ? battle.getAliveEnemyCount()
@@ -2993,7 +3061,17 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       <div class="row">
         <label class="small"><input id="testArenaInvinciblePlayer" type="checkbox" ${testArenaInvinciblePlayer ? "checked" : ""} /> Player controlled invincible</label>
       </div>
+      <div class="row">
+        <label class="small">Player AI
+          <select id="testArenaPlayerAiPreset">${aiPresetOptions(testArenaPlayerAiPreset)}</select>
+        </label>
+        <label class="small">Enemy AI
+          <select id="testArenaEnemyAiPreset">${aiPresetOptions(testArenaEnemyAiPreset)}</select>
+        </label>
+        <button id="btnRefreshArenaAiModels">Refresh trained AI</button>
+      </div>
       <div class="small">Invincible player still collides and can be targeted, but takes no damage.</div>
+      <div class="small">AI presets apply to Test Arena only; campaign battles keep default behavior.</div>
     `;
 
     ensureEditorSelectionForLayer();
@@ -3235,10 +3313,11 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     if (battle.getState().active && !battle.getState().outcome) {
       battle.resetToMapMode();
     }
+    applyTestArenaAiControllers();
     battle.start(testArenaNode);
     battle.setControlledUnitInvincible(testArenaInvinciblePlayer);
     battle.setEnemyActiveCount(testArenaEnemyCount);
-    addLog("Test Arena started.");
+    addLog(`Test Arena started. AI: P=${testArenaPlayerAiPreset}, E=${testArenaEnemyAiPreset}.`);
     setScreen("testArena");
     renderPanels();
   };
@@ -3319,6 +3398,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         if (!node) {
           return;
         }
+        battle.setAiControllers({});
         battle.start(node);
         addLog(`Battle started at ${node.name}`);
         setScreen("battle");
@@ -3403,6 +3483,32 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       testArenaInvinciblePlayer = (event.currentTarget as HTMLInputElement).checked;
       battle.setControlledUnitInvincible(testArenaInvinciblePlayer);
       addLog(`Controlled unit invincibility ${testArenaInvinciblePlayer ? "ON" : "OFF"}.`, "warn");
+      renderPanels();
+    });
+
+    getOptionalElement<HTMLSelectElement>("#testArenaPlayerAiPreset")?.addEventListener("change", (event) => {
+      const value = (event.currentTarget as HTMLSelectElement).value as TestArenaAiPreset;
+      testArenaPlayerAiPreset = value;
+      if (battle.getState().active && battle.getState().nodeId === testArenaNode.id) {
+        applyTestArenaAiControllers();
+      }
+      addLog(`Test Arena player AI set to ${value}.`, "good");
+      renderPanels();
+    });
+
+    getOptionalElement<HTMLSelectElement>("#testArenaEnemyAiPreset")?.addEventListener("change", (event) => {
+      const value = (event.currentTarget as HTMLSelectElement).value as TestArenaAiPreset;
+      testArenaEnemyAiPreset = value;
+      if (battle.getState().active && battle.getState().nodeId === testArenaNode.id) {
+        applyTestArenaAiControllers();
+      }
+      addLog(`Test Arena enemy AI set to ${value}.`, "good");
+      renderPanels();
+    });
+
+    getOptionalElement<HTMLButtonElement>("#btnRefreshArenaAiModels")?.addEventListener("click", async () => {
+      await fetchLatestCompositeSpec();
+      addLog(latestCompositeSpec ? "Refreshed latest trained composite AI." : "No trained composite AI found.", latestCompositeSpec ? "good" : "warn");
       renderPanels();
     });
 

@@ -5,6 +5,11 @@ export type Side = "player" | "enemy";
 export type MatchAiSpec = {
   familyId: string;
   params: Params;
+  composite?: {
+    target: { familyId: string; params: Params };
+    movement: { familyId: string; params: Params };
+    shoot: { familyId: string; params: Params };
+  };
 };
 
 export type SpawnMode = "mirrored-random" | "ai";
@@ -25,6 +30,10 @@ export type MatchSpec = {
   spawnMaxActive?: number;
   aiPlayer: MatchAiSpec;
   aiEnemy: MatchAiSpec;
+  scenario?: {
+    withBase: boolean;
+    initialUnitsPerSide: number;
+  };
   spawnMode?: SpawnMode;
   spawnPlayer?: SpawnSpec;
   spawnEnemy?: SpawnSpec;

@@ -1,4 +1,4 @@
-import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { defineConfig } from "vite";
 import { parseTemplate } from "../packages/game-core/src/templates/template-schema.ts";
@@ -589,6 +589,57 @@ function partStorePlugin() {
   };
 }
 
+function arenaModelPlugin() {
+  const runsDir = resolve(process.cwd(), "..", "arena", ".arena-data", "runs");
+
+  return {
+    name: "arena-models",
+    configureServer(server: import("vite").ViteDevServer) {
+      server.middlewares.use("/__arena/composite/latest", (req, res) => {
+        if (req.method !== "GET") {
+          res.statusCode = 405;
+          res.end("method not allowed");
+          return;
+        }
+        if (!existsSync(runsDir)) {
+          res.setHeader("content-type", "application/json");
+          res.end(JSON.stringify({ ok: true, found: false }));
+          return;
+        }
+        const runIds = readdirSync(runsDir);
+        let bestPath: string | null = null;
+        let bestMtime = 0;
+        for (const runId of runIds) {
+          const filePath = resolve(runsDir, runId, "best-composite.json");
+          if (!existsSync(filePath)) {
+            continue;
+          }
+          const stat = statSync(filePath);
+          const mtime = stat.mtimeMs;
+          if (mtime > bestMtime) {
+            bestMtime = mtime;
+            bestPath = filePath;
+          }
+        }
+        if (!bestPath) {
+          res.setHeader("content-type", "application/json");
+          res.end(JSON.stringify({ ok: true, found: false }));
+          return;
+        }
+        try {
+          const raw = readFileSync(bestPath, "utf8");
+          const spec = JSON.parse(raw);
+          res.setHeader("content-type", "application/json");
+          res.end(JSON.stringify({ ok: true, found: true, path: bestPath, spec }));
+        } catch {
+          res.statusCode = 500;
+          res.end("failed to read latest model");
+        }
+      });
+    },
+  };
+}
+
 export default defineConfig({
-  plugins: [debugLogPlugin(), templateStorePlugin(), partStorePlugin(), debugProbePlugin()],
+  plugins: [debugLogPlugin(), templateStorePlugin(), partStorePlugin(), debugProbePlugin(), arenaModelPlugin()],
 });
