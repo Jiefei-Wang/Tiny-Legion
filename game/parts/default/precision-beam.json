@@ -1,0 +1,47 @@
+{
+  "id": "precision-beam",
+  "name": "Precision Beam",
+  "layer": "functional",
+  "baseComponent": "precisionBeam",
+  "directional": true,
+  "anchor": {
+    "x": 0,
+    "y": 0
+  },
+  "boxes": [
+    {
+      "x": 0,
+      "y": 0,
+      "occupiesStructureSpace": false,
+      "occupiesFunctionalSpace": true,
+      "needsStructureBehind": true,
+      "isAttachPoint": false,
+      "isAnchorPoint": true,
+      "isShootingPoint": true,
+      "takesDamage": true
+    }
+  ],
+  "placement": {
+    "requireStructureOffsets": [],
+    "requireStructureBelowAnchor": false,
+    "requireStructureOnFunctionalOccupiedBoxes": true,
+    "requireStructureOnStructureOccupiedBoxes": true,
+    "requireEmptyStructureOffsets": [],
+    "requireEmptyFunctionalOffsets": []
+  },
+  "properties": {
+    "category": "weapon",
+    "subcategory": "beam-precision",
+    "isEngine": false,
+    "isWeapon": true,
+    "isLoader": false,
+    "isArmor": false,
+    "weaponType": "beam-precision",
+    "hasCoreTuning": false
+  },
+  "tags": [
+    "default",
+    "weapon",
+    "beam"
+  ]
+}

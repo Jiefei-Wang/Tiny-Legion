@@ -46,13 +46,17 @@ export function applyRecoilForAttachment(
     return null;
   }
   const weapon = COMPONENTS[weaponAttachment.component];
+  const damage = weaponAttachment.runtimeOverrides?.damage ?? weapon.damage;
+  const range = weaponAttachment.runtimeOverrides?.range ?? weapon.range;
+  const cooldown = weaponAttachment.runtimeOverrides?.cooldown ?? weapon.cooldown;
+  const spreadDeg = weaponAttachment.runtimeOverrides?.spreadDeg ?? weapon.spreadDeg;
   if (
     weapon.type !== "weapon" ||
     weapon.recoil === undefined ||
     weapon.hitImpulse === undefined ||
-    weapon.damage === undefined ||
-    weapon.range === undefined ||
-    weapon.cooldown === undefined
+    damage === undefined ||
+    range === undefined ||
+    cooldown === undefined
   ) {
     return null;
   }
@@ -62,14 +66,14 @@ export function applyRecoilForAttachment(
   unit.vibrate = Math.min(1.2, unit.vibrate + impulseToDeltaV(weapon.recoil, unit.mass) * 2.2);
 
   return {
-    damage: weapon.damage,
+    damage,
     impulse: weapon.hitImpulse,
-    range: weapon.range,
-    cooldown: weapon.cooldown,
+    range,
+    cooldown,
     weaponClass: weapon.weaponClass ?? "rapid-fire",
     projectileSpeed: weapon.projectileSpeed ?? PROJECTILE_SPEED,
     projectileGravity: weapon.projectileGravity ?? PROJECTILE_GRAVITY,
-    spreadDeg: weapon.spreadDeg ?? 0,
+    spreadDeg: spreadDeg ?? 0,
     explosive: weapon.explosive ?? null,
     trackingTurnRateDegPerSec: weapon.tracking?.turnRateDegPerSec ?? 0,
     controlImpairFactor: weapon.control?.impairFactor ?? 1,

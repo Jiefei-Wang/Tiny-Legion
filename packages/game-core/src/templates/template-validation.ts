@@ -1,6 +1,14 @@
 import { COMPONENTS } from "../config/balance/weapons.ts";
 import { MATERIALS } from "../config/balance/materials.ts";
-import type { ComponentId, DisplayAttachmentTemplate, MaterialId, UnitTemplate, UnitType } from "../types.ts";
+import {
+  createDefaultPartDefinitions,
+  getPartFootprintOffsets,
+  mergePartCatalogs,
+  normalizePartAttachmentRotate,
+  rotateOffsetByQuarter,
+  resolvePartDefinitionForAttachment,
+} from "../parts/part-schema.ts";
+import type { DisplayAttachmentTemplate, MaterialId, PartDefinition, UnitTemplate, UnitType } from "../types.ts";
 
 const AIR_HOLD_GRAVITY = 110;
 const AIR_THRUST_ACCEL_SCALE = 70;
@@ -10,6 +18,18 @@ export type TemplateValidationResult = {
   warnings: string[];
 };
 
+export type TemplateValidationOptions = {
+  partCatalog?: ReadonlyArray<PartDefinition>;
+};
+
+function resolveCatalog(partCatalog?: ReadonlyArray<PartDefinition>): PartDefinition[] {
+  const defaults = createDefaultPartDefinitions();
+  if (!partCatalog || partCatalog.length <= 0) {
+    return defaults;
+  }
+  return mergePartCatalogs(defaults, partCatalog);
+}
+
 function isUnitType(value: unknown): value is UnitType {
   return value === "ground" || value === "air";
 }
@@ -18,26 +38,8 @@ function isMaterialId(value: unknown): value is MaterialId {
   return typeof value === "string" && value in MATERIALS;
 }
 
-function isComponentId(value: unknown): value is ComponentId {
-  return typeof value === "string" && value in COMPONENTS;
-}
-
 function isDisplayKind(value: unknown): value is DisplayAttachmentTemplate["kind"] {
   return value === "panel" || value === "stripe" || value === "glass";
-}
-
-function rotateOffsetByQuarter(offsetX: number, offsetY: number, rotateQuarter: number): { x: number; y: number } {
-  const q = ((rotateQuarter % 4) + 4) % 4;
-  if (q === 0) {
-    return { x: offsetX, y: offsetY };
-  }
-  if (q === 1) {
-    return { x: -offsetY, y: offsetX };
-  }
-  if (q === 2) {
-    return { x: -offsetX, y: -offsetY };
-  }
-  return { x: offsetY, y: -offsetX };
 }
 
 function getPropellerDirection(rotateQuarter: number): { x: number; y: number } {
@@ -58,7 +60,7 @@ function unique(items: string[]): string[] {
   return Array.from(new Set(items));
 }
 
-function computeAirLiftAccel(template: UnitTemplate): number {
+function computeAirLiftAccel(template: UnitTemplate, partCatalog: ReadonlyArray<PartDefinition>): number {
   let mass = 0;
   for (const cell of template.structure) {
     if (!isMaterialId(cell.material)) {
@@ -67,29 +69,44 @@ function computeAirLiftAccel(template: UnitTemplate): number {
     mass += MATERIALS[cell.material].mass;
   }
   for (const attachment of template.attachments) {
-    if (!isComponentId(attachment.component)) {
+    const part = resolvePartDefinitionForAttachment({ partId: attachment.partId, component: attachment.component }, partCatalog);
+    const component = part?.baseComponent ?? attachment.component;
+    if (!(component in COMPONENTS)) {
       continue;
     }
-    mass += COMPONENTS[attachment.component].mass;
+    const runtimeMass = part?.runtimeOverrides?.mass;
+    mass += runtimeMass !== undefined ? runtimeMass : COMPONENTS[component].mass;
   }
   mass = Math.max(16, mass);
 
   let liftAccel = 0;
   for (const attachment of template.attachments) {
-    if (!isComponentId(attachment.component)) {
+    const part = resolvePartDefinitionForAttachment({ partId: attachment.partId, component: attachment.component }, partCatalog);
+    const component = part?.baseComponent ?? attachment.component;
+    if (!(component in COMPONENTS)) {
       continue;
     }
-    const stats = COMPONENTS[attachment.component];
+    const stats = COMPONENTS[component];
     if (stats.type !== "engine" || stats.propulsion?.platform !== "air") {
       continue;
     }
-    const power = Math.max(0, stats.power ?? 0);
+    const power = Math.max(0, part?.runtimeOverrides?.power ?? stats.power ?? 0);
     const baseAccel = (power / mass) * AIR_THRUST_ACCEL_SCALE;
     if (stats.propulsion.mode === "omni") {
       liftAccel += baseAccel;
       continue;
     }
-    const propDir = getPropellerDirection(attachment.rotateQuarter ?? 0);
+    const rotateQuarterRaw = attachment.rotateQuarter ?? 0;
+    const rotateQuarter = normalizePartAttachmentRotate(part ?? {
+      id: component,
+      name: component,
+      layer: "functional",
+      baseComponent: component,
+      anchor: { x: 0, y: 0 },
+      boxes: [{ x: 0, y: 0 }],
+      directional: stats.directional === true,
+    }, rotateQuarterRaw);
+    const propDir = getPropellerDirection(rotateQuarter);
     const dot = propDir.x * 0 + propDir.y * -1;
     const angleLimitDeg = stats.propulsion.thrustAngleDeg ?? 25;
     const cosLimit = Math.cos((angleLimitDeg * Math.PI) / 180);
@@ -103,7 +120,11 @@ function computeAirLiftAccel(template: UnitTemplate): number {
   return liftAccel;
 }
 
-export function validateTemplateDetailed(template: UnitTemplate): TemplateValidationResult {
+export function validateTemplateDetailed(
+  template: UnitTemplate,
+  options: TemplateValidationOptions = {},
+): TemplateValidationResult {
+  const partCatalog = resolveCatalog(options.partCatalog);
   const errors: string[] = [];
   const warnings: string[] = [];
 
@@ -144,11 +165,19 @@ export function validateTemplateDetailed(template: UnitTemplate): TemplateValida
   let airEngineCount = 0;
   let weaponCount = 0;
 
+  const occupiedFunctional = new Set<string>();
+  const occupiedStructure = new Set<string>();
+
   for (const attachment of template.attachments) {
-    if (!isComponentId(attachment.component)) {
+    const part = resolvePartDefinitionForAttachment(
+      { partId: attachment.partId, component: attachment.component },
+      partCatalog,
+    );
+    if (!part) {
       errors.push("invalid functional component");
       continue;
     }
+
     if (attachment.cell < 0 || attachment.cell >= template.structure.length) {
       errors.push("functional cell index out of range");
     }
@@ -162,34 +191,98 @@ export function validateTemplateDetailed(template: UnitTemplate): TemplateValida
       errors.push("rotate90 must be boolean");
     }
 
-    const stats = COMPONENTS[attachment.component];
+    const component = part.baseComponent;
+    if (!(component in COMPONENTS)) {
+      errors.push("invalid functional component");
+      continue;
+    }
+    const stats = COMPONENTS[component];
     const componentType = stats.type;
-    const placement = stats.placement;
-    if (placement && attachment.x !== undefined && attachment.y !== undefined) {
-      const rotateQuarter = attachment.rotateQuarter ?? 0;
-      if (placement.requireStructureBelowAnchor) {
-        const supportKey = `${attachment.x},${attachment.y + 1}`;
+
+    const rotateQuarter = normalizePartAttachmentRotate(part, attachment.rotateQuarter ?? 0);
+    const anchor = attachment.x !== undefined && attachment.y !== undefined
+      ? { x: attachment.x, y: attachment.y }
+      : (Number.isInteger(template.structure[attachment.cell]?.x) && Number.isInteger(template.structure[attachment.cell]?.y)
+          ? { x: template.structure[attachment.cell]?.x ?? 0, y: template.structure[attachment.cell]?.y ?? 0 }
+          : null);
+
+    if (anchor) {
+      const placement = part.placement;
+      const footprint = getPartFootprintOffsets(part, rotateQuarter);
+
+      if (placement?.requireStructureBelowAnchor) {
+        const supportKey = `${anchor.x},${anchor.y + 1}`;
         if (!structureCoords.has(supportKey)) {
           errors.push("component requires structure support below anchor");
         }
       }
-      const footprintOffsets = (placement.footprintOffsets ?? [{ x: 0, y: 0 }]).map((offset) => {
-        return rotateOffsetByQuarter(offset.x, offset.y, rotateQuarter);
-      });
-      if (placement.requireStructureOnFootprint ?? true) {
-        for (const offset of footprintOffsets) {
-          const key = `${attachment.x + offset.x},${attachment.y + offset.y}`;
-          if (!structureCoords.has(key)) {
-            errors.push("component footprint must be attached to structure cells");
-            break;
-          }
+
+      for (const offset of placement?.requireStructureOffsets ?? []) {
+        const rotated = rotateOffsetByQuarter(offset.x, offset.y, rotateQuarter);
+        const key = `${anchor.x + rotated.x},${anchor.y + rotated.y}`;
+        if (!structureCoords.has(key)) {
+          errors.push("component requires structure support at required offsets");
+          break;
         }
       }
-      for (const offset of (placement.requireEmptyOffsets ?? []).map((item) => rotateOffsetByQuarter(item.x, item.y, rotateQuarter))) {
-        const key = `${attachment.x + offset.x},${attachment.y + offset.y}`;
+
+      for (const offset of placement?.requireEmptyStructureOffsets ?? []) {
+        const rotated = rotateOffsetByQuarter(offset.x, offset.y, rotateQuarter);
+        const key = `${anchor.x + rotated.x},${anchor.y + rotated.y}`;
         if (structureCoords.has(key)) {
-          errors.push("component clearance area must be empty");
+          errors.push("component clearance area must be empty of structure");
           break;
+        }
+      }
+
+      for (const offset of placement?.requireEmptyFunctionalOffsets ?? []) {
+        const rotated = rotateOffsetByQuarter(offset.x, offset.y, rotateQuarter);
+        const key = `xy:${anchor.x + rotated.x},${anchor.y + rotated.y}`;
+        if (occupiedFunctional.has(key)) {
+          errors.push("component clearance area must be empty of functional occupancy");
+          break;
+        }
+      }
+
+      const requireStructureOnFunctional = placement?.requireStructureOnFunctionalOccupiedBoxes ?? true;
+      const requireStructureOnStructure = placement?.requireStructureOnStructureOccupiedBoxes ?? true;
+
+      for (const cell of footprint) {
+        const key = `xy:${anchor.x + cell.x},${anchor.y + cell.y}`;
+        const coordKey = `${anchor.x + cell.x},${anchor.y + cell.y}`;
+        const needsStructureForFunctional = cell.needsStructureBehind || (cell.occupiesFunctionalSpace && requireStructureOnFunctional);
+        const needsStructureForAttachPoint = cell.isAttachPoint;
+
+        if ((needsStructureForFunctional || needsStructureForAttachPoint) && !structureCoords.has(coordKey)) {
+          errors.push(needsStructureForAttachPoint ? "attach point requires structure support" : "functional occupied boxes must sit on structure");
+          break;
+        }
+        if (cell.occupiesStructureSpace && requireStructureOnStructure && !structureCoords.has(coordKey)) {
+          errors.push("structure occupied boxes must map to structure support");
+          break;
+        }
+        if (cell.occupiesStructureSpace && structureCoords.has(coordKey)) {
+          errors.push("structure occupied boxes require empty structure space");
+          break;
+        }
+
+        if (cell.occupiesFunctionalSpace && occupiedFunctional.has(key)) {
+          errors.push("functional occupancy overlap");
+          break;
+        }
+        if (cell.occupiesStructureSpace && occupiedStructure.has(key)) {
+          errors.push("structure occupancy overlap");
+          break;
+        }
+      }
+
+      for (const cell of footprint) {
+        const key = `xy:${anchor.x + cell.x},${anchor.y + cell.y}`;
+        if (cell.occupiesFunctionalSpace) {
+          occupiedFunctional.add(key);
+        }
+        if (cell.occupiesStructureSpace) {
+          occupiedStructure.add(key);
         }
       }
     }
@@ -219,7 +312,7 @@ export function validateTemplateDetailed(template: UnitTemplate): TemplateValida
     if (airEngineCount < 1) {
       errors.push("air unit requires at least one jet engine or propeller");
     } else {
-      const liftAccel = computeAirLiftAccel(template);
+      const liftAccel = computeAirLiftAccel(template, partCatalog);
       if (liftAccel < AIR_HOLD_GRAVITY) {
         errors.push(`air thrust cannot hold altitude (lift=${liftAccel.toFixed(1)} < gravity=${AIR_HOLD_GRAVITY.toFixed(1)})`);
       }

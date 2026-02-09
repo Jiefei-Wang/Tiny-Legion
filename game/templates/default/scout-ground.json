@@ -17,16 +17,19 @@
   "attachments": [
     {
       "component": "control",
+      "partId": "control",
       "cell": 1,
       "rotateQuarter": 0
     },
     {
       "component": "engineS",
+      "partId": "engine-s",
       "cell": 0,
       "rotateQuarter": 0
     },
     {
       "component": "rapidGun",
+      "partId": "rapid-gun",
       "cell": 2,
       "rotateQuarter": 0
     }

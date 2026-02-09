@@ -1,0 +1,112 @@
+{
+  "id": "propeller",
+  "name": "Propeller",
+  "layer": "functional",
+  "baseComponent": "propeller",
+  "directional": true,
+  "anchor": {
+    "x": 0,
+    "y": 0
+  },
+  "boxes": [
+    {
+      "x": 0,
+      "y": 0,
+      "occupiesStructureSpace": false,
+      "occupiesFunctionalSpace": false,
+      "needsStructureBehind": false,
+      "isAttachPoint": true,
+      "isAnchorPoint": true,
+      "isShootingPoint": false,
+      "takesDamage": false
+    },
+    {
+      "x": 1,
+      "y": -1,
+      "occupiesStructureSpace": false,
+      "occupiesFunctionalSpace": true,
+      "needsStructureBehind": false,
+      "isAttachPoint": false,
+      "isAnchorPoint": false,
+      "isShootingPoint": false,
+      "takesDamage": true
+    },
+    {
+      "x": 1,
+      "y": 0,
+      "occupiesStructureSpace": false,
+      "occupiesFunctionalSpace": true,
+      "needsStructureBehind": false,
+      "isAttachPoint": false,
+      "isAnchorPoint": false,
+      "isShootingPoint": false,
+      "takesDamage": true
+    },
+    {
+      "x": 1,
+      "y": 1,
+      "occupiesStructureSpace": false,
+      "occupiesFunctionalSpace": true,
+      "needsStructureBehind": false,
+      "isAttachPoint": false,
+      "isAnchorPoint": false,
+      "isShootingPoint": false,
+      "takesDamage": true
+    }
+  ],
+  "placement": {
+    "requireStructureOffsets": [
+      {
+        "x": 0,
+        "y": 1
+      }
+    ],
+    "requireStructureBelowAnchor": true,
+    "requireStructureOnFunctionalOccupiedBoxes": false,
+    "requireStructureOnStructureOccupiedBoxes": true,
+    "requireEmptyStructureOffsets": [
+      {
+        "x": 1,
+        "y": -1
+      },
+      {
+        "x": 1,
+        "y": 0
+      },
+      {
+        "x": 1,
+        "y": 1
+      }
+    ],
+    "requireEmptyFunctionalOffsets": [
+      {
+        "x": 1,
+        "y": -1
+      },
+      {
+        "x": 1,
+        "y": 0
+      },
+      {
+        "x": 1,
+        "y": 1
+      }
+    ]
+  },
+  "properties": {
+    "category": "functional",
+    "subcategory": "engine-air",
+    "isEngine": true,
+    "isWeapon": false,
+    "isLoader": false,
+    "isArmor": false,
+    "engineType": "air",
+    "hasCoreTuning": false
+  },
+  "tags": [
+    "default",
+    "mobility",
+    "air",
+    "fragile"
+  ]
+}

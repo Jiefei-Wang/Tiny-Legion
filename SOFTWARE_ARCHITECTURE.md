@@ -25,9 +25,13 @@ Implemented gameplay architecture highlights:
   - `src/ai/shooting/ballistic-aim.ts`
   - `src/ai/movement/threat-movement.ts`
   - `src/ai/shooting/weapon-ai-policy.ts`
-- Multi-weapon units with independent cooldown timers and slot controls
+- Multi-weapon units with independent cooldown timers, per-slot manual-control toggles, and per-slot auto-fire toggles
+- Player-controlled manual slots suppress auto-fire execution at runtime without mutating stored auto-fire flags
+- Top-level mode tabs include dedicated `Template Editor` and `Part Editor` entries (alongside `Base`/`Map`/`Battle`)
+- `Test Arena` is a dedicated top-level tab for debug battles (not part of the map node list)
+- Display layer visibility is debug-controlled (top-bar `Debug Options`) and defaults to OFF in battle runtime
 - In-app debug options plus local runtime log pipeline (`/__debug/*` -> `game/.debug/runtime.log`)
-- Strategic layer is turn-based: **Next Round** advances gas economy, construction, and resolves battles
+- Strategic layer is turn-based: **Next Round** advances gas economy, construction, and resolves campaign battles (Test Arena skips round resolution)
 
 ## 1. Target Stack
 
@@ -133,6 +137,10 @@ packages/game-core/src/
   gameplay/
     battle/battle-session.ts
     map/
+  parts/
+    part-geometry.ts
+    part-schema.ts
+    part-validation.ts
   simulation/
   templates/template-schema.ts
   templates/template-validation.ts
@@ -142,11 +150,16 @@ game/src/
   app/
     bootstrap.ts
     game-loop.ts
+    part-store.ts          (fetch/save adapter over game-core part schema/validation)
     template-store.ts      (fetch/save adapter over game-core template schema/validation)
   ai|config|core|gameplay|simulation|types.ts
     (thin re-exports to packages/game-core)
 
 game/templates/
+  default/*.json
+  user/*.json
+
+game/parts/
   default/*.json
   user/*.json
 ```
@@ -203,11 +216,17 @@ Map node metadata supports test-only battle tuning via optional fields on `MapNo
 - `testEnemyMinActive` keeps a minimum enemy unit count active in battle.
 - `testEnemyInfiniteGas` bypasses enemy gas drain so test scenarios can sustain pressure.
 - `testBaseHpOverride` sets both player/enemy battle base HP and max HP for long-running test battles.
+- The `Test Arena` tab uses these overrides while skipping campaign rewards/ownership changes.
 
 Template/editor architecture notes:
 
+- `ScreenMode` now separates editor surfaces into `templateEditor` and `partEditor` (no nested editor workspace switch state) and includes `testArena`.
+- The left mode pane tab strip is rendered as a 2x3 grid and routes directly to each screen.
 - `template-validation.ts` is an isolated validation module with severity output (`errors` + `warnings`).
 - `template-schema.ts` parse pipeline supports placement sanitization plus loader coverage normalization, and middleware/headless flows persist the normalized JSON so editor/headless/runtime stay aligned.
+- Functional placement and validation now resolve through part catalog definitions (`partId` + `baseComponent`) rather than component-only hardcoding.
+- `parts/part-schema.ts` + `parts/part-validation.ts` define part parsing, default implicit part generation, and validation severity output.
+- Part catalog merge order is built-in defaults -> file-backed defaults -> user overrides.
 - Loader injection remains configurable in parse options; current dev/headless normalization persists the injected-loader result to template JSON.
 - Editor save does not block on warnings/errors; categories are surfaced in UI/logs for developer feedback.
 - Battle deploy/spawn paths validate templates and block creation when `errors` are present.
@@ -343,6 +362,14 @@ Template persistence middleware (dev server via `vite.config.ts`):
 - `PUT /__templates/user/:id` -> save/overwrite one user object template JSON
 - `DELETE /__templates/user/:id` -> remove one user object template JSON
 
+Part persistence middleware (dev server via `vite.config.ts`):
+
+- `GET /__parts/default` -> read merged default part catalog (built-in + `game/parts/default`)
+- `PUT /__parts/default/:id` -> save/overwrite one default part definition JSON
+- `GET /__parts/user` -> read user part definitions from `game/parts/user`
+- `PUT /__parts/user/:id` -> save/overwrite one user part definition JSON
+- `DELETE /__parts/user/:id` -> remove one user part definition JSON
+
 Startup flow in `bootstrap.ts` merges templates from built-in defaults + file-backed defaults + user templates, then feeds the merged list into deploy/editor flows.
 
 Editor UX implementation details:
@@ -350,17 +377,20 @@ Editor UX implementation details:
 - Canvas editor uses a resizable placement grid up to `10x10`.
 - Right-side palette renders component cards (placeholder thumbnail + label + type) in a scrollable list with hover detail text.
 - Active layer (`structure`, `functional`, `display`) is switched from right-panel controls above the part palette.
+- Template editor functional palette uses part catalog entries (not only hardcoded component IDs).
 - Per-part gas contribution is not used in current editor stage; part cards and placement logic focus on gameplay stats/constraints.
 - Editor `Open` window lists all templates; clicking a template row opens it directly, and one-click `Copy` creates an editable clone (`-copy` suffix).
 - Editor has `Save` (persist to user templates) and `Save to Default` (persist to default templates); both paths run the same template normalization before writing JSON.
 - Template ID is internal/auto-managed for new and copied templates (no manual ID field in editor UI).
 - Editor templates persist coordinates per placed part (`x`,`y`, origin `(0,0)`; negatives allowed).
+- Editor functional attachments persist `partId` + `component` for runtime compatibility and part-catalog lookup.
 - Weapon functional entries may carry `rotateQuarter` metadata (0..3, each step = 90deg).
 - Heavy-shot weapons use grouped multi-cell occupancy in editor and rotate footprint with `rotateQuarter`.
 - Functional component rotation/rendering now keys off a `directional` property (default undirectional).
 - Editor grid is user-resizable (up to 10x10) and supports mouse drag panning.
+- Template editor supports optional center-based placement (`center place on click`) for multi-cell part footprints.
 - Runtime unit instancing and battle rendering consume template coordinates, so visual shape and hit cell layout match editor placement.
-- Battle shot origin is computed from weapon attachment coordinates.
+- Battle shot origin is computed from per-part shooting-point box offsets when defined; otherwise it falls back to attachment anchor/cell coordinates.
 - Template parsing normalizes legacy weapon IDs (`mg`, `cannonL`, `cannonM`, `rocket`) to current IDs so old object designs remain valid.
 - Weapon firing clamps out-of-angle aim to the nearest allowed boundary before projectile spawn/cooldown.
 - Runtime mobility derives from current engine power and current mass (power-to-mass), recalculated during battle updates.
@@ -375,6 +405,28 @@ Editor UX implementation details:
   - Loader settings (`supports`, `loadMultiplier`, `fastOperation`, `minLoadTime`, `storeCapacity`, `minBurstInterval`) drive reload and burst cadence.
 - Selection highlight rendering traces outer alive-structure edges.
 - Tracking projectiles keep homing-aim coordinates and reacquire nearest valid enemy when initial target is unavailable.
+- Runtime attachment instances now carry part metadata (`partId`, footprint occupancy flags, optional runtime overrides) for movement/fire/damage systems.
+- Functional hit resolution can target part boxes marked as damageable functional space instead of only anchor-cell coupling.
+
+Developer Part Designer UX:
+
+- Primary access is the top-level `Part Editor` mode tab.
+- Top-bar `Debug Options` -> `Part Designer` is a shortcut into the same `Part Editor` screen.
+- Dedicated editor workspace for authoring a single reusable part definition.
+- UI split:
+  - left panel edits part-level fields (`name`, `id`, `baseComponent`, `directional`) plus grouped controls:
+    - `Editor Meta` (`category` dropdown + `subcategory` text),
+    - `Part Properties` (`tags` and checkbox-enabled groups for engine/weapon/loader/armor/core tuning with conditional parameter blocks),
+  - right panel edits per-box properties for the currently selected grid cell.
+- Per-box properties include:
+  - occupies structure space,
+  - occupies functional space,
+  - needs structure behind (functional-only),
+  - takes damage,
+  - attach point,
+  - anchor point (single),
+  - shooting point.
+- Canonical default part set is stored under `game/parts/default/*.json`, and default template `partId` values align with those explicit IDs.
 
 In-app debug UI:
 
@@ -382,6 +434,8 @@ In-app debug UI:
   - `Unlimited Resources`
   - `Draw Path + Hitbox`
   - `Draw Target Lines`
+  - `Show Display Layer` (default OFF)
+  - `Show Part HP Overlay` (per-structure-cell HP text + red damage tint)
 
 Dev-server log endpoints (available via `vite.config.ts` middleware):
 

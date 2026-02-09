@@ -28,6 +28,7 @@
   "attachments": [
     {
       "component": "control",
+      "partId": "control",
       "cell": 1,
       "x": 0,
       "y": 0,
@@ -35,6 +36,7 @@
     },
     {
       "component": "rapidGun",
+      "partId": "rapid-gun",
       "cell": 2,
       "x": 1,
       "y": 0,
@@ -42,6 +44,7 @@
     },
     {
       "component": "jetEngine",
+      "partId": "jet-engine",
       "cell": 3,
       "x": 0,
       "y": 1,

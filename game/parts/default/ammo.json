@@ -1,0 +1,46 @@
+{
+  "id": "ammo",
+  "name": "Ammo Rack",
+  "layer": "functional",
+  "baseComponent": "ammo",
+  "directional": false,
+  "anchor": {
+    "x": 0,
+    "y": 0
+  },
+  "boxes": [
+    {
+      "x": 0,
+      "y": 0,
+      "occupiesStructureSpace": false,
+      "occupiesFunctionalSpace": true,
+      "needsStructureBehind": true,
+      "isAttachPoint": false,
+      "isAnchorPoint": true,
+      "isShootingPoint": false,
+      "takesDamage": true
+    }
+  ],
+  "placement": {
+    "requireStructureOffsets": [],
+    "requireStructureBelowAnchor": false,
+    "requireStructureOnFunctionalOccupiedBoxes": true,
+    "requireStructureOnStructureOccupiedBoxes": true,
+    "requireEmptyStructureOffsets": [],
+    "requireEmptyFunctionalOffsets": []
+  },
+  "properties": {
+    "category": "functional",
+    "subcategory": "ammo",
+    "isEngine": false,
+    "isWeapon": false,
+    "isLoader": false,
+    "isArmor": false,
+    "hasCoreTuning": false
+  },
+  "tags": [
+    "default",
+    "support",
+    "volatile"
+  ]
+}

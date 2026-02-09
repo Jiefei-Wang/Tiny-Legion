@@ -3,8 +3,9 @@ import { BattleSession } from "../src/gameplay/battle/battle-session.ts";
 import { COMPONENTS } from "../src/config/balance/weapons.ts";
 import { createInitialTemplates } from "../src/simulation/units/unit-builder.ts";
 import { mergeTemplates, parseTemplate, validateTemplateDetailed } from "../src/app/template-store.ts";
+import { createDefaultPartDefinitions, mergePartCatalogs, parsePartDefinition } from "../src/app/part-store.ts";
 import type { BattleHooks } from "../src/gameplay/battle/battle-session.ts";
-import type { KeyState, MapNode, UnitInstance, UnitTemplate } from "../src/types.ts";
+import type { KeyState, MapNode, PartDefinition, UnitInstance, UnitTemplate } from "../src/types.ts";
 
 declare const process: { exit: (code?: number) => void; cwd: () => string };
 
@@ -61,7 +62,42 @@ function findNewUnit(beforeIds: Set<string>, units: UnitInstance[], templateId: 
   return null;
 }
 
-function readTemplateDir(dirPath: string): UnitTemplate[] {
+function readPartDir(dirPath: string): PartDefinition[] {
+  if (!existsSync(dirPath)) {
+    return [];
+  }
+  const files = readdirSync(dirPath).filter((name) => name.endsWith(".json"));
+  const parts: PartDefinition[] = [];
+  for (const fileName of files) {
+    try {
+      const filePath = `${dirPath}/${fileName}`;
+      const raw = readFileSync(filePath, "utf8");
+      const parsed = JSON.parse(raw) as unknown;
+      const normalized = parsePartDefinition(parsed);
+      if (!normalized) {
+        continue;
+      }
+      const normalizedRaw = `${JSON.stringify(normalized, null, 2)}\n`;
+      if (raw !== normalizedRaw) {
+        writeFileSync(filePath, normalizedRaw, "utf8");
+      }
+      parts.push(normalized);
+    } catch {
+      continue;
+    }
+  }
+  return parts;
+}
+
+function loadRuntimeMergedParts(): PartDefinition[] {
+  const baseParts = createDefaultPartDefinitions();
+  const root = process.cwd().replace(/\\/g, "/");
+  const defaults = readPartDir(`${root}/parts/default`);
+  const users = readPartDir(`${root}/parts/user`);
+  return mergePartCatalogs(baseParts, mergePartCatalogs(defaults, users));
+}
+
+function readTemplateDir(dirPath: string, partCatalog: ReadonlyArray<PartDefinition>): UnitTemplate[] {
   if (!existsSync(dirPath)) {
     return [];
   }
@@ -72,7 +108,7 @@ function readTemplateDir(dirPath: string): UnitTemplate[] {
       const filePath = `${dirPath}/${fileName}`;
       const raw = readFileSync(filePath, "utf8");
       const parsed = JSON.parse(raw) as unknown;
-      const normalized = parseTemplate(parsed, { injectLoaders: true, sanitizePlacement: true });
+      const normalized = parseTemplate(parsed, { injectLoaders: true, sanitizePlacement: true, partCatalog });
       if (!normalized) {
         continue;
       }
@@ -88,11 +124,11 @@ function readTemplateDir(dirPath: string): UnitTemplate[] {
   return templates;
 }
 
-function loadRuntimeMergedTemplates(): UnitTemplate[] {
+function loadRuntimeMergedTemplates(partCatalog: ReadonlyArray<PartDefinition>): UnitTemplate[] {
   const baseTemplates = createInitialTemplates();
   const root = process.cwd().replace(/\\/g, "/");
-  const defaults = readTemplateDir(`${root}/templates/default`);
-  const users = readTemplateDir(`${root}/templates/user`);
+  const defaults = readTemplateDir(`${root}/templates/default`, partCatalog);
+  const users = readTemplateDir(`${root}/templates/user`, partCatalog);
   return mergeTemplates(baseTemplates, mergeTemplates(defaults, users));
 }
 
@@ -121,14 +157,15 @@ function getMissingLoaderClasses(template: UnitTemplate): string[] {
 function runSmoke(): Failure[] {
   const failures: Failure[] = [];
   const requiredTemplateIds = ["scout-ground", "tank-ground", "air-light", "air-jet", "air-propeller"];
-  const templates = loadRuntimeMergedTemplates();
-  const defaultTemplateIds = new Set(readTemplateDir(`${process.cwd().replace(/\\/g, "/")}/templates/default`).map((template) => template.id));
+  const partCatalog = loadRuntimeMergedParts();
+  const templates = loadRuntimeMergedTemplates(partCatalog);
+  const defaultTemplateIds = new Set(readTemplateDir(`${process.cwd().replace(/\\/g, "/")}/templates/default`, partCatalog).map((template) => template.id));
 
   for (const template of templates) {
     if (!defaultTemplateIds.has(template.id)) {
       continue;
     }
-    const validation = validateTemplateDetailed(template);
+    const validation = validateTemplateDetailed(template, { partCatalog });
     if (validation.errors.length > 0 || validation.warnings.length > 0) {
       failures.push({
         templateId: template.id,
@@ -162,7 +199,7 @@ function runSmoke(): Failure[] {
   const logs: string[] = [];
   const canvas = createMockCanvas(1280, 720);
   const hooks = makeHooks(logs);
-  const battle = new BattleSession(canvas, hooks, templates);
+  const battle = new BattleSession(canvas, hooks, templates, { partCatalog });
 
   const node: MapNode = {
     id: "headless-test",

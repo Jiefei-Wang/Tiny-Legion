@@ -1,0 +1,65 @@
+{
+  "id": "heavy-cannon",
+  "name": "Heavy Cannon",
+  "layer": "functional",
+  "baseComponent": "heavyCannon",
+  "directional": true,
+  "anchor": {
+    "x": 0,
+    "y": 0
+  },
+  "boxes": [
+    {
+      "x": 0,
+      "y": 0,
+      "occupiesStructureSpace": false,
+      "occupiesFunctionalSpace": true,
+      "needsStructureBehind": true,
+      "isAttachPoint": false,
+      "isAnchorPoint": true,
+      "isShootingPoint": false,
+      "takesDamage": true,
+      "takesFunctionalDamage": true
+    },
+    {
+      "x": 1,
+      "y": 0,
+      "occupiesStructureSpace": false,
+      "occupiesFunctionalSpace": true,
+      "needsStructureBehind": false,
+      "isAttachPoint": false,
+      "isAnchorPoint": false,
+      "isShootingPoint": true,
+      "takesDamage": true,
+      "takesFunctionalDamage": true
+    }
+  ],
+  "placement": {
+    "requireStructureOffsets": [],
+    "requireStructureBelowAnchor": false,
+    "requireStructureOnFunctionalOccupiedBoxes": true,
+    "requireStructureOnStructureOccupiedBoxes": true,
+    "requireEmptyStructureOffsets": [],
+    "requireEmptyFunctionalOffsets": []
+  },
+  "runtimeOverrides": {
+    "damage": 100,
+    "range": 500,
+    "spreadDeg": 1
+  },
+  "properties": {
+    "category": "weapon",
+    "subcategory": "heavy-shot",
+    "isEngine": false,
+    "isWeapon": true,
+    "isLoader": false,
+    "isArmor": false,
+    "weaponType": "heavy-shot",
+    "hasCoreTuning": false
+  },
+  "tags": [
+    "default",
+    "weapon",
+    "heavy-shot"
+  ]
+}

@@ -1,4 +1,4 @@
-import type { UnitTemplate } from "../types.ts";
+import type { PartDefinition, UnitTemplate } from "../types.ts";
 
 export {
   cloneTemplate,
@@ -11,7 +11,7 @@ export {
 
 import { parseTemplate } from "../../../packages/game-core/src/templates/template-schema.ts";
 
-async function fetchTemplateCollection(path: string): Promise<UnitTemplate[]> {
+async function fetchTemplateCollection(path: string, partCatalog?: ReadonlyArray<PartDefinition>): Promise<UnitTemplate[]> {
   try {
     const response = await fetch(path);
     if (!response.ok) {
@@ -22,19 +22,19 @@ async function fetchTemplateCollection(path: string): Promise<UnitTemplate[]> {
       return [];
     }
     return body.templates
-      .map((entry) => parseTemplate(entry))
+      .map((entry) => parseTemplate(entry, { partCatalog }))
       .filter((template): template is UnitTemplate => template !== null);
   } catch {
     return [];
   }
 }
 
-export async function fetchDefaultTemplatesFromStore(): Promise<UnitTemplate[]> {
-  return fetchTemplateCollection("/__templates/default");
+export async function fetchDefaultTemplatesFromStore(partCatalog?: ReadonlyArray<PartDefinition>): Promise<UnitTemplate[]> {
+  return fetchTemplateCollection("/__templates/default", partCatalog);
 }
 
-export async function fetchUserTemplatesFromStore(): Promise<UnitTemplate[]> {
-  return fetchTemplateCollection("/__templates/user");
+export async function fetchUserTemplatesFromStore(partCatalog?: ReadonlyArray<PartDefinition>): Promise<UnitTemplate[]> {
+  return fetchTemplateCollection("/__templates/user", partCatalog);
 }
 
 export async function saveUserTemplateToStore(template: UnitTemplate): Promise<boolean> {

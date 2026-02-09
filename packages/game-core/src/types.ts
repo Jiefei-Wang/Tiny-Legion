@@ -1,4 +1,4 @@
-export type ScreenMode = "base" | "map" | "battle" | "editor";
+export type ScreenMode = "base" | "map" | "battle" | "testArena" | "templateEditor" | "partEditor";
 
 export type MaterialId = "basic" | "reinforced" | "ceramic" | "reactive" | "combined";
 
@@ -94,6 +94,70 @@ export interface ComponentStats {
   };
 }
 
+export interface PartBoxTemplate {
+  x: number;
+  y: number;
+  occupiesStructureSpace?: boolean;
+  occupiesFunctionalSpace?: boolean;
+  needsStructureBehind?: boolean;
+  isAttachPoint?: boolean;
+  isAnchorPoint?: boolean;
+  isShootingPoint?: boolean;
+  takesDamage?: boolean;
+  // Legacy alias kept for backward compatibility with older part JSON.
+  takesFunctionalDamage?: boolean;
+}
+
+export interface PartPlacementTemplate {
+  requireStructureOffsets?: ReadonlyArray<{ x: number; y: number }>;
+  requireStructureBelowAnchor?: boolean;
+  requireStructureOnFunctionalOccupiedBoxes?: boolean;
+  requireStructureOnStructureOccupiedBoxes?: boolean;
+  requireEmptyStructureOffsets?: ReadonlyArray<{ x: number; y: number }>;
+  requireEmptyFunctionalOffsets?: ReadonlyArray<{ x: number; y: number }>;
+}
+
+export interface PartRuntimeOverrides {
+  mass?: number;
+  hpMul?: number;
+  power?: number;
+  maxSpeed?: number;
+  damage?: number;
+  range?: number;
+  cooldown?: number;
+  shootAngleDeg?: number;
+  spreadDeg?: number;
+}
+
+export interface PartDesignerProperties {
+  category?: string;
+  subcategory?: string;
+  hp?: number;
+  isEngine?: boolean;
+  isWeapon?: boolean;
+  isLoader?: boolean;
+  isArmor?: boolean;
+  engineType?: "ground" | "air";
+  weaponType?: WeaponClass;
+  loaderServesTags?: string[];
+  loaderCooldownMultiplier?: number;
+  hasCoreTuning?: boolean;
+}
+
+export interface PartDefinition {
+  id: string;
+  name: string;
+  layer: "functional";
+  baseComponent: ComponentId;
+  directional?: boolean;
+  anchor: { x: number; y: number };
+  boxes: PartBoxTemplate[];
+  placement?: PartPlacementTemplate;
+  runtimeOverrides?: PartRuntimeOverrides;
+  properties?: PartDesignerProperties;
+  tags?: string[];
+}
+
 export interface StructureCellTemplate {
   material: MaterialId;
   x?: number;
@@ -102,6 +166,7 @@ export interface StructureCellTemplate {
 
 export interface AttachmentTemplate {
   component: ComponentId;
+  partId?: string;
   cell: number;
   x?: number;
   y?: number;
@@ -140,11 +205,26 @@ export interface StructureCell {
 export interface Attachment {
   id: number;
   component: ComponentId;
+  partId?: string;
   cell: number;
   x: number;
   y: number;
   rotateQuarter: number;
   alive: boolean;
+  occupiedOffsets?: Array<{
+    x: number;
+    y: number;
+    occupiesStructureSpace: boolean;
+    occupiesFunctionalSpace: boolean;
+    needsStructureBehind: boolean;
+    isAttachPoint: boolean;
+    isShootingPoint: boolean;
+    takesDamage: boolean;
+    // Legacy alias kept to avoid broad runtime churn.
+    takesFunctionalDamage: boolean;
+  }>;
+  shootingOffset?: { x: number; y: number };
+  runtimeOverrides?: PartRuntimeOverrides;
 }
 
 export interface UnitInstance {
@@ -167,6 +247,7 @@ export interface UnitInstance {
   controlAttachmentId: number;
   weaponAttachmentIds: number[];
   selectedWeaponIndex: number;
+  weaponManualControl: boolean[];
   weaponAutoFire: boolean[];
   weaponFireTimers: number[];
   weaponReadyCharges: number[];

@@ -1,0 +1,47 @@
+{
+  "id": "tracking-missile",
+  "name": "Tracking Missile Pod",
+  "layer": "functional",
+  "baseComponent": "trackingMissile",
+  "directional": true,
+  "anchor": {
+    "x": 0,
+    "y": 0
+  },
+  "boxes": [
+    {
+      "x": 0,
+      "y": 0,
+      "occupiesStructureSpace": false,
+      "occupiesFunctionalSpace": true,
+      "needsStructureBehind": true,
+      "isAttachPoint": false,
+      "isAnchorPoint": true,
+      "isShootingPoint": true,
+      "takesDamage": true
+    }
+  ],
+  "placement": {
+    "requireStructureOffsets": [],
+    "requireStructureBelowAnchor": false,
+    "requireStructureOnFunctionalOccupiedBoxes": true,
+    "requireStructureOnStructureOccupiedBoxes": true,
+    "requireEmptyStructureOffsets": [],
+    "requireEmptyFunctionalOffsets": []
+  },
+  "properties": {
+    "category": "weapon",
+    "subcategory": "tracking",
+    "isEngine": false,
+    "isWeapon": true,
+    "isLoader": false,
+    "isArmor": false,
+    "weaponType": "tracking",
+    "hasCoreTuning": false
+  },
+  "tags": [
+    "default",
+    "weapon",
+    "tracking"
+  ]
+}

@@ -1,0 +1,47 @@
+{
+  "id": "emp-emitter",
+  "name": "EMP Emitter",
+  "layer": "functional",
+  "baseComponent": "empEmitter",
+  "directional": true,
+  "anchor": {
+    "x": 0,
+    "y": 0
+  },
+  "boxes": [
+    {
+      "x": 0,
+      "y": 0,
+      "occupiesStructureSpace": false,
+      "occupiesFunctionalSpace": true,
+      "needsStructureBehind": true,
+      "isAttachPoint": false,
+      "isAnchorPoint": true,
+      "isShootingPoint": true,
+      "takesDamage": true
+    }
+  ],
+  "placement": {
+    "requireStructureOffsets": [],
+    "requireStructureBelowAnchor": false,
+    "requireStructureOnFunctionalOccupiedBoxes": true,
+    "requireStructureOnStructureOccupiedBoxes": true,
+    "requireEmptyStructureOffsets": [],
+    "requireEmptyFunctionalOffsets": []
+  },
+  "properties": {
+    "category": "weapon",
+    "subcategory": "control-utility",
+    "isEngine": false,
+    "isWeapon": true,
+    "isLoader": false,
+    "isArmor": false,
+    "weaponType": "control-utility",
+    "hasCoreTuning": false
+  },
+  "tags": [
+    "default",
+    "weapon",
+    "utility"
+  ]
+}

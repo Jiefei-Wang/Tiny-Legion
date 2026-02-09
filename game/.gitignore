@@ -25,3 +25,6 @@ dist-ssr
 
 # User-designed unit templates
 templates/user/*.json
+
+# User-designed part definitions
+parts/user/*.json

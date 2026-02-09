@@ -90,7 +90,7 @@ body {
   flex-direction: column;
   gap: 12px;
   min-height: 0;
-  overflow: hidden;
+  overflow-y: auto;
 }
 
 .center-panel {
@@ -100,12 +100,20 @@ body {
 }
 
 .panel {
-  min-height: 180px;
+  min-height: 0;
+  flex: 1;
+  overflow-y: auto;
 }
 
 .tabs {
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
+}
+
+.tabs button {
+  width: 100%;
+  min-height: 34px;
 }
 
 button {
@@ -133,6 +141,11 @@ input {
   padding: 7px 10px;
 }
 
+input::placeholder {
+  color: var(--muted);
+  opacity: 0.8;
+}
+
 .debug-menu {
   position: absolute;
   top: 8px;
@@ -156,6 +169,11 @@ input {
   margin-top: 6px;
   font-size: 12px;
   color: var(--text);
+}
+
+.debug-menu > button {
+  margin-top: 8px;
+  width: 100%;
 }
 
 button:hover {
@@ -213,7 +231,7 @@ button.active {
   color: #ccdcf0;
 }
 
-.weapon-chip.selected {
+.weapon-chip.controlled {
   border-color: #8de4a9;
   color: #8de4a9;
 }

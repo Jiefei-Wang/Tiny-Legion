@@ -1,9 +1,24 @@
 import { MATERIALS } from "../../config/balance/materials.ts";
 import { COMPONENTS } from "../../config/balance/weapons.ts";
 import { nextUid } from "../../core/ids/uid.ts";
+import {
+  createDefaultPartDefinitions,
+  mergePartCatalogs,
+  getPartFootprintOffsets,
+  normalizePartAttachmentRotate,
+  resolvePartDefinitionForAttachment,
+} from "../../parts/part-schema.ts";
 import { recalcMass } from "../physics/mass-cache.ts";
 import { getControlUnit, validateSingleControlUnit } from "./control-unit-rules.ts";
-import type { LoaderState, Side, UnitInstance, UnitTemplate } from "../../types.ts";
+import type { LoaderState, PartDefinition, Side, UnitInstance, UnitTemplate } from "../../types.ts";
+
+function resolveCatalog(partCatalog?: ReadonlyArray<PartDefinition>): PartDefinition[] {
+  const defaults = createDefaultPartDefinitions();
+  if (!partCatalog || partCatalog.length <= 0) {
+    return defaults;
+  }
+  return mergePartCatalogs(defaults, partCatalog);
+}
 
 export function createInitialTemplates(): UnitTemplate[] {
   return [
@@ -86,7 +101,7 @@ export function instantiateUnit(
   side: Side,
   x: number,
   y: number,
-  options: { deploymentGasCost?: number } = {},
+  options: { deploymentGasCost?: number; partCatalog?: ReadonlyArray<PartDefinition> } = {},
 ): UnitInstance | null {
   const template = templates.find((entry) => entry.id === templateId);
   if (!template) {
@@ -107,18 +122,82 @@ export function instantiateUnit(
     };
   });
 
+  const partCatalog = resolveCatalog(options.partCatalog);
   const attachments = template.attachments.map((attachment, index) => {
+    const part = resolvePartDefinitionForAttachment(
+      { partId: attachment.partId, component: attachment.component },
+      partCatalog,
+    );
+    const component = part?.baseComponent ?? attachment.component;
     const host = structure[attachment.cell];
+    const rotateQuarterRaw = typeof attachment.rotateQuarter === "number"
+      ? attachment.rotateQuarter
+      : (attachment.rotate90 ? 1 : 0);
+    const rotateQuarter = normalizePartAttachmentRotate(
+      part ?? {
+        id: component,
+        name: component,
+        layer: "functional",
+        baseComponent: component,
+        anchor: { x: 0, y: 0 },
+        boxes: [{ x: 0, y: 0 }],
+        directional: COMPONENTS[component].directional === true,
+      },
+      rotateQuarterRaw,
+    );
+    const anchorX = attachment.x ?? host?.x ?? attachment.cell;
+    const anchorY = attachment.y ?? host?.y ?? 0;
+    const partOffsets = part
+      ? getPartFootprintOffsets(part, rotateQuarter)
+      : null;
+    const occupiedOffsets = partOffsets
+      ? partOffsets.map((offset) => ({
+          x: offset.x,
+          y: offset.y,
+          occupiesStructureSpace: offset.occupiesStructureSpace,
+          occupiesFunctionalSpace: offset.occupiesFunctionalSpace,
+          needsStructureBehind: offset.needsStructureBehind,
+          isAttachPoint: offset.isAttachPoint,
+          isShootingPoint: offset.isShootingPoint,
+          takesDamage: offset.takesDamage,
+          takesFunctionalDamage: offset.takesFunctionalDamage,
+        }))
+      : [{
+          x: 0,
+          y: 0,
+          occupiesStructureSpace: false,
+          occupiesFunctionalSpace: true,
+          needsStructureBehind: true,
+          isAttachPoint: false,
+          isShootingPoint: COMPONENTS[component].type === "weapon",
+          takesDamage: true,
+          takesFunctionalDamage: true,
+        }];
+    const shootingOffset = partOffsets?.find((offset) => offset.isShootingPoint);
     return {
       id: index,
-      component: attachment.component,
+      component,
+      partId: part?.id,
       cell: attachment.cell,
-      x: attachment.x ?? host?.x ?? attachment.cell,
-      y: attachment.y ?? host?.y ?? 0,
-      rotateQuarter: typeof attachment.rotateQuarter === "number"
-        ? ((attachment.rotateQuarter % 4 + 4) % 4)
-        : (attachment.rotate90 ? 1 : 0),
+      x: anchorX,
+      y: anchorY,
+      rotateQuarter,
       alive: true,
+      occupiedOffsets,
+      shootingOffset: shootingOffset ? { x: shootingOffset.x, y: shootingOffset.y } : undefined,
+      runtimeOverrides: part?.runtimeOverrides
+        ? {
+            mass: part.runtimeOverrides.mass,
+            hpMul: part.runtimeOverrides.hpMul,
+            power: part.runtimeOverrides.power,
+            maxSpeed: part.runtimeOverrides.maxSpeed,
+            damage: part.runtimeOverrides.damage,
+            range: part.runtimeOverrides.range,
+            cooldown: part.runtimeOverrides.cooldown,
+            shootAngleDeg: part.runtimeOverrides.shootAngleDeg,
+            spreadDeg: part.runtimeOverrides.spreadDeg,
+          }
+        : undefined,
     };
   });
 
@@ -177,6 +256,7 @@ export function instantiateUnit(
     controlAttachmentId: control.id,
     weaponAttachmentIds,
     selectedWeaponIndex: 0,
+    weaponManualControl: weaponAttachmentIds.map(() => true),
     weaponAutoFire: weaponAttachmentIds.map(() => true),
     weaponFireTimers: weaponAttachmentIds.map(() => 0),
     weaponReadyCharges: weaponAttachmentIds.map((_, slot) => {

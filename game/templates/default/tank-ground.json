@@ -23,21 +23,25 @@
   "attachments": [
     {
       "component": "control",
+      "partId": "control",
       "cell": 2,
       "rotateQuarter": 0
     },
     {
       "component": "engineM",
+      "partId": "engine-m",
       "cell": 1,
       "rotateQuarter": 0
     },
     {
       "component": "heavyCannon",
+      "partId": "heavy-cannon",
       "cell": 3,
       "rotateQuarter": 0
     },
     {
       "component": "cannonLoader",
+      "partId": "cannon-loader",
       "cell": 0,
       "rotateQuarter": 0
     }

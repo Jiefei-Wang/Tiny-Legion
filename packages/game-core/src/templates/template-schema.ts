@@ -1,7 +1,15 @@
 import { COMPONENTS } from "../config/balance/weapons.ts";
 import { MATERIALS } from "../config/balance/materials.ts";
+import {
+  createDefaultPartDefinitions,
+  getPartFootprintOffsets,
+  mergePartCatalogs,
+  normalizePartAttachmentRotate,
+  rotateOffsetByQuarter,
+  resolvePartDefinitionForAttachment,
+} from "../parts/part-schema.ts";
 import { validateTemplateDetailed } from "./template-validation.ts";
-import type { ComponentId, DisplayAttachmentTemplate, MaterialId, UnitTemplate, UnitType } from "../types.ts";
+import type { ComponentId, DisplayAttachmentTemplate, MaterialId, PartDefinition, UnitTemplate, UnitType } from "../types.ts";
 
 export { validateTemplateDetailed } from "./template-validation.ts";
 
@@ -16,7 +24,16 @@ const LEGACY_COMPONENT_MAP: Partial<Record<string, ComponentId>> = {
 type ParseTemplateOptions = {
   injectLoaders?: boolean;
   sanitizePlacement?: boolean;
+  partCatalog?: ReadonlyArray<PartDefinition>;
 };
+
+function resolveCatalog(partCatalog?: ReadonlyArray<PartDefinition>): PartDefinition[] {
+  const defaults = createDefaultPartDefinitions();
+  if (!partCatalog || partCatalog.length <= 0) {
+    return defaults;
+  }
+  return mergePartCatalogs(defaults, partCatalog);
+}
 
 function isUnitType(value: unknown): value is UnitType {
   return value === "ground" || value === "air";
@@ -49,32 +66,11 @@ function readOptionalInt(value: unknown): number | undefined {
   return Math.floor(value);
 }
 
-function rotateOffsetByQuarter(offsetX: number, offsetY: number, rotateQuarter: 0 | 1 | 2 | 3): { x: number; y: number } {
-  if (rotateQuarter === 0) {
-    return { x: offsetX, y: offsetY };
-  }
-  if (rotateQuarter === 1) {
-    return { x: -offsetY, y: offsetX };
-  }
-  if (rotateQuarter === 2) {
-    return { x: -offsetX, y: -offsetY };
-  }
-  return { x: offsetY, y: -offsetX };
-}
-
-function getComponentFootprintOffsets(component: ComponentId, rotateQuarter: 0 | 1 | 2 | 3): Array<{ x: number; y: number }> {
-  const stats = COMPONENTS[component];
-  const placementOffsets = stats.placement?.footprintOffsets;
-  if (placementOffsets && placementOffsets.length > 0) {
-    return placementOffsets.map((offset) => rotateOffsetByQuarter(offset.x, offset.y, rotateQuarter));
-  }
-  if (stats.type === "weapon" && stats.weaponClass === "heavy-shot") {
-    return [{ x: 0, y: 0 }, { x: 1, y: 0 }].map((offset) => rotateOffsetByQuarter(offset.x, offset.y, rotateQuarter));
-  }
-  return [{ x: 0, y: 0 }];
-}
-
-export function sanitizeTemplatePlacement(template: UnitTemplate): UnitTemplate {
+export function sanitizeTemplatePlacement(
+  template: UnitTemplate,
+  partCatalog?: ReadonlyArray<PartDefinition>,
+): UnitTemplate {
+  const catalog = resolveCatalog(partCatalog);
   const next = cloneTemplate(template);
   const structureCoords = new Set<string>();
   const cellCoords = new Map<number, { x: number; y: number }>();
@@ -87,63 +83,156 @@ export function sanitizeTemplatePlacement(template: UnitTemplate): UnitTemplate 
     cellCoords.set(i, { x: cell.x, y: cell.y });
   }
 
+  const occupiedFunctional = new Set<string>();
+  const occupiedStructure = new Set<string>();
   const occupiedSlots = new Set<number>();
-  const occupiedFootprint = new Set<string>();
+
   const attachments: UnitTemplate["attachments"] = [];
   for (const attachment of next.attachments) {
     if (!Number.isInteger(attachment.cell) || attachment.cell < 0 || attachment.cell >= next.structure.length) {
       continue;
     }
-    const rotateQuarterRaw = attachment.rotateQuarter ?? (attachment.rotate90 ? 1 : 0);
-    const rotateQuarter = ((rotateQuarterRaw % 4 + 4) % 4) as 0 | 1 | 2 | 3;
 
-    const stats = COMPONENTS[attachment.component];
-    const normalizedRotate = stats.directional ? rotateQuarter : 0;
+    const part = resolvePartDefinitionForAttachment(
+      { partId: attachment.partId, component: attachment.component },
+      catalog,
+    );
+    if (!part) {
+      continue;
+    }
+
+    const rotateQuarterRaw = attachment.rotateQuarter ?? (attachment.rotate90 ? 1 : 0);
+    const normalizedRotate = normalizePartAttachmentRotate(part, rotateQuarterRaw);
     const anchor = attachment.x !== undefined && attachment.y !== undefined
       ? { x: attachment.x, y: attachment.y }
       : cellCoords.get(attachment.cell);
 
-    const footprintOffsets = getComponentFootprintOffsets(attachment.component, normalizedRotate);
-    const footprintKeys = anchor
-      ? footprintOffsets.map((offset) => `${anchor.x + offset.x},${anchor.y + offset.y}`)
-      : [];
+    const footprint = getPartFootprintOffsets(part, normalizedRotate);
+    if (footprint.length <= 0) {
+      continue;
+    }
 
-    const placement = stats.placement;
-    if (placement && anchor) {
-      if (placement.requireStructureBelowAnchor) {
+    const occupancyKeys = footprint.map((item) => {
+      if (anchor) {
+        const x = anchor.x + item.x;
+        const y = anchor.y + item.y;
+        return {
+          ...item,
+          key: `xy:${x},${y}`,
+          coordKey: `${x},${y}`,
+          x,
+          y,
+        };
+      }
+      return {
+        ...item,
+        key: `cell:${attachment.cell}:${item.x},${item.y}`,
+        coordKey: null,
+        x: item.x,
+        y: item.y,
+      };
+    });
+
+    const placement = part.placement;
+    let blocked = false;
+    if (anchor) {
+      if (placement?.requireStructureBelowAnchor) {
         const supportKey = `${anchor.x},${anchor.y + 1}`;
         if (!structureCoords.has(supportKey)) {
-          continue;
+          blocked = true;
         }
       }
-      const requireStructureOnFootprint = placement.requireStructureOnFootprint ?? true;
-      if (requireStructureOnFootprint && footprintKeys.some((key) => !structureCoords.has(key))) {
-        continue;
+
+      if (!blocked) {
+        for (const offset of placement?.requireStructureOffsets ?? []) {
+          const rotated = rotateOffsetByQuarter(offset.x, offset.y, normalizedRotate);
+          const x = anchor.x + rotated.x;
+          const y = anchor.y + rotated.y;
+          if (!structureCoords.has(`${x},${y}`)) {
+            blocked = true;
+            break;
+          }
+        }
       }
-      const requiredEmptyOffsets = placement.requireEmptyOffsets ?? [];
-      const blocked = requiredEmptyOffsets
-        .map((offset) => rotateOffsetByQuarter(offset.x, offset.y, normalizedRotate))
-        .map((offset) => `${anchor.x + offset.x},${anchor.y + offset.y}`)
-        .some((key) => structureCoords.has(key));
-      if (blocked) {
-        continue;
+
+      if (!blocked) {
+        for (const offset of placement?.requireEmptyStructureOffsets ?? []) {
+          const rotated = rotateOffsetByQuarter(offset.x, offset.y, normalizedRotate);
+          const x = anchor.x + rotated.x;
+          const y = anchor.y + rotated.y;
+          if (structureCoords.has(`${x},${y}`)) {
+            blocked = true;
+            break;
+          }
+        }
+      }
+
+      if (!blocked) {
+        for (const offset of placement?.requireEmptyFunctionalOffsets ?? []) {
+          const rotated = rotateOffsetByQuarter(offset.x, offset.y, normalizedRotate);
+          const x = anchor.x + rotated.x;
+          const y = anchor.y + rotated.y;
+          if (occupiedFunctional.has(`xy:${x},${y}`)) {
+            blocked = true;
+            break;
+          }
+        }
+      }
+
+      if (!blocked) {
+        const requireStructureOnFunctional = placement?.requireStructureOnFunctionalOccupiedBoxes ?? true;
+        const requireStructureOnStructure = placement?.requireStructureOnStructureOccupiedBoxes ?? true;
+        for (const item of occupancyKeys) {
+          if (item.coordKey === null) {
+            continue;
+          }
+          const needsStructureForFunctional = item.needsStructureBehind || (item.occupiesFunctionalSpace && requireStructureOnFunctional);
+          const needsStructureForAttachPoint = item.isAttachPoint;
+          if ((needsStructureForFunctional || needsStructureForAttachPoint) && !structureCoords.has(item.coordKey)) {
+            blocked = true;
+            break;
+          }
+          if (item.occupiesStructureSpace && requireStructureOnStructure && !structureCoords.has(item.coordKey)) {
+            blocked = true;
+            break;
+          }
+          if (item.occupiesStructureSpace && structureCoords.has(item.coordKey)) {
+            blocked = true;
+            break;
+          }
+        }
       }
     }
 
-    if (anchor) {
-      if (footprintKeys.some((key) => occupiedFootprint.has(key))) {
-        continue;
-      }
-    } else if (occupiedSlots.has(attachment.cell)) {
+    if (blocked) {
+      continue;
+    }
+
+    if (!anchor && occupiedSlots.has(attachment.cell)) {
+      continue;
+    }
+
+    if (occupancyKeys.some((item) => item.occupiesFunctionalSpace && occupiedFunctional.has(item.key))) {
+      continue;
+    }
+    if (occupancyKeys.some((item) => item.occupiesStructureSpace && occupiedStructure.has(item.key))) {
       continue;
     }
 
     occupiedSlots.add(attachment.cell);
-    for (const key of footprintKeys) {
-      occupiedFootprint.add(key);
+    for (const item of occupancyKeys) {
+      if (item.occupiesFunctionalSpace) {
+        occupiedFunctional.add(item.key);
+      }
+      if (item.occupiesStructureSpace) {
+        occupiedStructure.add(item.key);
+      }
     }
+
     attachments.push({
       ...attachment,
+      component: part.baseComponent,
+      partId: part.id,
       rotateQuarter: normalizedRotate,
     });
   }
@@ -153,7 +242,11 @@ export function sanitizeTemplatePlacement(template: UnitTemplate): UnitTemplate 
   return next;
 }
 
-function ensureLoaderCoverage(template: UnitTemplate): UnitTemplate["attachments"] {
+function ensureLoaderCoverage(
+  template: UnitTemplate,
+  partCatalog?: ReadonlyArray<PartDefinition>,
+): UnitTemplate["attachments"] {
+  const catalog = resolveCatalog(partCatalog);
   const next = template.attachments.map((attachment) => ({ ...attachment }));
   const weaponClasses = new Set(
     next
@@ -174,18 +267,28 @@ function ensureLoaderCoverage(template: UnitTemplate): UnitTemplate["attachments
 
   const occupiedKeys = new Set<string>();
   for (const attachment of next) {
+    const part = resolvePartDefinitionForAttachment({ partId: attachment.partId, component: attachment.component }, catalog);
+    if (!part) {
+      continue;
+    }
     const rotateQuarterRaw = attachment.rotateQuarter ?? (attachment.rotate90 ? 1 : 0);
-    const rotateQuarter = ((rotateQuarterRaw % 4 + 4) % 4) as 0 | 1 | 2 | 3;
-    const footprintOffsets = getComponentFootprintOffsets(attachment.component, rotateQuarter);
+    const rotateQuarter = normalizePartAttachmentRotate(part, rotateQuarterRaw);
+    const footprint = getPartFootprintOffsets(part, rotateQuarter);
     const baseX = attachment.x;
     const baseY = attachment.y;
     if (baseX !== undefined && baseY !== undefined) {
-      for (const offset of footprintOffsets) {
+      for (const offset of footprint) {
+        if (!offset.occupiesFunctionalSpace && !offset.occupiesStructureSpace) {
+          continue;
+        }
         occupiedKeys.add(`xy:${baseX + offset.x},${baseY + offset.y}`);
       }
       continue;
     }
-    for (const offset of footprintOffsets) {
+    for (const offset of footprint) {
+      if (!offset.occupiesFunctionalSpace && !offset.occupiesStructureSpace) {
+        continue;
+      }
       occupiedKeys.add(`cell:${attachment.cell}:${offset.x},${offset.y}`);
     }
   }
@@ -194,6 +297,11 @@ function ensureLoaderCoverage(template: UnitTemplate): UnitTemplate["attachments
     if (!weaponClasses.has(supportedClass) || supportedClasses.has(supportedClass)) {
       return;
     }
+    const loaderPart = resolvePartDefinitionForAttachment({ component }, catalog);
+    if (!loaderPart) {
+      return;
+    }
+
     const anchor = next.find((attachment) => {
       const stats = COMPONENTS[attachment.component];
       return stats.type === "weapon" && (stats.weaponClass ?? "rapid-fire") === supportedClass;
@@ -201,20 +309,24 @@ function ensureLoaderCoverage(template: UnitTemplate): UnitTemplate["attachments
     if (!anchor) {
       return;
     }
-    const loaderFootprint = getComponentFootprintOffsets(component, 0);
+
+    const loaderFootprint = getPartFootprintOffsets(loaderPart, 0);
     let placed:
       | { cell: number; x: number | undefined; y: number | undefined; keys: string[] }
       | null = null;
+
     for (let cellIndex = 0; cellIndex < template.structure.length; cellIndex += 1) {
       const structureCell = template.structure[cellIndex];
       const baseX = structureCell?.x;
       const baseY = structureCell?.y;
-      const candidateKeys = loaderFootprint.map((offset) => {
-        if (baseX !== undefined && baseY !== undefined) {
-          return `xy:${baseX + offset.x},${baseY + offset.y}`;
-        }
-        return `cell:${cellIndex}:${offset.x},${offset.y}`;
-      });
+      const candidateKeys = loaderFootprint
+        .filter((offset) => offset.occupiesFunctionalSpace || offset.occupiesStructureSpace)
+        .map((offset) => {
+          if (baseX !== undefined && baseY !== undefined) {
+            return `xy:${baseX + offset.x},${baseY + offset.y}`;
+          }
+          return `cell:${cellIndex}:${offset.x},${offset.y}`;
+        });
       if (candidateKeys.some((key) => occupiedKeys.has(key))) {
         continue;
       }
@@ -226,31 +338,39 @@ function ensureLoaderCoverage(template: UnitTemplate): UnitTemplate["attachments
       };
       break;
     }
+
     const fallbackBaseX = anchor.x;
     const fallbackBaseY = anchor.y;
-    const fallbackKeys = loaderFootprint.map((offset) => {
-      if (fallbackBaseX !== undefined && fallbackBaseY !== undefined) {
-        return `xy:${fallbackBaseX + offset.x},${fallbackBaseY + offset.y}`;
-      }
-      return `cell:${anchor.cell}:${offset.x},${offset.y}`;
-    });
+    const fallbackKeys = loaderFootprint
+      .filter((offset) => offset.occupiesFunctionalSpace || offset.occupiesStructureSpace)
+      .map((offset) => {
+        if (fallbackBaseX !== undefined && fallbackBaseY !== undefined) {
+          return `xy:${fallbackBaseX + offset.x},${fallbackBaseY + offset.y}`;
+        }
+        return `cell:${anchor.cell}:${offset.x},${offset.y}`;
+      });
+
     const target = placed ?? {
       cell: anchor.cell,
       x: anchor.x,
       y: anchor.y,
       keys: fallbackKeys,
     };
+
     next.push({
-      component,
+      component: loaderPart.baseComponent,
+      partId: loaderPart.id,
       cell: target.cell,
       x: target.x,
       y: target.y,
       rotateQuarter: 0,
     });
+
     for (const key of target.keys) {
       occupiedKeys.add(key);
     }
-    const loaderStats = COMPONENTS[component];
+
+    const loaderStats = COMPONENTS[loaderPart.baseComponent];
     if (loaderStats.type === "loader" && loaderStats.loader) {
       for (const supported of loaderStats.loader.supports) {
         supportedClasses.add(supported);
@@ -274,6 +394,7 @@ export function cloneTemplate(template: UnitTemplate): UnitTemplate {
     structure: template.structure.map((cell) => ({ material: cell.material, x: cell.x, y: cell.y })),
     attachments: template.attachments.map((attachment) => ({
       component: attachment.component,
+      partId: attachment.partId,
       cell: attachment.cell,
       x: attachment.x,
       y: attachment.y,
@@ -284,13 +405,16 @@ export function cloneTemplate(template: UnitTemplate): UnitTemplate {
   };
 }
 
-export function getTemplateValidationIssues(template: UnitTemplate): string[] {
-  const detailed = validateTemplateDetailed(template);
+export function getTemplateValidationIssues(template: UnitTemplate, partCatalog?: ReadonlyArray<PartDefinition>): string[] {
+  const detailed = validateTemplateDetailed(template, { partCatalog });
   return [...detailed.errors, ...detailed.warnings];
 }
 
-export function validateTemplate(template: UnitTemplate): { valid: boolean; reason: string | null } {
-  const detailed = validateTemplateDetailed(template);
+export function validateTemplate(
+  template: UnitTemplate,
+  partCatalog?: ReadonlyArray<PartDefinition>,
+): { valid: boolean; reason: string | null } {
+  const detailed = validateTemplateDetailed(template, { partCatalog });
   if (detailed.errors.length > 0) {
     return { valid: false, reason: detailed.errors[0] ?? "invalid template" };
   }
@@ -308,6 +432,9 @@ export function parseTemplate(input: unknown, options: ParseTemplateOptions = {}
   if (!Array.isArray(data.structure) || !Array.isArray(data.attachments)) {
     return null;
   }
+
+  const partCatalog = resolveCatalog(options.partCatalog);
+
   const structure: UnitTemplate["structure"] = [];
   for (const rawCell of data.structure) {
     if (!rawCell || typeof rawCell !== "object") {
@@ -324,6 +451,7 @@ export function parseTemplate(input: unknown, options: ParseTemplateOptions = {}
       y: readOptionalInt(record.y),
     });
   }
+
   const coordToCell = new Map<string, number>();
   for (let i = 0; i < structure.length; i += 1) {
     const cell = structure[i];
@@ -332,16 +460,26 @@ export function parseTemplate(input: unknown, options: ParseTemplateOptions = {}
     }
     coordToCell.set(`${cell.x},${cell.y}`, i);
   }
+
   const attachments: UnitTemplate["attachments"] = [];
   for (const rawAttachment of data.attachments) {
     if (!rawAttachment || typeof rawAttachment !== "object") {
       continue;
     }
     const record = rawAttachment as Record<string, unknown>;
-    const component = normalizeComponentId(record.component);
+    const partId = typeof record.partId === "string" && record.partId.trim().length > 0
+      ? record.partId.trim()
+      : undefined;
+
+    const partFromId = partId
+      ? resolvePartDefinitionForAttachment({ partId }, partCatalog)
+      : null;
+
+    const component = normalizeComponentId(record.component) ?? partFromId?.baseComponent ?? null;
     if (!component) {
       continue;
     }
+
     const x = readOptionalInt(record.x);
     const y = readOptionalInt(record.y);
     const byCoord = x !== undefined && y !== undefined ? coordToCell.get(`${x},${y}`) : undefined;
@@ -350,8 +488,10 @@ export function parseTemplate(input: unknown, options: ParseTemplateOptions = {}
     if (cell === undefined) {
       continue;
     }
+
     attachments.push({
       component,
+      partId,
       cell,
       x,
       y,
@@ -398,9 +538,9 @@ export function parseTemplate(input: unknown, options: ParseTemplateOptions = {}
     return null;
   }
 
-  const placementNormalized = sanitizePlacement ? sanitizeTemplatePlacement(template) : template;
+  const placementNormalized = sanitizePlacement ? sanitizeTemplatePlacement(template, partCatalog) : template;
   const loaderNormalized = injectLoaders
-    ? { ...placementNormalized, attachments: ensureLoaderCoverage(placementNormalized) }
+    ? { ...placementNormalized, attachments: ensureLoaderCoverage(placementNormalized, partCatalog) }
     : placementNormalized;
   return loaderNormalized;
 }

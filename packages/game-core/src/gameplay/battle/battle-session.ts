@@ -20,8 +20,9 @@ import { solveBallisticAim } from "../../ai/shooting/ballistic-aim.ts";
 import { adjustAimForWeaponPolicy } from "../../ai/shooting/weapon-ai-policy.ts";
 import { evaluateCombatDecisionTree } from "../../ai/decision-tree/combat-decision-tree.ts";
 import { validateTemplateDetailed } from "../../templates/template-validation.ts";
+import { createDefaultPartDefinitions, mergePartCatalogs } from "../../parts/part-schema.ts";
 import type { CombatDecision } from "../../ai/decision-tree/combat-decision-tree.ts";
-import type { BattleState, KeyState, MapNode, Side, UnitInstance, UnitTemplate } from "../../types.ts";
+import type { BattleState, KeyState, MapNode, PartDefinition, Side, UnitInstance, UnitTemplate } from "../../types.ts";
 
 const GROUND_MIN_Y = 250;
 const GROUND_MAX_Y = 485;
@@ -63,6 +64,7 @@ export interface BattleSessionOptions {
   disableAutoEnemySpawns?: boolean;
   disableEnemyMinimumPresence?: boolean;
   disableDefaultStarters?: boolean;
+  partCatalog?: ReadonlyArray<PartDefinition>;
 }
 
 export class BattleSession {
@@ -75,6 +77,7 @@ export class BattleSession {
   private readonly disableAutoEnemySpawns: boolean;
   private readonly disableEnemyMinimumPresence: boolean;
   private readonly disableDefaultStarters: boolean;
+  private partCatalog: PartDefinition[];
   private state: BattleState;
   private selectedUnitId: string | null;
   private playerControlledId: string | null;
@@ -84,6 +87,8 @@ export class BattleSession {
   private displayEnabled: boolean;
   private debugDrawEnabled: boolean;
   private debugTargetLineEnabled: boolean;
+  private debugPartHpEnabled: boolean;
+  private controlledUnitInvincible: boolean;
 
   constructor(canvas: HTMLCanvasElement, hooks: BattleHooks, templates: UnitTemplate[], options: BattleSessionOptions = {}) {
     const context = canvas.getContext("2d");
@@ -99,15 +104,20 @@ export class BattleSession {
     this.disableAutoEnemySpawns = options.disableAutoEnemySpawns ?? false;
     this.disableEnemyMinimumPresence = options.disableEnemyMinimumPresence ?? false;
     this.disableDefaultStarters = options.disableDefaultStarters ?? false;
+    this.partCatalog = options.partCatalog && options.partCatalog.length > 0
+      ? mergePartCatalogs(createDefaultPartDefinitions(), options.partCatalog)
+      : createDefaultPartDefinitions();
     this.state = this.createEmptyBattle();
     this.selectedUnitId = null;
     this.playerControlledId = null;
     this.aimX = canvas.width * 0.7;
     this.aimY = canvas.height * 0.5;
     this.manualFireHeld = false;
-    this.displayEnabled = true;
+    this.displayEnabled = false;
     this.debugDrawEnabled = false;
     this.debugTargetLineEnabled = false;
+    this.debugPartHpEnabled = false;
+    this.controlledUnitInvincible = false;
   }
 
   public getState(): BattleState {
@@ -122,9 +132,25 @@ export class BattleSession {
     return this.displayEnabled;
   }
 
-  public toggleDisplayLayer(): void {
-    this.displayEnabled = !this.displayEnabled;
+  public setDisplayLayerEnabled(enabled: boolean): void {
+    const next = enabled === true;
+    if (this.displayEnabled === next) {
+      return;
+    }
+    this.displayEnabled = next;
     this.hooks.addLog(this.displayEnabled ? "Display layer ON" : "Display layer OFF", "warn");
+  }
+
+  public toggleDisplayLayer(): void {
+    this.setDisplayLayerEnabled(!this.displayEnabled);
+  }
+
+  public isPartHpOverlayEnabled(): boolean {
+    return this.debugPartHpEnabled;
+  }
+
+  public setDebugPartHpEnabled(enabled: boolean): void {
+    this.debugPartHpEnabled = enabled === true;
   }
 
   public setDebugDrawEnabled(enabled: boolean): void {
@@ -133,6 +159,63 @@ export class BattleSession {
 
   public setDebugTargetLineEnabled(enabled: boolean): void {
     this.debugTargetLineEnabled = enabled;
+  }
+
+  public setPartCatalog(partCatalog: ReadonlyArray<PartDefinition>): void {
+    this.partCatalog = partCatalog.length > 0
+      ? mergePartCatalogs(createDefaultPartDefinitions(), partCatalog)
+      : createDefaultPartDefinitions();
+  }
+
+  public isControlledUnitInvincible(): boolean {
+    return this.controlledUnitInvincible;
+  }
+
+  public setControlledUnitInvincible(enabled: boolean): void {
+    this.controlledUnitInvincible = enabled === true;
+  }
+
+  public getAliveEnemyCount(): number {
+    return this.state.units.filter((unit) => unit.side === "enemy" && unit.alive).length;
+  }
+
+  public setEnemyActiveCount(targetCount: number): number {
+    const normalizedTarget = clamp(Math.floor(targetCount), 0, 40);
+    this.state.enemyMinActive = normalizedTarget;
+    this.state.enemyCap = normalizedTarget;
+    if (!this.state.active || this.state.outcome) {
+      return this.getAliveEnemyCount();
+    }
+
+    const aliveEnemies = this.state.units.filter((unit) => unit.side === "enemy" && unit.alive);
+    if (aliveEnemies.length > normalizedTarget) {
+      const removeCount = aliveEnemies.length - normalizedTarget;
+      for (let i = 0; i < removeCount; i += 1) {
+        const enemy = aliveEnemies[aliveEnemies.length - 1 - i];
+        if (!enemy) {
+          continue;
+        }
+        enemy.alive = false;
+      }
+      this.state.units = this.state.units.filter((unit) => unit.alive);
+    }
+
+    let aliveCount = this.getAliveEnemyCount();
+    let attempts = 0;
+    const maxAttempts = Math.max(4, normalizedTarget * 4);
+    while (aliveCount < normalizedTarget && attempts < maxAttempts) {
+      const spawned = this.maybeSpawnEnemy();
+      if (!spawned) {
+        break;
+      }
+      aliveCount += 1;
+      attempts += 1;
+    }
+    return this.getAliveEnemyCount();
+  }
+
+  public spawnEnemyTemplate(templateId: string): boolean {
+    return this.arenaDeploy("enemy", templateId, { chargeGas: false, ignoreCap: true, ignoreLowGasThreshold: true });
   }
 
   public setAim(mouseX: number, mouseY: number): void {
@@ -222,7 +305,7 @@ export class BattleSession {
     this.hooks.addLog(`${controlled.name} flipped direction`, "warn");
   }
 
-  public selectControlledWeapon(slotIndex: number): void {
+  public toggleControlledWeaponManualControl(slotIndex: number): void {
     if (!this.playerControlledId || !this.state.active) {
       return;
     }
@@ -233,8 +316,17 @@ export class BattleSession {
     if (slotIndex < 0 || slotIndex >= controlled.weaponAttachmentIds.length) {
       return;
     }
-    controlled.selectedWeaponIndex = slotIndex;
-    this.hooks.addLog(`${controlled.name} selected weapon #${slotIndex + 1}`);
+    const next = !this.isWeaponManualControlEnabled(controlled, slotIndex);
+    controlled.weaponManualControl[slotIndex] = next;
+    if (next) {
+      controlled.selectedWeaponIndex = slotIndex;
+    }
+    const status = next ? "ON" : "OFF";
+    this.hooks.addLog(`${controlled.name} weapon #${slotIndex + 1} manual control ${status}`, "warn");
+  }
+
+  public selectControlledWeapon(slotIndex: number): void {
+    this.toggleControlledWeaponManualControl(slotIndex);
   }
 
   public toggleControlledWeaponAutoFire(slotIndex: number): void {
@@ -270,8 +362,14 @@ export class BattleSession {
     }
 
     if (!this.disableDefaultStarters) {
-      const starterA = instantiateUnit(this.templates, "scout-ground", "player", 140, 300, { deploymentGasCost: 0 });
-      const starterB = instantiateUnit(this.templates, "tank-ground", "player", 150, 430, { deploymentGasCost: 0 });
+      const starterA = instantiateUnit(this.templates, "scout-ground", "player", 140, 300, {
+        deploymentGasCost: 0,
+        partCatalog: this.partCatalog,
+      });
+      const starterB = instantiateUnit(this.templates, "tank-ground", "player", 150, 430, {
+        deploymentGasCost: 0,
+        partCatalog: this.partCatalog,
+      });
       if (starterA) {
         this.state.units.push(starterA);
       }
@@ -313,7 +411,7 @@ export class BattleSession {
       this.hooks.addLog("Commander cap reached", "warn");
       return;
     }
-    const validation = validateTemplateDetailed(template);
+    const validation = validateTemplateDetailed(template, { partCatalog: this.partCatalog });
     if (validation.errors.length > 0) {
       this.hooks.addLog(`Cannot deploy ${template.name}: ${validation.errors[0] ?? "invalid template"}`, "bad");
       return;
@@ -322,7 +420,9 @@ export class BattleSession {
     const y = template.type === "air"
       ? AIR_MIN_Z + Math.random() * (AIR_MAX_Z - AIR_MIN_Z)
       : GROUND_MIN_Y + Math.random() * (GROUND_MAX_Y - GROUND_MIN_Y);
-    const unit = instantiateUnit(this.templates, templateId, "player", 120, y);
+    const unit = instantiateUnit(this.templates, templateId, "player", 120, y, {
+      partCatalog: this.partCatalog,
+    });
     if (!unit) {
       this.hooks.addLog(`Cannot deploy ${template.name}: instantiate failed`, "bad");
       return;
@@ -464,7 +564,9 @@ export class BattleSession {
             const beforeAliveAttachments = new Set(target.attachments.filter((attachment) => attachment.alive).map((attachment) => attachment.id));
             const wasAlive = target.alive;
             const impactSide = projectile.vx >= 0 ? -1 : 1;
-            applyHitToUnit(target, projectile.damage, projectile.hitImpulse, impactSide, hitCellId);
+            if (!this.shouldIgnoreDamageForUnit(target)) {
+              applyHitToUnit(target, projectile.damage, projectile.hitImpulse, impactSide, hitCellId);
+            }
             projectile.hitUnitIds.push(target.id);
             if (projectile.intendedTargetId === target.id) {
               projectile.hitIntendedTarget = true;
@@ -499,7 +601,9 @@ export class BattleSession {
           const beforeAliveAttachments = new Set(target.attachments.filter((attachment) => attachment.alive).map((attachment) => attachment.id));
           const wasAlive = target.alive;
           const impactSide = projectile.vx >= 0 ? -1 : 1;
-          applyHitToUnit(target, projectile.damage, projectile.hitImpulse, impactSide, hitCellId);
+          if (!this.shouldIgnoreDamageForUnit(target)) {
+            applyHitToUnit(target, projectile.damage, projectile.hitImpulse, impactSide, hitCellId);
+          }
           projectile.hitUnitIds.push(target.id);
           if (projectile.intendedTargetId === target.id) {
             projectile.hitIntendedTarget = true;
@@ -684,7 +788,7 @@ export class BattleSession {
       return false;
     }
     const candidates = this.templates.filter((template) => {
-      const validation = validateTemplateDetailed(template);
+      const validation = validateTemplateDetailed(template, { partCatalog: this.partCatalog });
       if (validation.errors.length > 0) {
         return false;
       }
@@ -707,7 +811,9 @@ export class BattleSession {
     const y = template.type === "air"
       ? AIR_MIN_Z + Math.random() * (AIR_MAX_Z - AIR_MIN_Z)
       : GROUND_MIN_Y + Math.random() * (GROUND_MAX_Y - GROUND_MIN_Y);
-    const enemy = instantiateUnit(this.templates, template.id, "enemy", this.canvas.width - 120, y);
+    const enemy = instantiateUnit(this.templates, template.id, "enemy", this.canvas.width - 120, y, {
+      partCatalog: this.partCatalog,
+    });
     if (!enemy) {
       return false;
     }
@@ -730,7 +836,7 @@ export class BattleSession {
     if (!template) {
       return false;
     }
-    const validation = validateTemplateDetailed(template);
+    const validation = validateTemplateDetailed(template, { partCatalog: this.partCatalog });
     if (validation.errors.length > 0) {
       return false;
     }
@@ -749,6 +855,7 @@ export class BattleSession {
             : GROUND_MIN_Y + Math.random() * (GROUND_MAX_Y - GROUND_MIN_Y);
       const unit = instantiateUnit(this.templates, templateId, "player", 120, y, {
         deploymentGasCost: typeof opts.deploymentGasCost === "number" && Number.isFinite(opts.deploymentGasCost) ? opts.deploymentGasCost : undefined,
+        partCatalog: this.partCatalog,
       });
       if (!unit) {
         return false;
@@ -776,6 +883,7 @@ export class BattleSession {
           : GROUND_MIN_Y + Math.random() * (GROUND_MAX_Y - GROUND_MIN_Y);
     const enemy = instantiateUnit(this.templates, templateId, "enemy", this.canvas.width - 120, y, {
       deploymentGasCost: typeof opts.deploymentGasCost === "number" && Number.isFinite(opts.deploymentGasCost) ? opts.deploymentGasCost : undefined,
+      partCatalog: this.partCatalog,
     });
     if (!enemy) {
       return false;
@@ -875,7 +983,9 @@ export class BattleSession {
       }
       const hitCellId = this.projectileHitsLiveCell(projectile, target, target.type === "air");
       const impactSide = dx >= 0 ? 1 : -1;
-      applyHitToUnit(target, splashDamage, projectile.hitImpulse * 0.45, impactSide, hitCellId);
+      if (!this.shouldIgnoreDamageForUnit(target)) {
+        applyHitToUnit(target, splashDamage, projectile.hitImpulse * 0.45, impactSide, hitCellId);
+      }
       if (projectile.controlImpairDuration > 0) {
         this.applyControlImpair(target, projectile.controlImpairFactor, projectile.controlImpairDuration * 0.8);
       }
@@ -900,20 +1010,24 @@ export class BattleSession {
       return;
     }
     if (manual) {
-      this.fireSelectedWeapon(unit, target, intendedTargetId, intendedTargetY);
+      this.fireManualControlledWeapons(unit, target, intendedTargetId, intendedTargetY);
       return;
     }
     this.fireAutoWeapons(unit, target, intendedTargetId, intendedTargetY);
   }
 
-  private fireSelectedWeapon(
+  private fireManualControlledWeapons(
     unit: UnitInstance,
     target: { x: number; y: number } | null,
     intendedTargetId: string | null,
     intendedTargetY: number | null,
-  ): boolean {
-    const slot = clamp(unit.selectedWeaponIndex, 0, Math.max(0, unit.weaponAttachmentIds.length - 1));
-    return this.fireWeaponSlot(unit, slot, true, target, intendedTargetId, intendedTargetY);
+  ): void {
+    for (let slot = 0; slot < unit.weaponAttachmentIds.length; slot += 1) {
+      if (!this.isWeaponManualControlEnabled(unit, slot)) {
+        continue;
+      }
+      this.fireWeaponSlot(unit, slot, true, target, intendedTargetId, intendedTargetY);
+    }
   }
 
   private fireAutoWeapons(
@@ -921,15 +1035,20 @@ export class BattleSession {
     target: { x: number; y: number } | null,
     intendedTargetId: string | null,
     intendedTargetY: number | null,
-    excludeSlot: number | null = null,
+    options: { excludeSlot?: number | null; suppressedSlots?: ReadonlySet<number> } = {},
   ): void {
     const slotCount = unit.weaponAttachmentIds.length;
     if (slotCount === 0) {
       return;
     }
+    const excludeSlot = options.excludeSlot ?? null;
+    const suppressedSlots = options.suppressedSlots ?? null;
     for (let offset = 0; offset < slotCount; offset += 1) {
       const slot = (unit.aiWeaponCycleIndex + offset) % slotCount;
       if (excludeSlot !== null && slot === excludeSlot) {
+        continue;
+      }
+      if (suppressedSlots?.has(slot)) {
         continue;
       }
       if (!unit.weaponAutoFire[slot]) {
@@ -990,19 +1109,26 @@ export class BattleSession {
       return false;
     }
     const attachmentId = unit.weaponAttachmentIds[slot];
-    const shot = applyRecoilForAttachment(unit, attachmentId);
-    if (!shot) {
-      return false;
-    }
-    const attachment = unit.attachments.find((entry) => entry.id === attachmentId);
+    const attachment = unit.attachments.find((entry) => entry.id === attachmentId && entry.alive);
     if (!attachment) {
       return false;
     }
-    if (this.requiresDedicatedLoader(shot.weaponClass)) {
+    const attachmentStats = COMPONENTS[attachment.component];
+    if (attachmentStats.type !== "weapon") {
+      return false;
+    }
+    const attachmentWeaponClass = attachmentStats.weaponClass ?? "rapid-fire";
+    const requiresDedicatedLoader = this.requiresDedicatedLoader(attachmentWeaponClass);
+    // Cooldown/reload commands should be a true no-op: skip recoil if not ready.
+    if (requiresDedicatedLoader) {
       const charges = unit.weaponReadyCharges[slot] ?? 0;
       if (charges <= 0) {
         return false;
       }
+    }
+    const shot = applyRecoilForAttachment(unit, attachmentId);
+    if (!shot) {
+      return false;
     }
     const effectiveRange = this.getEffectiveWeaponRange(unit, shot.range);
     const fallbackX = unit.x + unit.facing * 400;
@@ -1019,7 +1145,14 @@ export class BattleSession {
       ? (intendedTargetId ?? this.findClosestEnemyToPoint(unit.side, finalIntendedTargetX, finalIntendedTargetY)?.id ?? null)
       : null;
     const weaponCellSize = Math.max(8, Math.min(14, unit.radius * 1.7 * 0.24));
-    const weaponOffset = this.getCellOffset(unit, attachment.cell, weaponCellSize);
+    const weaponOffset = attachment.shootingOffset
+      ? this.getCoordOffset(
+          unit,
+          attachment.x + attachment.shootingOffset.x,
+          attachment.y + attachment.shootingOffset.y,
+          weaponCellSize,
+        )
+      : this.getCellOffset(unit, attachment.cell, weaponCellSize);
     const weaponOriginX = unit.x + weaponOffset.x;
     const weaponOriginY = unit.y + weaponOffset.y;
     const dx = targetX - weaponOriginX;
@@ -1075,7 +1208,7 @@ export class BattleSession {
       hitImpulse: shot.impulse,
       r: Math.max(2, Math.sqrt(shot.damage) * 0.35),
     });
-    if (this.requiresDedicatedLoader(shot.weaponClass)) {
+    if (requiresDedicatedLoader) {
       unit.weaponReadyCharges[slot] = Math.max(0, (unit.weaponReadyCharges[slot] ?? 0) - 1);
       unit.weaponFireTimers[slot] = this.getLoaderMinBurstInterval(unit, slot);
     } else {
@@ -1291,9 +1424,10 @@ export class BattleSession {
       if (!weaponStats || weaponStats.type !== "weapon") {
         continue;
       }
+      const weaponCooldown = weaponAttachment?.runtimeOverrides?.cooldown ?? weaponStats.cooldown ?? 1;
 
       loaderState.targetWeaponSlot = nextSlot;
-      loaderState.remaining = this.computeLoaderDuration(loaderStats, weaponStats.cooldown ?? 1);
+      loaderState.remaining = this.computeLoaderDuration(loaderStats, weaponCooldown);
       unit.weaponLoadTimers[nextSlot] = Math.max(unit.weaponLoadTimers[nextSlot] ?? 0, loaderState.remaining);
       alreadyLoading.add(nextSlot);
     }
@@ -1319,8 +1453,8 @@ export class BattleSession {
       } else if (propulsion?.platform === "air") {
         continue;
       }
-      const enginePower = Math.max(0, stats.power ?? 0);
-      const engineSpeedCap = Math.max(1, stats.maxSpeed ?? 90);
+      const enginePower = Math.max(0, attachment.runtimeOverrides?.power ?? stats.power ?? 0);
+      const engineSpeedCap = Math.max(1, attachment.runtimeOverrides?.maxSpeed ?? stats.maxSpeed ?? 90);
       totalPower += enginePower;
       weightedSpeedCap += engineSpeedCap * Math.max(1, enginePower);
       capWeight += Math.max(1, enginePower);
@@ -1371,7 +1505,7 @@ export class BattleSession {
       if (stats.type !== "engine" || stats.propulsion?.platform !== "air") {
         continue;
       }
-      const enginePower = Math.max(0, stats.power ?? 0);
+      const enginePower = Math.max(0, attachment.runtimeOverrides?.power ?? stats.power ?? 0);
       const baseAccel = (enginePower / Math.max(16, unit.mass)) * AIR_THRUST_ACCEL_SCALE;
       if (stats.propulsion.mode === "omni") {
         accel += baseAccel;
@@ -1512,7 +1646,47 @@ export class BattleSession {
     return this.state.units.find((unit) => unit.id === this.playerControlledId && unit.alive && unit.side === "player") ?? null;
   }
 
+  private isWeaponManualControlEnabled(unit: UnitInstance, slot: number): boolean {
+    if (slot < 0 || slot >= unit.weaponAttachmentIds.length) {
+      return false;
+    }
+    return unit.weaponManualControl[slot] !== false;
+  }
+
+  private getManualControlSuppressedSlots(unit: UnitInstance): Set<number> {
+    const suppressed = new Set<number>();
+    for (let slot = 0; slot < unit.weaponAttachmentIds.length; slot += 1) {
+      if (this.isWeaponManualControlEnabled(unit, slot)) {
+        suppressed.add(slot);
+      }
+    }
+    return suppressed;
+  }
+
   private getSelectedWeaponRange(unit: UnitInstance): number {
+    if (unit.id === this.playerControlledId) {
+      let bestRange = 0;
+      for (let slot = 0; slot < unit.weaponAttachmentIds.length; slot += 1) {
+        if (!this.isWeaponManualControlEnabled(unit, slot)) {
+          continue;
+        }
+        const attachmentId = unit.weaponAttachmentIds[slot];
+        const attachment = unit.attachments.find((entry) => entry.id === attachmentId && entry.alive);
+        if (!attachment) {
+          continue;
+        }
+        const stats = COMPONENTS[attachment.component];
+        const range = attachment.runtimeOverrides?.range ?? stats.range;
+        if (range === undefined) {
+          continue;
+        }
+        bestRange = Math.max(bestRange, this.getEffectiveWeaponRange(unit, range));
+      }
+      if (bestRange > 0) {
+        return bestRange;
+      }
+    }
+
     const slot = clamp(unit.selectedWeaponIndex, 0, Math.max(0, unit.weaponAttachmentIds.length - 1));
     const attachmentId = unit.weaponAttachmentIds[slot];
     if (attachmentId === undefined) {
@@ -1523,10 +1697,11 @@ export class BattleSession {
       return 0;
     }
     const stats = COMPONENTS[attachment.component];
-    if (stats.range === undefined) {
+    const range = attachment.runtimeOverrides?.range ?? stats.range;
+    if (range === undefined) {
       return 0;
     }
-    return this.getEffectiveWeaponRange(unit, stats.range);
+    return this.getEffectiveWeaponRange(unit, range);
   }
 
   private getDesiredEngageRange(unit: UnitInstance): number {
@@ -1537,11 +1712,12 @@ export class BattleSession {
     let best = 180;
     for (const weaponAttachment of weapons) {
       const stats = COMPONENTS[weaponAttachment.component];
-      if (stats.range === undefined) {
+      const range = weaponAttachment.runtimeOverrides?.range ?? stats.range;
+      if (range === undefined) {
         continue;
       }
       const factor = unit.type === "air" ? 0.52 : 0.62;
-      best = Math.max(best, this.getEffectiveWeaponRange(unit, stats.range) * factor);
+      best = Math.max(best, this.getEffectiveWeaponRange(unit, range) * factor);
     }
     const maxBand = unit.type === "air" ? this.canvas.width * 0.56 : this.canvas.width * 0.46;
     const minBand = unit.type === "air" ? 180 : 140;
@@ -1658,7 +1834,7 @@ export class BattleSession {
 
     const slotCount = unit.weaponAttachmentIds.length;
     if (slotCount > 0) {
-      const excludeSlot = clamp(unit.selectedWeaponIndex, 0, Math.max(0, slotCount - 1));
+      const suppressedAutoSlots = this.getManualControlSuppressedSlots(unit);
       const target = this.pickTarget(unit);
       const baseTarget = this.getEnemyBaseCenter(unit.side);
       const attackTarget = target ?? baseTarget;
@@ -1666,10 +1842,10 @@ export class BattleSession {
 
       let bestRange = 0;
       for (let slot = 0; slot < slotCount; slot += 1) {
-        if (slot === excludeSlot) {
+        if (!unit.weaponAutoFire[slot]) {
           continue;
         }
-        if (!unit.weaponAutoFire[slot]) {
+        if (suppressedAutoSlots.has(slot)) {
           continue;
         }
         const attachmentId = unit.weaponAttachmentIds[slot];
@@ -1678,10 +1854,11 @@ export class BattleSession {
           continue;
         }
         const stats = COMPONENTS[attachment.component];
-        if (stats.range === undefined) {
+        const range = attachment.runtimeOverrides?.range ?? stats.range;
+        if (range === undefined) {
           continue;
         }
-        bestRange = Math.max(bestRange, this.getEffectiveWeaponRange(unit, stats.range));
+        bestRange = Math.max(bestRange, this.getEffectiveWeaponRange(unit, range));
       }
 
       if (bestRange > 0) {
@@ -1707,7 +1884,7 @@ export class BattleSession {
             unit.aiDebugLastAngleRad = Math.atan2(aim.y - unit.y, aim.x - unit.x);
           }
 
-          this.fireAutoWeapons(unit, aim, target ? target.id : null, intendedY, excludeSlot);
+          this.fireAutoWeapons(unit, aim, target ? target.id : null, intendedY, { suppressedSlots: suppressedAutoSlots });
         }
       }
     }
@@ -1818,6 +1995,10 @@ export class BattleSession {
       shooter.aiAimCorrectionY += AI_GRAVITY_CORRECTION_STEP;
     }
     shooter.aiAimCorrectionY = clamp(shooter.aiAimCorrectionY, -AI_GRAVITY_CORRECTION_CLAMP, AI_GRAVITY_CORRECTION_CLAMP);
+  }
+
+  private shouldIgnoreDamageForUnit(unit: UnitInstance): boolean {
+    return this.controlledUnitInvincible && unit.side === "player" && unit.id === this.playerControlledId;
   }
 
   private endBattle(victory: boolean, reason: string): void {
@@ -2039,6 +2220,12 @@ export class BattleSession {
   private drawStructureAndFunctionalLayer(unit: UnitInstance, sideSign: number, w: number, h: number): void {
     const cellSize = Math.max(8, Math.min(14, w * 0.24));
 
+    if (this.debugPartHpEnabled) {
+      this.ctx.font = "9px Trebuchet MS";
+      this.ctx.textAlign = "center";
+      this.ctx.textBaseline = "middle";
+    }
+
     for (const cell of unit.structure) {
       const offset = this.getCellOffset(unit, cell.id, cellSize);
       this.ctx.strokeStyle = cell.destroyed ? "rgba(160, 94, 94, 0.55)" : "rgba(184, 202, 224, 0.9)";
@@ -2047,6 +2234,17 @@ export class BattleSession {
       if (!cell.destroyed) {
         this.ctx.fillStyle = "rgba(130, 158, 186, 0.22)";
         this.ctx.fillRect(offset.x - cellSize / 2 + 1, offset.y - cellSize / 2 + 1, cellSize - 2, cellSize - 2);
+        if (this.debugPartHpEnabled) {
+          const hpRatio = clamp((cell.breakThreshold - cell.strain) / Math.max(1, cell.breakThreshold), 0, 1);
+          const damageRatio = 1 - hpRatio;
+          if (damageRatio > 0.001) {
+            this.ctx.fillStyle = `rgba(232, 58, 58, ${Math.min(0.8, 0.12 + damageRatio * 0.72)})`;
+            this.ctx.fillRect(offset.x - cellSize / 2 + 1, offset.y - cellSize / 2 + 1, cellSize - 2, cellSize - 2);
+          }
+          const hpText = `${Math.round(Math.max(0, cell.breakThreshold - cell.strain))}`;
+          this.ctx.fillStyle = hpRatio > 0.35 ? "#deebf7" : "#ffe5e5";
+          this.ctx.fillText(hpText, offset.x, offset.y);
+        }
       }
     }
 
@@ -2070,6 +2268,11 @@ export class BattleSession {
       this.ctx.strokeStyle = "rgba(210, 228, 246, 0.5)";
       this.ctx.strokeRect(-w * 0.55, -h * 0.5, w * 1.1, h);
     }
+
+    if (this.debugPartHpEnabled) {
+      this.ctx.textAlign = "start";
+      this.ctx.textBaseline = "alphabetic";
+    }
   }
 
   private getUnitLayoutBounds(unit: UnitInstance): { minX: number; maxX: number; minY: number; maxY: number } {
@@ -2085,12 +2288,16 @@ export class BattleSession {
     if (!cell) {
       return { x: 0, y: 0 };
     }
+    return this.getCoordOffset(unit, cell.x, cell.y, cellSize);
+  }
+
+  private getCoordOffset(unit: UnitInstance, coordX: number, coordY: number, cellSize: number): { x: number; y: number } {
     const bounds = this.getUnitLayoutBounds(unit);
     const width = (bounds.maxX - bounds.minX + 1) * cellSize;
     const height = (bounds.maxY - bounds.minY + 1) * cellSize;
     return {
-      x: (cell.x - bounds.minX) * cellSize - width / 2 + cellSize / 2,
-      y: (cell.y - bounds.minY) * cellSize - height / 2 + cellSize / 2,
+      x: (coordX - bounds.minX) * cellSize - width / 2 + cellSize / 2,
+      y: (coordY - bounds.minY) * cellSize - height / 2 + cellSize / 2,
     };
   }
 

@@ -26,9 +26,10 @@ If you are a new coding agent/session, read this file first, then read:
   - `src/ai/shooting/weapon-ai-policy.ts`
 - Multi-weapon units with independent cooldown timers
 - Player weapon controls:
-  - `1..9`: select weapon slot
+  - `1..9`: toggle manual control for slot
   - `Shift+1..9`: toggle auto fire for slot
-  - Hold left mouse: fire selected weapon
+  - Hold left mouse: fire all manual-controlled slots
+  - Manual-controlled slots temporarily suppress auto fire (auto toggle state is preserved)
 
 ## Debug Instructions (Agent)
 
@@ -43,6 +44,8 @@ If you are a new coding agent/session, read this file first, then read:
 - Open `Debug Options` in top bar:
   - `Unlimited Resources`
   - `Draw Path + Hitbox`
+  - `Show Display Layer` (default OFF)
+  - `Show Part HP Overlay` (per-structure-cell HP text + red damage tint)
 - With visual debug ON, battle HUD includes live AI telemetry.
 
 ### Local debug file logging

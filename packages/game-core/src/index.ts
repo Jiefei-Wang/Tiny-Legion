@@ -27,3 +27,4 @@ export * from "./gameplay/map/node-graph.ts";
 export * from "./gameplay/map/occupation.ts";
 
 export * from "./templates/template-schema.ts";
+export * from "./parts/part-schema.ts";

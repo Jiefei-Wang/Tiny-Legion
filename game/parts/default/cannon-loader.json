@@ -1,0 +1,51 @@
+{
+  "id": "cannon-loader",
+  "name": "Cannon Loader",
+  "layer": "functional",
+  "baseComponent": "cannonLoader",
+  "directional": false,
+  "anchor": {
+    "x": 0,
+    "y": 0
+  },
+  "boxes": [
+    {
+      "x": 0,
+      "y": 0,
+      "occupiesStructureSpace": false,
+      "occupiesFunctionalSpace": true,
+      "needsStructureBehind": true,
+      "isAttachPoint": false,
+      "isAnchorPoint": true,
+      "isShootingPoint": false,
+      "takesDamage": false
+    }
+  ],
+  "placement": {
+    "requireStructureOffsets": [],
+    "requireStructureBelowAnchor": false,
+    "requireStructureOnFunctionalOccupiedBoxes": true,
+    "requireStructureOnStructureOccupiedBoxes": true,
+    "requireEmptyStructureOffsets": [],
+    "requireEmptyFunctionalOffsets": []
+  },
+  "properties": {
+    "category": "functional",
+    "subcategory": "loader",
+    "isEngine": false,
+    "isWeapon": false,
+    "isLoader": true,
+    "isArmor": false,
+    "loaderServesTags": [
+      "heavy-shot",
+      "explosive"
+    ],
+    "loaderCooldownMultiplier": 0.95,
+    "hasCoreTuning": false
+  },
+  "tags": [
+    "default",
+    "support",
+    "loader"
+  ]
+}

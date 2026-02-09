@@ -46,14 +46,27 @@ export function applyHitToUnit(
     destroyCell(unit, targetCell.id);
   }
 
-  const localAttachments = unit.attachments.filter((attachment) => attachment.alive && attachment.cell === targetCell.id);
+  const localAttachments = unit.attachments.filter((attachment) => {
+    if (!attachment.alive) {
+      return false;
+    }
+    if (attachment.occupiedOffsets && attachment.occupiedOffsets.length > 0) {
+      return attachment.occupiedOffsets.some((offset) => {
+        if (!(offset.takesDamage ?? offset.takesFunctionalDamage)) {
+          return false;
+        }
+        return attachment.x + offset.x === targetCell.x && attachment.y + offset.y === targetCell.y;
+      });
+    }
+    return attachment.cell === targetCell.id;
+  });
   if (localAttachments.length > 0) {
     const attachmentStressChance = Math.min(0.75, 0.22 + incomingDamage / 180);
     if (Math.random() < attachmentStressChance) {
       const localIndex = Math.floor(Math.random() * localAttachments.length);
       const pick = localAttachments[localIndex];
       if (pick) {
-        const hpMul = COMPONENTS[pick.component].hpMul;
+        const hpMul = pick.runtimeOverrides?.hpMul ?? COMPONENTS[pick.component].hpMul;
         const fragility = clamp(1 / Math.max(0.35, hpMul), 1, 2.4);
         if (Math.random() < Math.min(0.98, attachmentStressChance * fragility)) {
           pick.alive = false;

@@ -43,8 +43,9 @@ Lose condition chain:
   - Player-controlled
   - Enemy-controlled
   - Contested
-- Includes a dedicated testing node: `Test Arena (Enemy >= 2)` where enemy presence is sustained at a minimum of 2 active battlefield objects.
+- Includes a dedicated `Test Arena` top-level tab (parallel to `Battle`) for debug scenarios.
 - Test Arena overrides both battle bases to extremely high HP so base destruction does not end the test run.
+- Test Arena controls allow setting enemy count, spawning a specific enemy template, and toggling controlled-unit invincibility (no HP loss, still collides and can be hit).
 
 ## 3.2 Base Layer (Top-Down)
 
@@ -62,18 +63,23 @@ Lose condition chain:
 
 ## 4. Unit Design System (Three-Layer)
 
-Current implementation includes an in-app `Editor` mode where the player can:
+Current implementation includes dedicated in-app editor tabs where the player can:
+
+- Open `Template Editor` and `Part Editor` as top-level mode tabs (parallel to `Battle`).
+- Use `Template Editor` for full unit template authoring.
 
 - Switch between `Structure`, `Functional`, and `Display` layers from the right-side panel.
 - Use a resizable editor grid (up to `10x10`) for placement/removal by cell.
-- Choose components from a layer-specific side palette (placeholder image cards + hover info).
+- Choose parts/components from a layer-specific side palette (placeholder image cards + hover info).
 - Toggle delete mode to remove items on the active layer.
 - Open any existing template from an `Open` window, or create a template copy using one-click `Copy` (`-copy` postfix).
 - Template IDs are auto-generated and hidden from editor UI (not user-editable).
 - Stored template parts include coordinate metadata (`x`,`y`) with origin `(0,0)` and negative coordinates supported.
+- Functional template entries now persist both `component` and `partId` so user templates can reference developer-authored parts.
 - Weapon functional parts store additive orientation (`rotateQuarter`, 0..3 in 90-degree steps).
-- Heavy-shot weapons occupy a multi-cell footprint in editor placement, and that footprint rotates with `rotateQuarter`.
+- Functional placement now uses part footprints from part catalog definitions (instead of hardcoded component-only footprints), and footprint rotation follows `rotateQuarter`.
 - Functional parts may declare `directional: true`; only directional parts show direction UI and use rotation controls. Parts without it are undirectional by default.
+- Functional placement supports `center place on click` mode in template editor (developer/user toggle).
 - Editor canvas uses a resizable grid up to `10x10` with left-drag panning.
 - Battle rendering and hitboxes now honor stored structure/display/functional coordinates instead of compacting to a fixed index grid.
 - Part composition focuses on physical/functional stats; per-part gas contribution is not used in current editor stage.
@@ -83,6 +89,43 @@ Current implementation includes an in-app `Editor` mode where the player can:
   - `Error`: severe issues (for example missing control module, air unit cannot hold altitude).
   - `Warning`: spawn-allowed but suboptimal setup (for example no engine for ground unit, no weapon).
 - Runtime deployment/spawn gate: templates with any `Error` are blocked from spawning in battle.
+
+### 4.0 Developer Part Designer (Part Editor)
+
+- Developer-only Part Designer is available in the top-level `Part Editor` tab.
+- Top-bar `Debug Options` -> `Part Designer` is a shortcut that switches directly to the `Part Editor` tab.
+- Part Designer edits a **single reusable part definition** (not a full unit template).
+- UI split:
+  - left panel edits part-level properties grouped as:
+    - `Editor Meta`: category (dropdown) + subcategory (free text),
+    - `Part Properties`: tags + checkbox-enabled property groups with conditional parameter inputs (instead of always showing all parameters),
+  - right panel edits per-box properties of the currently selected grid cell.
+- Each part definition includes:
+  - `baseComponent` (runtime behavior family),
+  - developer metadata (`category`, `subcategory`, `tags`),
+  - part-property groups (`is_engine`, `is_weapon`, `is_loader`, `is_armor`, core tuning) with scoped parameters:
+    - engine: `engineType`, power/speed tuning,
+    - weapon: `weaponType`, damage/range/cooldown/angle/spread tuning,
+    - loader: served tag groups + cooldown multiplier,
+    - armor: hp,
+    - core tuning: mass/hp multiplier,
+  - footprint boxes (`boxes`) with per-box flags:
+    - occupies structure space,
+    - occupies functional space,
+    - needs structure behind (functional-only box support),
+    - takes damage,
+    - attach point (requires structure but does not occupy space),
+    - anchor point (single center reference),
+    - shooting point (weapon muzzle reference),
+  - anchor coordinate (`anchor`),
+  - placement constraints:
+    - require structure below anchor,
+    - require structure support offsets,
+    - require empty structure offsets,
+    - require empty functional offsets,
+    - whether functional/structure-occupied boxes require structure support,
+  - optional runtime parameter overrides (`mass`, `hpMul`, `power`, `maxSpeed`, `damage`, `range`, `cooldown`, `shootAngleDeg`, `spreadDeg`).
+- Template editor consumes this part catalog for placement/validation; battle runtime consumes the same catalog for instancing, damage semantics, and shooting-origin offsets.
 - Enemy auto-spawn selection samples from the current loaded template set (default + user overrides), not a fixed hardcoded shortlist.
 
 ## 4.1 Structure Layer (Outer)
@@ -173,7 +216,7 @@ Display layer provides optional visual mesh/sprite styling and silhouette polish
   - no mass contribution
   - no functional contribution
 - Physics, collision, damage, and module breakage are evaluated only on Structure + Functional layers.
-- Players can toggle display layer visibility during battle to inspect internals.
+- Battle display-layer visibility is controlled from top-bar `Debug Options` (`Show Display Layer`), and defaults to `OFF`.
 - Editor placement rule: display elements are attached to structure cells only, so display visuals stay on/inside structure bounds.
 
 ### 4.4 Template Storage
@@ -186,6 +229,18 @@ Display layer provides optional visual mesh/sprite styling and silhouette polish
 - Loader auto-injection is part of persisted template normalization; injected loaders are placed on available structure cells to avoid overlapping existing functional footprints when possible.
 - Detailed template validation severity logic is isolated in `packages/game-core/src/templates/template-validation.ts`.
 - Headless smoke includes default-template validation to ensure all system default templates are warning/error free.
+
+### 4.5 Part Storage
+
+- Developer default part definitions are file-based under `game/parts/default/`.
+- Developer/user part overrides are stored under `game/parts/user/`.
+- Current workflow: Part Designer saves to default part storage only (single `Save` action).
+- Canonical default part definitions are now explicitly authored in `game/parts/default/*.json` (one per current component family).
+- Default templates reference these explicit part IDs in `partId` so runtime/editor behavior matches configured part semantics.
+- Runtime part catalog merge order:
+  1. built-in implicit defaults from component stats,
+  2. file-backed defaults (`game/parts/default`),
+  3. user part overrides (`game/parts/user`).
 
 ---
 
@@ -213,7 +268,7 @@ Recommended starter values:
 - Player may directly control any friendly unit at any time.
 - Non-controlled units are AI-driven.
 - Player can switch controlled unit instantly (short cooldown recommended).
-- Strategic layer is round-based: battles resolve at end of round when **Next Round** is pressed.
+- Strategic layer is round-based: campaign battles resolve at end of round when **Next Round** is pressed (Test Arena ignores round resolution).
 
 ## 6.2 Ground Battle Space
 
@@ -242,20 +297,24 @@ Recommended starter values:
 ### 6.4 Mouse Aiming and Layered Targeting Rules
 
 - Mouse controls player aim target in battle.
-- Hold left mouse is the primary fire action; controlled unit keeps firing selected weapon toward current mouse aim target.
+- Hold left mouse is the primary fire action; controlled unit keeps firing all manual-controlled weapon slots toward current mouse aim target.
 - Projectiles spawn from the firing weapon module location instead of unit center.
 - Unit selection highlight follows outer structure silhouette (not a rectangular bounding box).
 - Tracking missile homing reacquires the nearest valid enemy around its intended aim point when needed.
 - Loader naming uses `cannonLoader` (legacy `gunLoader` IDs remain load-compatible).
 - If left click intersects a friendly object, it selects that object as controlled unit.
 - When a controlled unit fires, projectile vector is computed toward current mouse aim target.
+- Number keys `1..9` toggle per-slot manual weapon control for the currently controlled unit (default `ON` for every weapon slot).
+- `Shift+1..9` toggles per-slot auto-fire state.
+- Slots under manual control temporarily suppress auto fire without mutating the auto-fire toggle state; auto fire resumes once manual control is disabled for that slot.
 - Keyboard Space flips controlled unit facing direction instantly (forward/backward orientation swap).
 - Ground vs ground attacks use Y-axis tolerance (`abs(y1 - y2) <= tolerance`) so exact alignment is not required.
 - Air targets are treated as same Y axis for hit eligibility checks.
 - Ground cannon rounds can pass through multiple air targets along X path (piercing air layer).
 - Enemy units should engage from weapon distance and should not win by direct body contact with player base.
 - Ground combat zone is rendered with a visible grid, and aircraft minimum altitude must remain above this grid zone.
-- During battle, player can switch **Display Layer ON/OFF** to inspect structure and functional internals.
+- During battle, developer debug tools can switch **Display Layer ON/OFF** from top-bar `Debug Options`.
+- Developer debug tools can enable **Show Part HP Overlay** to visualize per-structure-cell remaining HP with red damage tint and numeric HP text.
 
 ---
 
@@ -487,9 +546,10 @@ Exclude for MVP:
 The current playable implementation already includes:
 
 - Ground XY movement and air XZ movement abstraction.
-- Structure/functional/display layer split with runtime display toggle.
+- Structure/functional/display layer split with debug-menu display toggle (default display OFF) and optional per-cell part HP overlay.
 - Multi-weapon units and independent weapon cooldown timers.
-- Weapon slot control and per-slot auto-fire toggles.
+- Weapon slot manual-control toggles (default `ON`) and per-slot auto-fire toggles.
+- Player-controlled manual slots fire together and runtime-suppress auto fire while keeping the auto toggle state intact.
 - Weapon classes are standardized to: rapid-fire, heavy-shot, explosive, tracking, beam-precision, and control-utility.
 - Out-of-angle firing is clamped to the nearest allowed weapon-angle boundary, so shots still fire at edge angle.
 - Engine modules now provide explicit power; object mobility scales proportionally with total engine power and inversely with current mass.
@@ -500,6 +560,7 @@ The current playable implementation already includes:
   - Player-controlled selected weapon is prioritized for loading.
   - Loader `loadMultiplier` + `fastOperation` modify load time, bounded by `minLoadTime`.
   - Loader `storeCapacity` allows charge overfill (burst behavior), with minimum burst interval floor of `0.5s`.
+  - Fire commands sent to a cooling/reloading weapon slot are ignored (no projectile and no recoil/knockback side effects).
 - Projectile gravity, range-limited lifetime, and debris persistence.
 - AI split into targeting, movement, ballistic shooting, and weapon policy modules.
 - AI combat orchestration now runs through a decision tree (`game/src/ai/decision-tree/combat-decision-tree.ts`) that evaluates target, movement, weapon slot, firing geometry, and predictive lead per tick.

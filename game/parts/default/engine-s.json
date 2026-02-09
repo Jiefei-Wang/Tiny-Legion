@@ -1,0 +1,46 @@
+{
+  "id": "engine-s",
+  "name": "Engine S",
+  "layer": "functional",
+  "baseComponent": "engineS",
+  "directional": false,
+  "anchor": {
+    "x": 0,
+    "y": 0
+  },
+  "boxes": [
+    {
+      "x": 0,
+      "y": 0,
+      "occupiesStructureSpace": false,
+      "occupiesFunctionalSpace": true,
+      "needsStructureBehind": true,
+      "isAttachPoint": false,
+      "isAnchorPoint": true,
+      "isShootingPoint": false,
+      "takesDamage": false
+    }
+  ],
+  "placement": {
+    "requireStructureOffsets": [],
+    "requireStructureBelowAnchor": false,
+    "requireStructureOnFunctionalOccupiedBoxes": true,
+    "requireStructureOnStructureOccupiedBoxes": true,
+    "requireEmptyStructureOffsets": [],
+    "requireEmptyFunctionalOffsets": []
+  },
+  "properties": {
+    "category": "functional",
+    "subcategory": "engine-ground",
+    "isEngine": true,
+    "isWeapon": false,
+    "isLoader": false,
+    "isArmor": false,
+    "engineType": "ground",
+    "hasCoreTuning": false
+  },
+  "tags": [
+    "default",
+    "mobility"
+  ]
+}

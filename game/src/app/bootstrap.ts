@@ -11,7 +11,29 @@ import { BattleSession } from "../gameplay/battle/battle-session.ts";
 import type { BattleSessionOptions } from "../gameplay/battle/battle-session.ts";
 import { BATTLE_SALVAGE_REFUND_FACTOR } from "../gameplay/battle/battle-session.ts";
 import { cloneTemplate, fetchDefaultTemplatesFromStore, fetchUserTemplatesFromStore, mergeTemplates, saveDefaultTemplateToStore, saveUserTemplateToStore, validateTemplateDetailed } from "./template-store.ts";
-import type { ComponentId, DisplayAttachmentTemplate, GameBase, KeyState, MapNode, MaterialId, ScreenMode, TechState, UnitTemplate } from "../types.ts";
+import {
+  clonePartDefinition,
+  createDefaultPartDefinitions,
+  fetchDefaultPartsFromStore,
+  getPartFootprintOffsets,
+  mergePartCatalogs,
+  normalizePartAttachmentRotate,
+  resolvePartDefinitionForAttachment,
+  saveDefaultPartToStore,
+  validatePartDefinitionDetailed,
+} from "./part-store.ts";
+import type {
+  ComponentId,
+  DisplayAttachmentTemplate,
+  GameBase,
+  KeyState,
+  MapNode,
+  MaterialId,
+  PartDefinition,
+  ScreenMode,
+  TechState,
+  UnitTemplate,
+} from "../types.ts";
 
 export type ArenaReplaySpec = {
   seed: number;
@@ -72,6 +94,9 @@ export function bootstrap(options: BootstrapOptions = {}): void {
           <label><input id="debugResourcesChk" type="checkbox" /> Unlimited Resources</label>
           <label><input id="debugVisualChk" type="checkbox" /> Draw Path + Hitbox</label>
           <label><input id="debugTargetLineChk" type="checkbox" /> Draw Target Lines</label>
+          <label><input id="debugDisplayLayerChk" type="checkbox" /> Show Display Layer</label>
+          <label><input id="debugPartHpChk" type="checkbox" /> Show Part HP Overlay</label>
+          <button id="btnOpenPartDesigner" type="button">Part Designer</button>
         </details>
         <div class="topbar-status">
           <div id="metaBar" class="meta"></div>
@@ -88,18 +113,20 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       <main class="layout">
         <section class="left-panel">
           <div class="card">
-            <h3>Mode</h3>
             <div class="tabs">
               <button id="tabBase">Base</button>
               <button id="tabMap">Map</button>
               <button id="tabBattle">Battle</button>
-              <button id="tabEditor">Editor</button>
+              <button id="tabTestArena">Test Arena</button>
+              <button id="tabTemplateEditor">Template Editor</button>
+              <button id="tabPartEditor">Part Editor</button>
             </div>
           </div>
 
           <div id="basePanel" class="card panel"></div>
           <div id="mapPanel" class="card panel hidden"></div>
           <div id="battlePanel" class="card panel hidden"></div>
+          <div id="testArenaPanel" class="card panel hidden"></div>
           <div id="editorPanel" class="card panel hidden"></div>
         </section>
 
@@ -122,11 +149,12 @@ export function bootstrap(options: BootstrapOptions = {}): void {
             <div class="small">
               - Click a friendly unit to control it<br />
               - Move mouse to aim selected unit<br />
-              - Hold left click: keep firing selected weapon<br />
+              - Hold left click: fire all manually controlled weapons<br />
               - WASD: move selected unit<br />
               - Space: flip selected unit direction<br />
-              - 1..9: select weapon slot<br />
+              - 1..9: toggle manual control for that weapon slot<br />
               - Shift+1..9: toggle auto fire for that slot<br />
+              - Manual-controlled slots temporarily suppress auto fire<br />
               - Ground units move freely on X/Y<br />
               - Air units move on X/Z (same screen Y axis)
             </div>
@@ -141,6 +169,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
   const basePanel = getElement<HTMLDivElement>("#basePanel");
   const mapPanel = getElement<HTMLDivElement>("#mapPanel");
   const battlePanel = getElement<HTMLDivElement>("#battlePanel");
+  const testArenaPanel = getElement<HTMLDivElement>("#testArenaPanel");
   const editorPanel = getElement<HTMLDivElement>("#editorPanel");
   const selectedInfo = getElement<HTMLDivElement>("#selectedInfo");
   const weaponHud = getElement<HTMLDivElement>("#weaponHud");
@@ -148,6 +177,9 @@ export function bootstrap(options: BootstrapOptions = {}): void {
   const debugResourcesChk = getElement<HTMLInputElement>("#debugResourcesChk");
   const debugVisualChk = getElement<HTMLInputElement>("#debugVisualChk");
   const debugTargetLineChk = getElement<HTMLInputElement>("#debugTargetLineChk");
+  const debugDisplayLayerChk = getElement<HTMLInputElement>("#debugDisplayLayerChk");
+  const debugPartHpChk = getElement<HTMLInputElement>("#debugPartHpChk");
+  const btnOpenPartDesigner = getElement<HTMLButtonElement>("#btnOpenPartDesigner");
   const debugMenu = getElement<HTMLElement>("#debugMenu");
   const metaBar = getElement<HTMLDivElement>("#metaBar");
   const arenaReplayStats = getElement<HTMLDivElement>("#arenaReplayStats");
@@ -167,10 +199,13 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     base: getElement<HTMLButtonElement>("#tabBase"),
     map: getElement<HTMLButtonElement>("#tabMap"),
     battle: getElement<HTMLButtonElement>("#tabBattle"),
-    editor: getElement<HTMLButtonElement>("#tabEditor"),
+    testArena: getElement<HTMLButtonElement>("#tabTestArena"),
+    templateEditor: getElement<HTMLButtonElement>("#tabTemplateEditor"),
+    partEditor: getElement<HTMLButtonElement>("#tabPartEditor"),
   };
 
   const templates: UnitTemplate[] = createInitialTemplates();
+  const parts: PartDefinition[] = createDefaultPartDefinitions();
   const keys: KeyState = { a: false, d: false, w: false, s: false, space: false };
   const base: GameBase = { areaLevel: 1, refineries: 1, workshops: 1, labs: 0 };
   const tech: TechState = {
@@ -183,6 +218,24 @@ export function bootstrap(options: BootstrapOptions = {}): void {
 
   const mapNodes: MapNode[] = createMapNodes();
   let screen: ScreenMode = "base";
+  const testArenaNode: MapNode = {
+    id: "test-arena",
+    name: "Test Arena",
+    owner: "enemy",
+    garrison: false,
+    reward: 0,
+    defense: 1.1,
+    testEnemyMinActive: 2,
+    testEnemyInfiniteGas: true,
+    testBaseHpOverride: 1000000000,
+  };
+  let testArenaEnemyCount = 2;
+  let testArenaSpawnTemplateId: string | null = null;
+  let testArenaInvinciblePlayer = false;
+  const isTemplateEditorScreen = (): boolean => screen === "templateEditor";
+  const isPartEditorScreen = (): boolean => screen === "partEditor";
+  const isEditorScreen = (): boolean => isTemplateEditorScreen() || isPartEditorScreen();
+  const isBattleScreen = (): boolean => screen === "battle" || screen === "testArena";
   let running = true;
   let round = 1;
   let gas = replay?.spec.playerGas ?? 250;
@@ -191,6 +244,8 @@ export function bootstrap(options: BootstrapOptions = {}): void {
   let debugUnlimitedResources = replayMode ? false : true;
   let debugVisual = replayMode ? false : true;
   let debugTargetLines = replayMode ? false : true;
+  let debugDisplayLayer = false;
+  let debugPartHpOverlay = false;
   let debugServerEnabled = false;
   const EDITOR_GRID_MAX_COLS = 10;
   const EDITOR_GRID_MAX_ROWS = 10;
@@ -198,13 +253,33 @@ export function bootstrap(options: BootstrapOptions = {}): void {
   const EDITOR_DISPLAY_KINDS: DisplayAttachmentTemplate["kind"][] = ["panel", "stripe", "glass"];
   type EditorFunctionalSlot = {
     component: ComponentId;
+    partId?: string;
     rotateQuarter: 0 | 1 | 2 | 3;
     groupId: number;
     isAnchor: boolean;
   } | null;
+  type PartDesignerTool =
+    | "select"
+    | "paintFunctional"
+    | "paintStructure"
+    | "paintDamage"
+    | "erase"
+    | "setAnchor"
+    | "markSupport"
+    | "markEmptyStructure"
+    | "markEmptyFunctional";
+  type PartDesignerSlot = {
+    occupiesFunctionalSpace: boolean;
+    occupiesStructureSpace: boolean;
+    needsStructureBehind: boolean;
+    takesDamage: boolean;
+    isAttachPoint: boolean;
+    isShootingPoint: boolean;
+  } | null;
   let editorLayer: "structure" | "functional" | "display" = "structure";
   let editorDeleteMode = false;
   let editorSelection = "basic";
+  let editorPlaceByCenter = true;
   let editorGridCols = 10;
   let editorGridRows = 10;
   let editorWeaponRotateQuarter: 0 | 1 | 2 | 3 = 0;
@@ -224,6 +299,25 @@ export function bootstrap(options: BootstrapOptions = {}): void {
   let editorDisplaySlots: Array<DisplayAttachmentTemplate["kind"] | null> = new Array<DisplayAttachmentTemplate["kind"] | null>(EDITOR_GRID_MAX_SIZE).fill(null);
   let editorTemplateDialogOpen = false;
   let editorTemplateDialogSelectedId: string | null = null;
+  let partDesignerDialogOpen = false;
+  let partDesignerSelectedId: string | null = null;
+  let partDesignerTool: PartDesignerTool = "select";
+  let partDesignerDraft: PartDefinition = clonePartDefinition(parts[0] ?? {
+    id: "control",
+    name: "control",
+    layer: "functional",
+    baseComponent: "control",
+    anchor: { x: 0, y: 0 },
+    boxes: [{ x: 0, y: 0, occupiesFunctionalSpace: true, occupiesStructureSpace: false, needsStructureBehind: true, takesDamage: true, isAnchorPoint: true }],
+    directional: false,
+  });
+  let partDesignerAnchorSlot: number | null = null;
+  let partDesignerSelectedSlot: number | null = null;
+  let partDesignerSlots: PartDesignerSlot[] = new Array<PartDesignerSlot>(EDITOR_GRID_MAX_SIZE).fill(null);
+  let partDesignerSupportOffsets = new Set<number>();
+  let partDesignerEmptyStructureOffsets = new Set<number>();
+  let partDesignerEmptyFunctionalOffsets = new Set<number>();
+  let partDesignerRequireStructureBelowAnchor = false;
   let editorDraft: UnitTemplate = {
     id: "custom-1",
     name: "Custom Unit",
@@ -539,6 +633,11 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         gas += amount;
       },
       onBattleOver: (victory, nodeId) => {
+        if (nodeId === testArenaNode.id) {
+          addLog(`Test Arena ended (${victory ? "victory" : "defeat"}).`, victory ? "good" : "bad");
+          renderPanels();
+          return;
+        }
         if (victory) {
           const node = mapNodes.find((entry) => entry.id === nodeId);
           if (!node) {
@@ -556,7 +655,12 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       },
     },
     templates,
-    battleSessionOptions,
+    {
+      ...(battleSessionOptions ?? {}),
+      partCatalog: battleSessionOptions?.partCatalog
+        ? mergePartCatalogs(parts, battleSessionOptions.partCatalog)
+        : parts,
+    },
   );
 
   const startDebugProbeLoop = (): void => {
@@ -574,6 +678,8 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         debugUnlimitedResources,
         debugVisual,
         debugTargetLines,
+        debugDisplayLayer,
+        debugPartHpOverlay,
         replayMode,
       };
     };
@@ -583,6 +689,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         state: battle.getState(),
         selection: battle.getSelection(),
         displayEnabled: battle.isDisplayEnabled(),
+        partHpOverlayEnabled: battle.isPartHpOverlayEnabled(),
       };
     };
 
@@ -1032,9 +1139,35 @@ export function bootstrap(options: BootstrapOptions = {}): void {
   };
 
 
+  const refreshPartsFromStore = async (): Promise<void> => {
+    const defaultParts = await fetchDefaultPartsFromStore();
+    const normalizedDefaults = (() => {
+      const hasExplicitByBase = new Set<string>();
+      for (const part of defaultParts) {
+        const isImplicit = (part.tags ?? []).includes("implicit");
+        if (!isImplicit) {
+          hasExplicitByBase.add(part.baseComponent);
+        }
+      }
+      return defaultParts.filter((part) => {
+        const isImplicit = (part.tags ?? []).includes("implicit");
+        if (!isImplicit) {
+          return true;
+        }
+        return !hasExplicitByBase.has(part.baseComponent);
+      });
+    })();
+    if (normalizedDefaults.length > 0) {
+      parts.splice(0, parts.length, ...normalizedDefaults);
+    } else {
+      parts.splice(0, parts.length, ...createDefaultPartDefinitions());
+    }
+    battle.setPartCatalog(parts);
+  };
+
   const refreshTemplatesFromStore = async (): Promise<void> => {
-    const defaultTemplates = await fetchDefaultTemplatesFromStore();
-    const userTemplates = await fetchUserTemplatesFromStore();
+    const defaultTemplates = await fetchDefaultTemplatesFromStore(parts);
+    const userTemplates = await fetchUserTemplatesFromStore(parts);
     const mergedStore = mergeTemplates(defaultTemplates, userTemplates);
     if (mergedStore.length > 0) {
       templates.splice(0, templates.length, ...mergedStore);
@@ -1115,8 +1248,12 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     const capLabel = isUnlimitedResources() ? "INF" : `${armyCap(getCommanderSkillForCap())}`;
     const battleLabel = battle.getState().active && !battle.getState().outcome ? " | Battle: active" : "";
     if (!replayMode) {
-      metaBar.innerHTML = `Round: ${round} | Gas: ${gasLabel} | Commander Skill: ${commanderSkill} | Army Cap: ${capLabel}${battleLabel} <button id="btnNextRound">Next Round</button>`;
-      getOptionalElement<HTMLButtonElement>("#btnNextRound")?.addEventListener("click", () => endRound());
+      const testArenaActive = battle.getState().active && battle.getState().nodeId === testArenaNode.id;
+      const showNextRound = !testArenaActive;
+      metaBar.innerHTML = `Round: ${round} | Gas: ${gasLabel} | Commander Skill: ${commanderSkill} | Army Cap: ${capLabel}${battleLabel}${showNextRound ? ` <button id="btnNextRound">Next Round</button>` : ""}`;
+      if (showNextRound) {
+        getOptionalElement<HTMLButtonElement>("#btnNextRound")?.addEventListener("click", () => endRound());
+      }
     }
 
     if (!replayMode) {
@@ -1141,12 +1278,15 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     basePanel.classList.toggle("hidden", next !== "base");
     mapPanel.classList.toggle("hidden", next !== "map");
     battlePanel.classList.toggle("hidden", next !== "battle");
-    editorPanel.classList.toggle("hidden", next !== "editor");
+    testArenaPanel.classList.toggle("hidden", next !== "testArena");
+    editorPanel.classList.toggle("hidden", !isEditorScreen());
     tabs.base.classList.toggle("active", next === "base");
     tabs.map.classList.toggle("active", next === "map");
     tabs.battle.classList.toggle("active", next === "battle");
-    tabs.editor.classList.toggle("active", next === "editor");
-    if (next !== "editor") {
+    tabs.testArena.classList.toggle("active", next === "testArena");
+    tabs.templateEditor.classList.toggle("active", next === "templateEditor");
+    tabs.partEditor.classList.toggle("active", next === "partEditor");
+    if (!isEditorScreen()) {
       hideEditorTooltip();
     }
   };
@@ -1172,6 +1312,27 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     return next;
   };
 
+  const slugifyPartId = (rawName: string): string => {
+    const base = rawName
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .replace(/-+/g, "-");
+    return base || "custom-part";
+  };
+
+  const makeUniquePartId = (baseId: string): string => {
+    const used = new Set<string>(parts.map((part) => part.id));
+    used.delete(partDesignerDraft.id);
+    let next = baseId;
+    let index = 2;
+    while (used.has(next)) {
+      next = `${baseId}-${index}`;
+      index += 1;
+    }
+    return next;
+  };
+
   const makeCopyTemplate = (source: UnitTemplate): UnitTemplate => {
     const copy = cloneTemplate(source);
     copy.name = `${source.name}-copy`;
@@ -1179,11 +1340,128 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     return copy;
   };
 
+  const makeCopyPart = (source: PartDefinition): PartDefinition => {
+    const copy = clonePartDefinition(source);
+    copy.name = `${source.name}-copy`;
+    copy.id = makeUniquePartId(slugifyPartId(copy.name));
+    return copy;
+  };
+
+  const getPartMetadataDefaults = (baseComponent: ComponentId): NonNullable<PartDefinition["properties"]> => {
+    const stats = COMPONENTS[baseComponent];
+    return {
+      category: stats.type === "weapon"
+        ? "weapon"
+        : stats.type === "engine"
+          ? "mobility"
+          : stats.type === "loader"
+            ? "support"
+            : "functional",
+      subcategory: stats.type === "weapon"
+        ? (stats.weaponClass ?? "weapon")
+        : stats.type === "engine"
+          ? (stats.propulsion?.platform ?? "engine")
+          : stats.type,
+      hp: undefined,
+      isEngine: stats.type === "engine",
+      isWeapon: stats.type === "weapon",
+      isLoader: stats.type === "loader",
+      isArmor: false,
+      engineType: stats.type === "engine" ? stats.propulsion?.platform : undefined,
+      weaponType: stats.type === "weapon" ? stats.weaponClass : undefined,
+      loaderServesTags: stats.type === "loader" ? stats.loader?.supports.map((entry) => String(entry)) : undefined,
+      loaderCooldownMultiplier: stats.type === "loader" ? stats.loader?.loadMultiplier : undefined,
+      hasCoreTuning: false,
+    };
+  };
+
+  const applyPartMetadataDefaults = (part: PartDefinition): PartDefinition => {
+    const defaults = getPartMetadataDefaults(part.baseComponent);
+    const hasCoreTuningOverrides = part.runtimeOverrides?.mass !== undefined || part.runtimeOverrides?.hpMul !== undefined;
+    return {
+      ...part,
+      properties: {
+        category: part.properties?.category ?? defaults.category,
+        subcategory: part.properties?.subcategory ?? defaults.subcategory,
+        hp: part.properties?.hp,
+        isEngine: part.properties?.isEngine ?? defaults.isEngine,
+        isWeapon: part.properties?.isWeapon ?? defaults.isWeapon,
+        isLoader: part.properties?.isLoader ?? defaults.isLoader,
+        isArmor: part.properties?.isArmor ?? defaults.isArmor,
+        engineType: part.properties?.engineType ?? defaults.engineType,
+        weaponType: part.properties?.weaponType ?? defaults.weaponType,
+        loaderServesTags: part.properties?.loaderServesTags ?? defaults.loaderServesTags,
+        loaderCooldownMultiplier: part.properties?.loaderCooldownMultiplier ?? defaults.loaderCooldownMultiplier,
+        hasCoreTuning: part.properties?.hasCoreTuning ?? hasCoreTuningOverrides,
+      },
+    };
+  };
+
   const updateSelectedInfo = (): void => {
-    if (screen === "editor") {
+    if (isEditorScreen()) {
+      if (isPartEditorScreen()) {
+        const validation = validatePartDefinitionDetailed(partDesignerDraft);
+        const errorSummary = validation.errors.length > 0 ? validation.errors.join(" | ") : "none";
+        const warningSummary = validation.warnings.length > 0 ? validation.warnings.join(" | ") : "none";
+        const selectedSlot = partDesignerSelectedSlot;
+        const selectedCoord = selectedSlot !== null ? slotToCoord(selectedSlot) : null;
+        const selectedEntry = selectedSlot !== null ? partDesignerSlots[selectedSlot] : null;
+        const resolvedEntry = selectedEntry ?? {
+          occupiesStructureSpace: false,
+          occupiesFunctionalSpace: true,
+          needsStructureBehind: true,
+          takesDamage: true,
+          isAttachPoint: false,
+          isShootingPoint: false,
+        };
+        const needsStructureBehindEnabled = !resolvedEntry.isAttachPoint && !resolvedEntry.occupiesStructureSpace && resolvedEntry.occupiesFunctionalSpace;
+        selectedInfo.innerHTML = `
+          <div><strong>Part Designer</strong></div>
+          <div class="small">Part: ${partDesignerDraft.name} (${partDesignerDraft.id})</div>
+          <div class="small">Base component: ${partDesignerDraft.baseComponent} | Directional: ${partDesignerDraft.directional ? "yes" : "no"}</div>
+          <div class="small">Boxes: ${partDesignerDraft.boxes.length} | Anchor: (${partDesignerDraft.anchor.x},${partDesignerDraft.anchor.y})</div>
+          <div class="row">
+            <label class="small">Tool
+              <select id="partToolRight">
+                <option value="select" ${partDesignerTool === "select" ? "selected" : ""}>Select/Create</option>
+                <option value="paintFunctional" ${partDesignerTool === "paintFunctional" ? "selected" : ""}>Paint Functional</option>
+                <option value="paintStructure" ${partDesignerTool === "paintStructure" ? "selected" : ""}>Paint Structure</option>
+                <option value="paintDamage" ${partDesignerTool === "paintDamage" ? "selected" : ""}>Paint Damageable</option>
+                <option value="setAnchor" ${partDesignerTool === "setAnchor" ? "selected" : ""}>Set Anchor</option>
+                <option value="markSupport" ${partDesignerTool === "markSupport" ? "selected" : ""}>Mark Support Offset</option>
+                <option value="markEmptyStructure" ${partDesignerTool === "markEmptyStructure" ? "selected" : ""}>Mark Empty Structure</option>
+                <option value="markEmptyFunctional" ${partDesignerTool === "markEmptyFunctional" ? "selected" : ""}>Mark Empty Functional</option>
+                <option value="erase" ${partDesignerTool === "erase" ? "selected" : ""}>Erase</option>
+              </select>
+            </label>
+          </div>
+          <div class="small">Selected box: ${selectedCoord ? `(${selectedCoord.x},${selectedCoord.y})` : "none"}</div>
+          <div class="small">${selectedEntry ? "Box exists and can be edited below." : "No box at selected cell yet."}</div>
+          <div class="row">
+            <button id="btnPartCreateSelected" ${selectedSlot === null ? "disabled" : ""}>Create Box</button>
+            <button id="btnPartDeleteSelected" ${selectedSlot === null ? "disabled" : ""}>Delete Box</button>
+          </div>
+          <div class="row">
+            <label class="small"><input id="partBoxOccupiesStructure" type="checkbox" ${resolvedEntry.occupiesStructureSpace ? "checked" : ""} ${selectedSlot === null ? "disabled" : ""} /> Structure occupy</label>
+            <label class="small"><input id="partBoxOccupiesFunctional" type="checkbox" ${resolvedEntry.occupiesFunctionalSpace ? "checked" : ""} ${selectedSlot === null ? "disabled" : ""} /> Functional occupy</label>
+          </div>
+          <div class="row">
+            <label class="small"><input id="partBoxNeedsStructureBehind" type="checkbox" ${resolvedEntry.needsStructureBehind ? "checked" : ""} ${selectedSlot === null || !needsStructureBehindEnabled ? "disabled" : ""} /> Need structure behind</label>
+            <label class="small"><input id="partBoxTakeDamage" type="checkbox" ${resolvedEntry.takesDamage ? "checked" : ""} ${selectedSlot === null ? "disabled" : ""} /> Take damage</label>
+          </div>
+          <div class="row">
+            <label class="small"><input id="partBoxAttachPoint" type="checkbox" ${resolvedEntry.isAttachPoint ? "checked" : ""} ${selectedSlot === null ? "disabled" : ""} /> Attach point</label>
+            <label class="small"><input id="partBoxAnchor" type="checkbox" ${selectedSlot !== null && partDesignerAnchorSlot === selectedSlot ? "checked" : ""} ${selectedSlot === null ? "disabled" : ""} /> Anchor point</label>
+            <label class="small"><input id="partBoxShootingPoint" type="checkbox" ${resolvedEntry.isShootingPoint ? "checked" : ""} ${selectedSlot === null ? "disabled" : ""} /> Shooting point</label>
+          </div>
+          <div class="small bad">Errors (${validation.errors.length}): ${errorSummary}</div>
+          <div class="small warn">Warnings (${validation.warnings.length}): ${warningSummary}</div>
+        `;
+        return;
+      }
       ensureEditorSelectionForLayer();
       const catalog = getEditorCatalogItems();
-      const validation = validateTemplateDetailed(editorDraft);
+      const validation = validateTemplateDetailed(editorDraft, { partCatalog: parts });
       const controlCount = editorDraft.attachments.filter((attachment) => attachment.component === "control").length;
       const displayCount = (editorDraft.display ?? []).length;
       const materialUsage = getEditorMaterialBreakdown();
@@ -1204,6 +1482,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       }).join("");
       selectedInfo.innerHTML = `
         <div><strong>${editorDraft.name}</strong> (${editorDraft.type})</div>
+        <div class="small">Workspace: Template Editor</div>
         <div class="row">
           <button id="editorLayerStructureRight" class="${editorLayer === "structure" ? "active" : ""}">Structure</button>
           <button id="editorLayerFunctionalRight" class="${editorLayer === "functional" ? "active" : ""}">Functional</button>
@@ -1224,6 +1503,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         <div class="small">Structure: ${editorDraft.structure.length} | Functional: ${functionalUsage} | Display: ${displayCount}</div>
         <div class="small">Control Units: ${controlCount}</div>
         <div class="small">${isCurrentEditorSelectionDirectional() ? `Weapon direction: ${getRotationSymbol()} (${editorWeaponRotateQuarter * 90}deg)` : "Weapon direction: n/a"}</div>
+        <div class="small">Placement: ${editorPlaceByCenter ? "center-on-click" : "anchor-on-click"}</div>
         <div class="small">Material usage: ${materialUsage}</div>
         <div class="small bad">Errors (${validation.errors.length}): ${errorSummary}</div>
         <div class="small warn">Warnings (${validation.warnings.length}): ${warningSummary}</div>
@@ -1233,7 +1513,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       `;
       return;
     }
-    if (screen !== "battle") {
+    if (!isBattleScreen()) {
       selectedInfo.innerHTML = `<span class="small">No unit selected.</span>`;
       return;
     }
@@ -1251,8 +1531,9 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       }
       const weaponType = COMPONENTS[attachment.component].type;
       const mode = selected.weaponAutoFire[index] ? "auto" : "manual";
+      const control = selected.weaponManualControl[index] !== false ? "ctrl" : "free";
       const selectedMark = index === selected.selectedWeaponIndex ? "*" : "";
-      return `${selectedMark}#${index + 1}: ${attachment.component} (${weaponType}, ${mode})`;
+      return `${selectedMark}#${index + 1}: ${attachment.component} (${weaponType}, ${mode}, ${control})`;
     }).join(" | ");
     const structureAlive = selected.structure.filter((cell) => !cell.destroyed).length;
     const functionalAlive = selected.attachments.filter((attachment) => attachment.alive).length;
@@ -1270,28 +1551,34 @@ export function bootstrap(options: BootstrapOptions = {}): void {
   };
 
   const updateWeaponHud = (): void => {
-    if (screen === "editor") {
-      weaponHud.innerHTML = `<div><strong>Object Editor</strong></div><div class="small">Layer=${editorLayer} | Mode=${editorDeleteMode ? "delete" : "place"}. Right-click = delete. Q/E = weapon rotate 90deg (ccw/cw). Display items attach to structure cells only.</div>`;
+    if (isEditorScreen()) {
+      if (isPartEditorScreen()) {
+        weaponHud.innerHTML = `<div><strong>Part Designer</strong></div><div class="small">Tool=${partDesignerTool}. Click canvas to select/create box, edit box flags on the right panel, right-click to erase box. Q/E rotates preview for directional parts.</div>`;
+      } else {
+        weaponHud.innerHTML = `<div><strong>Object Editor</strong></div><div class="small">Layer=${editorLayer} | Mode=${editorDeleteMode ? "delete" : "place"}. Right-click = delete. Q/E = weapon rotate 90deg (ccw/cw). Display items attach to structure cells only.</div>`;
+      }
       return;
     }
-    if (screen !== "battle") {
-      weaponHud.innerHTML = `<div class="small">Weapon Control - enter battle to activate.</div>`;
+    if (!isBattleScreen()) {
+      weaponHud.innerHTML = `<div class="small">Weapon Control - enter battle or test arena to activate.</div>`;
       return;
     }
     const selection = battle.getSelection();
     const controlled = battle.getState().units.find((unit) => unit.id === selection.playerControlledId && unit.alive && unit.side === "player");
     if (!controlled || controlled.weaponAttachmentIds.length === 0) {
-      weaponHud.innerHTML = `<div><strong>Weapon Control</strong> - Press 1..9 to select weapon, Shift+1..9 to toggle auto fire</div><div class="small">No controlled weapon system.</div>`;
+      weaponHud.innerHTML = `<div><strong>Weapon Control</strong> - Press 1..9 to toggle manual control, Shift+1..9 to toggle auto fire</div><div class="small">No controlled weapon system.</div>`;
       return;
     }
 
     const chips = controlled.weaponAttachmentIds.map((weaponId, index) => {
       const attachment = controlled.attachments.find((entry) => entry.id === weaponId && entry.alive) ?? null;
-      const selectedMark = index === controlled.selectedWeaponIndex ? "selected" : "";
+      const manualControl = controlled.weaponManualControl[index] !== false;
+      const chipClass = manualControl ? "weapon-chip controlled" : "weapon-chip";
       const auto = controlled.weaponAutoFire[index] ? "AUTO" : "MANUAL";
+      const control = manualControl ? "CTRL" : "FREE";
       const label = attachment ? attachment.component : "destroyed";
       const timer = controlled.weaponFireTimers[index] ?? 0;
-      const cooldown = attachment ? (COMPONENTS[attachment.component].cooldown ?? 0) : 0;
+      const cooldown = attachment ? (attachment.runtimeOverrides?.cooldown ?? COMPONENTS[attachment.component].cooldown ?? 0) : 0;
       const cooldownPct = cooldown > 0 ? Math.max(0, Math.min(100, ((cooldown - timer) / cooldown) * 100)) : 100;
       const cooldownText = timer > 0.01 ? `${timer.toFixed(2)}s` : "ready";
       const weaponClass = attachment ? COMPONENTS[attachment.component].weaponClass : undefined;
@@ -1299,11 +1586,12 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       const charges = controlled.weaponReadyCharges[index] ?? 0;
       const loadTimer = controlled.weaponLoadTimers[index] ?? 0;
       const loaderText = loaderManaged ? ` | load ${loadTimer > 0.01 ? `${loadTimer.toFixed(2)}s` : "idle"} | chg ${charges}` : "";
-      return `<span class="weapon-chip ${selectedMark}">[${index + 1}] ${label} ${auto} | ${cooldownText} (${cooldownPct.toFixed(0)}%)${loaderText}</span>`;
+      return `<span class="${chipClass}">[${index + 1}] ${label} ${control} | ${auto} | ${cooldownText} (${cooldownPct.toFixed(0)}%)${loaderText}</span>`;
     }).join("");
 
     weaponHud.innerHTML = `
-      <div><strong>Weapon Control</strong> - Press 1..9 to select weapon, Shift+1..9 to toggle auto fire</div>
+      <div><strong>Weapon Control</strong> - Press 1..9 to toggle manual control, Shift+1..9 to toggle auto fire</div>
+      <div class="small">CTRL slots suppress auto fire while control remains enabled.</div>
       <div class="weapon-row">${chips}</div>
     `;
 
@@ -1383,59 +1671,146 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     return { x: offsetY, y: -offsetX };
   };
 
-  const getComponentFootprintOffsets = (component: ComponentId, rotateQuarter: 0 | 1 | 2 | 3): Array<{ x: number; y: number }> => {
-    const stats = COMPONENTS[component];
-    const placementOffsets = stats.placement?.footprintOffsets;
-    if (placementOffsets && placementOffsets.length > 0) {
-      return placementOffsets.map((offset) => rotateOffsetByQuarter(offset.x, offset.y, rotateQuarter));
-    }
-    if (stats.type === "weapon" && stats.weaponClass === "heavy-shot") {
-      return [{ x: 0, y: 0 }, { x: 1, y: 0 }].map((offset) => rotateOffsetByQuarter(offset.x, offset.y, rotateQuarter));
-    }
-    return [{ x: 0, y: 0 }];
+  const getPartById = (partId: string): PartDefinition | null => {
+    return parts.find((part) => part.id === partId) ?? null;
   };
 
-  const getFootprintSlots = (anchorSlot: number, component: ComponentId, rotateQuarter: 0 | 1 | 2 | 3): { slots: number[]; anchorCoord: { x: number; y: number } } | null => {
+  const resolvePartForSelection = (selection: string): PartDefinition | null => {
+    const byId = getPartById(selection);
+    if (byId) {
+      return byId;
+    }
+    if (selection in COMPONENTS) {
+      return resolvePartDefinitionForAttachment({ component: selection as ComponentId }, parts);
+    }
+    return null;
+  };
+
+  const getFootprintSlots = (
+    anchorSlot: number,
+    part: PartDefinition,
+    rotateQuarter: 0 | 1 | 2 | 3,
+  ): {
+    slots: Array<{
+      slot: number;
+      occupiesStructureSpace: boolean;
+      occupiesFunctionalSpace: boolean;
+      needsStructureBehind: boolean;
+      isAttachPoint: boolean;
+      isShootingPoint: boolean;
+      takesDamage: boolean;
+      takesFunctionalDamage: boolean;
+      offsetX: number;
+      offsetY: number;
+    }>;
+    anchorCoord: { x: number; y: number };
+  } | null => {
     const anchor = slotToCoord(anchorSlot);
-    const offsets = getComponentFootprintOffsets(component, rotateQuarter);
-    const slots: number[] = [];
+    const normalizedRotate = normalizePartAttachmentRotate(part, rotateQuarter);
+    const offsets = getPartFootprintOffsets(part, normalizedRotate);
+    const slots: Array<{
+      slot: number;
+      occupiesStructureSpace: boolean;
+      occupiesFunctionalSpace: boolean;
+      needsStructureBehind: boolean;
+      isAttachPoint: boolean;
+      isShootingPoint: boolean;
+      takesDamage: boolean;
+      takesFunctionalDamage: boolean;
+      offsetX: number;
+      offsetY: number;
+    }> = [];
     for (const offset of offsets) {
       const slot = coordToSlot(anchor.x + offset.x, anchor.y + offset.y);
       if (slot === null) {
         return null;
       }
-      slots.push(slot);
+      slots.push({
+        slot,
+        occupiesStructureSpace: offset.occupiesStructureSpace,
+        occupiesFunctionalSpace: offset.occupiesFunctionalSpace,
+        needsStructureBehind: offset.needsStructureBehind,
+        isAttachPoint: offset.isAttachPoint,
+        isShootingPoint: offset.isShootingPoint,
+        takesDamage: offset.takesDamage,
+        takesFunctionalDamage: offset.takesFunctionalDamage,
+        offsetX: offset.x,
+        offsetY: offset.y,
+      });
     }
     return { slots, anchorCoord: anchor };
   };
 
-  const getPlacementOffsets = (component: ComponentId, rotateQuarter: 0 | 1 | 2 | 3): Array<{ x: number; y: number }> => {
-    return (COMPONENTS[component].placement?.requireEmptyOffsets ?? []).map((offset) => rotateOffsetByQuarter(offset.x, offset.y, rotateQuarter));
+  const getPlacementOffsets = (
+    part: PartDefinition,
+    rotateQuarter: 0 | 1 | 2 | 3,
+    mode: "support" | "emptyStructure" | "emptyFunctional",
+  ): Array<{ x: number; y: number }> => {
+    if (mode === "support") {
+      return (part.placement?.requireStructureOffsets ?? []).map((offset) => rotateOffsetByQuarter(offset.x, offset.y, rotateQuarter));
+    }
+    if (mode === "emptyStructure") {
+      return (part.placement?.requireEmptyStructureOffsets ?? []).map((offset) => rotateOffsetByQuarter(offset.x, offset.y, rotateQuarter));
+    }
+    return (part.placement?.requireEmptyFunctionalOffsets ?? []).map((offset) => rotateOffsetByQuarter(offset.x, offset.y, rotateQuarter));
   };
 
   const validateFunctionalPlacement = (
-    component: ComponentId,
+    part: PartDefinition,
     rotateQuarter: 0 | 1 | 2 | 3,
     anchorSlot: number,
-    footprintSlots: number[],
+    footprintSlots: Array<{
+      slot: number;
+      occupiesStructureSpace: boolean;
+      occupiesFunctionalSpace: boolean;
+      needsStructureBehind: boolean;
+      isAttachPoint: boolean;
+      isShootingPoint: boolean;
+      takesDamage: boolean;
+      takesFunctionalDamage: boolean;
+    }>,
     anchorCoord: { x: number; y: number },
   ): { ok: boolean; reason: string | null } => {
-    const stats = COMPONENTS[component];
-    const placement = stats.placement;
-    const requireStructureOnFootprint = placement?.requireStructureOnFootprint ?? true;
-    if (requireStructureOnFootprint && footprintSlots.some((occupiedSlot) => !editorStructureSlots[occupiedSlot])) {
-      return { ok: false, reason: "All occupied blocks must sit on structure cells" };
+    const placement = part.placement;
+    const currentGroupId = editorFunctionalSlots[anchorSlot]?.groupId ?? -1;
+    const requireStructureOnFunctional = placement?.requireStructureOnFunctionalOccupiedBoxes ?? true;
+    const requireStructureOnStructure = placement?.requireStructureOnStructureOccupiedBoxes ?? true;
+
+    for (const footprint of footprintSlots) {
+      const needsStructureForFunctional = footprint.needsStructureBehind || (footprint.occupiesFunctionalSpace && requireStructureOnFunctional);
+      const needsStructureForAttachPoint = footprint.isAttachPoint;
+      if ((needsStructureForFunctional || needsStructureForAttachPoint) && !editorStructureSlots[footprint.slot]) {
+        return { ok: false, reason: needsStructureForAttachPoint ? "Attach point requires structure support at target cell" : "Functional occupied boxes must sit on structure cells" };
+      }
+      if (footprint.occupiesStructureSpace && requireStructureOnStructure && !editorStructureSlots[footprint.slot]) {
+        return { ok: false, reason: "Structure occupied boxes require structure support" };
+      }
+      if (footprint.occupiesStructureSpace && editorStructureSlots[footprint.slot]) {
+        return { ok: false, reason: "Structure occupied boxes require empty structure space" };
+      }
+      const existing = editorFunctionalSlots[footprint.slot];
+      if (footprint.occupiesFunctionalSpace && existing && existing.groupId !== currentGroupId) {
+        return { ok: false, reason: "Functional occupied boxes overlap another component" };
+      }
     }
 
-    if (placement?.requireStructureBelowAnchor) {
+    if (placement?.requireStructureBelowAnchor === true) {
       const supportSlot = coordToSlot(anchorCoord.x, anchorCoord.y + 1);
       if (supportSlot === null || !editorStructureSlots[supportSlot]) {
         return { ok: false, reason: "Component requires structure support directly below anchor" };
       }
     }
 
-    const requiredEmptyOffsets = getPlacementOffsets(component, rotateQuarter);
-    for (const offset of requiredEmptyOffsets) {
+    const requiredSupportOffsets = getPlacementOffsets(part, rotateQuarter, "support");
+    for (const offset of requiredSupportOffsets) {
+      const requiredSlot = coordToSlot(anchorCoord.x + offset.x, anchorCoord.y + offset.y);
+      if (requiredSlot === null || !editorStructureSlots[requiredSlot]) {
+        return { ok: false, reason: "Component requires structure support offsets" };
+      }
+    }
+
+    const requiredEmptyStructureOffsets = getPlacementOffsets(part, rotateQuarter, "emptyStructure");
+    for (const offset of requiredEmptyStructureOffsets) {
       const requiredSlot = coordToSlot(anchorCoord.x + offset.x, anchorCoord.y + offset.y);
       if (requiredSlot === null) {
         return { ok: false, reason: "Component clearance extends beyond editor bounds" };
@@ -1443,7 +1818,15 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       if (editorStructureSlots[requiredSlot]) {
         return { ok: false, reason: "Required clearance area must be empty of structure" };
       }
-      if (editorFunctionalSlots[requiredSlot] && editorFunctionalSlots[requiredSlot]?.groupId !== (editorFunctionalSlots[anchorSlot]?.groupId ?? -1)) {
+    }
+
+    const requiredEmptyFunctionalOffsets = getPlacementOffsets(part, rotateQuarter, "emptyFunctional");
+    for (const offset of requiredEmptyFunctionalOffsets) {
+      const requiredSlot = coordToSlot(anchorCoord.x + offset.x, anchorCoord.y + offset.y);
+      if (requiredSlot === null) {
+        return { ok: false, reason: "Functional clearance extends beyond editor bounds" };
+      }
+      if (editorFunctionalSlots[requiredSlot] && editorFunctionalSlots[requiredSlot]?.groupId !== currentGroupId) {
         return { ok: false, reason: "Required clearance area is occupied by another functional component" };
       }
     }
@@ -1521,15 +1904,18 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     return "^";
   };
 
-  const isDirectionalComponent = (component: ComponentId): boolean => {
-    return COMPONENTS[component].directional === true;
+  const isDirectionalPart = (part: PartDefinition | null): boolean => {
+    if (!part) {
+      return false;
+    }
+    return part.directional ?? COMPONENTS[part.baseComponent].directional === true;
   };
 
   const isCurrentEditorSelectionDirectional = (): boolean => {
-    if (editorLayer !== "functional" || !(editorSelection in COMPONENTS)) {
+    if (editorLayer !== "functional") {
       return false;
     }
-    return isDirectionalComponent(editorSelection as ComponentId);
+    return isDirectionalPart(resolvePartForSelection(editorSelection));
   };
 
   const getEditorCatalogItems = (): EditorCatalogItem[] => {
@@ -1546,14 +1932,18 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       });
     }
     if (editorLayer === "functional") {
-      return Object.entries(COMPONENTS).map(([id, stats]) => {
-        const rotateHint = stats.directional ? " | Supports 90deg rotate" : "";
+      return parts.map((part) => {
+        const stats = COMPONENTS[part.baseComponent];
+        const rotateHint = isDirectionalPart(part) ? " | Supports 90deg rotate" : "";
+        const footprint = getPartFootprintOffsets(part, 0);
+        const hasStructureSpace = footprint.some((cell) => cell.occupiesStructureSpace);
+        const hasDamageableBox = footprint.some((cell) => cell.takesDamage);
         return {
-          value: id,
-          title: id,
-          subtitle: stats.type,
-          detail: `Type ${stats.type} | Mass ${stats.mass.toFixed(2)} | HPx ${stats.hpMul.toFixed(2)}${rotateHint}`,
-          thumb: id.slice(0, 2).toUpperCase(),
+          value: part.id,
+          title: part.name,
+          subtitle: `${stats.type}/${part.baseComponent}`,
+          detail: `Base ${part.baseComponent} | Boxes ${footprint.length} | StructSpace ${hasStructureSpace ? "yes" : "no"} | Damageable ${hasDamageableBox ? "yes" : "no"}${rotateHint}`,
+          thumb: part.id.slice(0, 2).toUpperCase(),
         };
       });
     }
@@ -1589,11 +1979,12 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     editorDraft.attachments = editorFunctionalSlots
       .map((entry, slotIndex) => ({ entry, slotIndex }))
       .filter((item): item is {
-        entry: { component: ComponentId; rotateQuarter: 0 | 1 | 2 | 3; groupId: number; isAnchor: boolean };
+        entry: { component: ComponentId; partId?: string; rotateQuarter: 0 | 1 | 2 | 3; groupId: number; isAnchor: boolean };
         slotIndex: number;
       } => item.entry !== null && item.entry.isAnchor && slotToCell.has(item.slotIndex))
       .map((entry) => ({
         component: entry.entry.component,
+        partId: entry.entry.partId,
         cell: slotToCell.get(entry.slotIndex) ?? 0,
         x: slotToCoord(entry.slotIndex).x,
         y: slotToCoord(entry.slotIndex).y,
@@ -1611,6 +2002,160 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       }));
 
     // Gas is currently not derived from parts in editor mode.
+  };
+
+  const createDefaultPartDesignerSlot = (): NonNullable<PartDesignerSlot> => ({
+    occupiesFunctionalSpace: true,
+    occupiesStructureSpace: false,
+    needsStructureBehind: true,
+    takesDamage: true,
+    isAttachPoint: false,
+    isShootingPoint: false,
+  });
+
+  const ensurePartDesignerSlot = (slot: number): NonNullable<PartDesignerSlot> => {
+    const current = partDesignerSlots[slot];
+    if (current) {
+      return current;
+    }
+    const next = createDefaultPartDesignerSlot();
+    partDesignerSlots[slot] = next;
+    return next;
+  };
+
+  const recalcPartDraftFromSlots = (): void => {
+    if (partDesignerAnchorSlot === null) {
+      const firstSlot = partDesignerSlots.findIndex((entry) => entry !== null);
+      if (firstSlot >= 0) {
+        partDesignerAnchorSlot = firstSlot;
+      }
+    }
+    if (partDesignerSelectedSlot === null) {
+      partDesignerSelectedSlot = partDesignerAnchorSlot;
+    }
+    const anchorCoord = partDesignerAnchorSlot !== null ? slotToCoord(partDesignerAnchorSlot) : { x: 0, y: 0 };
+    const boxes = partDesignerSlots
+      .map((entry, slotIndex) => ({ entry, slotIndex }))
+      .filter((item): item is { entry: NonNullable<PartDesignerSlot>; slotIndex: number } => item.entry !== null)
+      .map((item) => {
+        const coord = slotToCoord(item.slotIndex);
+        const needsStructureBehind = item.entry.needsStructureBehind
+          && !item.entry.occupiesStructureSpace
+          && item.entry.occupiesFunctionalSpace;
+        return {
+          x: coord.x,
+          y: coord.y,
+          occupiesFunctionalSpace: item.entry.occupiesFunctionalSpace,
+          occupiesStructureSpace: item.entry.occupiesStructureSpace,
+          needsStructureBehind,
+          isAttachPoint: item.entry.isAttachPoint,
+          isAnchorPoint: partDesignerAnchorSlot === item.slotIndex,
+          isShootingPoint: item.entry.isShootingPoint,
+          takesDamage: item.entry.takesDamage,
+          takesFunctionalDamage: item.entry.takesDamage,
+        };
+      });
+    if (boxes.length <= 0) {
+      boxes.push({
+        x: anchorCoord.x,
+        y: anchorCoord.y,
+        occupiesFunctionalSpace: true,
+        occupiesStructureSpace: false,
+        needsStructureBehind: true,
+        isAttachPoint: false,
+        isAnchorPoint: true,
+        isShootingPoint: false,
+        takesDamage: true,
+        takesFunctionalDamage: true,
+      });
+      const anchorSlot = coordToSlot(anchorCoord.x, anchorCoord.y);
+      if (anchorSlot !== null) {
+        partDesignerSlots[anchorSlot] = {
+          occupiesFunctionalSpace: true,
+          occupiesStructureSpace: false,
+          needsStructureBehind: true,
+          takesDamage: true,
+          isAttachPoint: false,
+          isShootingPoint: false,
+        };
+        if (partDesignerSelectedSlot === null) {
+          partDesignerSelectedSlot = anchorSlot;
+        }
+      }
+    }
+    const toRelativeOffsets = (slots: Set<number>): Array<{ x: number; y: number }> => {
+      return Array.from(slots)
+        .map((slot) => slotToCoord(slot))
+        .map((coord) => ({
+          x: coord.x - anchorCoord.x,
+          y: coord.y - anchorCoord.y,
+        }));
+    };
+    partDesignerDraft = {
+      ...partDesignerDraft,
+      anchor: { x: anchorCoord.x, y: anchorCoord.y },
+      boxes,
+      placement: {
+        requireStructureOffsets: toRelativeOffsets(partDesignerSupportOffsets),
+        requireStructureBelowAnchor: partDesignerRequireStructureBelowAnchor,
+        requireStructureOnFunctionalOccupiedBoxes: partDesignerDraft.placement?.requireStructureOnFunctionalOccupiedBoxes ?? true,
+        requireStructureOnStructureOccupiedBoxes: partDesignerDraft.placement?.requireStructureOnStructureOccupiedBoxes ?? true,
+        requireEmptyStructureOffsets: toRelativeOffsets(partDesignerEmptyStructureOffsets),
+        requireEmptyFunctionalOffsets: toRelativeOffsets(partDesignerEmptyFunctionalOffsets),
+      },
+    };
+  };
+
+  const loadPartIntoDesignerSlots = (part: PartDefinition): void => {
+    partDesignerDraft = applyPartMetadataDefaults(clonePartDefinition(part));
+    partDesignerSlots = new Array<PartDesignerSlot>(EDITOR_GRID_MAX_SIZE).fill(null);
+    partDesignerSupportOffsets = new Set<number>();
+    partDesignerEmptyStructureOffsets = new Set<number>();
+    partDesignerEmptyFunctionalOffsets = new Set<number>();
+    partDesignerRequireStructureBelowAnchor = part.placement?.requireStructureBelowAnchor ?? false;
+
+    for (const box of part.boxes) {
+      const slot = coordToSlot(box.x, box.y);
+      if (slot === null) {
+        continue;
+      }
+      const isAttachPoint = box.isAttachPoint === true;
+      const occupiesStructureSpace = isAttachPoint ? false : box.occupiesStructureSpace === true;
+      const occupiesFunctionalSpace = isAttachPoint ? false : box.occupiesFunctionalSpace !== false;
+      partDesignerSlots[slot] = {
+        occupiesFunctionalSpace,
+        occupiesStructureSpace,
+        needsStructureBehind: (box.needsStructureBehind === true) && !occupiesStructureSpace && occupiesFunctionalSpace,
+        takesDamage: box.takesDamage ?? box.takesFunctionalDamage ?? (occupiesStructureSpace || occupiesFunctionalSpace),
+        isAttachPoint,
+        isShootingPoint: box.isShootingPoint === true,
+      };
+    }
+
+    const anchorBox = part.boxes.find((box) => box.isAnchorPoint === true) ?? null;
+    partDesignerAnchorSlot = anchorBox ? coordToSlot(anchorBox.x, anchorBox.y) : coordToSlot(part.anchor.x, part.anchor.y);
+    partDesignerSelectedSlot = partDesignerAnchorSlot ?? partDesignerSlots.findIndex((entry) => entry !== null);
+    if (partDesignerSelectedSlot !== null && partDesignerSelectedSlot < 0) {
+      partDesignerSelectedSlot = null;
+    }
+
+    const anchorCoord = partDesignerAnchorSlot !== null ? slotToCoord(partDesignerAnchorSlot) : part.anchor;
+    const loadOffsets = (
+      offsets: ReadonlyArray<{ x: number; y: number }> | undefined,
+      targetSet: Set<number>,
+    ): void => {
+      for (const offset of offsets ?? []) {
+        const slot = coordToSlot(anchorCoord.x + offset.x, anchorCoord.y + offset.y);
+        if (slot !== null) {
+          targetSet.add(slot);
+        }
+      }
+    };
+
+    loadOffsets(part.placement?.requireStructureOffsets, partDesignerSupportOffsets);
+    loadOffsets(part.placement?.requireEmptyStructureOffsets, partDesignerEmptyStructureOffsets);
+    loadOffsets(part.placement?.requireEmptyFunctionalOffsets, partDesignerEmptyFunctionalOffsets);
+    recalcPartDraftFromSlots();
   };
 
   const loadTemplateIntoEditorSlots = (template: UnitTemplate): void => {
@@ -1638,26 +2183,34 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         ? coordToSlot(attachment.x, attachment.y)
         : cellToSlot.get(attachment.cell);
       if (slot !== undefined && slot !== null) {
+        const part = resolvePartDefinitionForAttachment(
+          { partId: attachment.partId, component: attachment.component },
+          parts,
+        );
+        if (!part) {
+          continue;
+        }
         const rotateQuarter = typeof attachment.rotateQuarter === "number"
           ? ((attachment.rotateQuarter % 4 + 4) % 4) as 0 | 1 | 2 | 3
           : (attachment.rotate90 ? 1 : 0);
-        const normalizedRotate = isDirectionalComponent(attachment.component) ? rotateQuarter : 0;
-        const placement = getFootprintSlots(slot, attachment.component, normalizedRotate);
+        const normalizedRotate = normalizePartAttachmentRotate(part, rotateQuarter);
+        const placement = getFootprintSlots(slot, part, normalizedRotate);
         if (!placement || placement.slots.length <= 0) {
           continue;
         }
-        const check = validateFunctionalPlacement(attachment.component, normalizedRotate, slot, placement.slots, placement.anchorCoord);
+        const check = validateFunctionalPlacement(part, normalizedRotate, slot, placement.slots, placement.anchorCoord);
         if (!check.ok) {
           continue;
         }
         const groupId = editorFunctionalGroupSeq;
         editorFunctionalGroupSeq += 1;
         for (const occupiedSlot of placement.slots) {
-          editorFunctionalSlots[occupiedSlot] = {
-            component: attachment.component,
+          editorFunctionalSlots[occupiedSlot.slot] = {
+            component: part.baseComponent,
+            partId: part.id,
             rotateQuarter: normalizedRotate,
             groupId,
-            isAnchor: occupiedSlot === slot,
+            isAnchor: occupiedSlot.slot === slot,
           };
         }
       }
@@ -1704,10 +2257,11 @@ export function bootstrap(options: BootstrapOptions = {}): void {
 
     for (const attachment of editorDraft.attachments) {
       const stats = COMPONENTS[attachment.component];
-      totalMass += stats.mass;
+      const part = resolvePartDefinitionForAttachment({ partId: attachment.partId, component: attachment.component }, parts);
+      totalMass += part?.runtimeOverrides?.mass ?? stats.mass;
       if (stats.type === "engine") {
-        const enginePower = Math.max(0, stats.power ?? 0);
-        const engineSpeedCap = Math.max(1, stats.maxSpeed ?? 90);
+        const enginePower = Math.max(0, part?.runtimeOverrides?.power ?? stats.power ?? 0);
+        const engineSpeedCap = Math.max(1, part?.runtimeOverrides?.maxSpeed ?? stats.maxSpeed ?? 90);
         totalPower += enginePower;
         weightedSpeedCap += engineSpeedCap * Math.max(1, enginePower);
         capWeight += Math.max(1, enginePower);
@@ -1733,7 +2287,120 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     };
   };
 
+  const drawPartDesignerCanvas = (): void => {
+    const context = canvas.getContext("2d");
+    if (!context) {
+      return;
+    }
+    context.clearRect(0, 0, canvas.width, canvas.height);
+    context.fillStyle = "rgba(13, 21, 31, 0.98)";
+    context.fillRect(0, 0, canvas.width, canvas.height);
+
+    const grid = getEditorGridRect();
+    const validation = validatePartDefinitionDetailed(partDesignerDraft);
+    context.fillStyle = "#dbe8f6";
+    context.font = "14px Trebuchet MS";
+    context.fillText(`Part Designer | Grid ${editorGridCols}x${editorGridRows} | Tool ${partDesignerTool}`, 18, 26);
+    context.fillText("Left-click: select/create box | Left-drag: pan grid | Right-click: erase selected box.", 18, 46);
+    context.fillStyle = validation.errors.length > 0 ? "#ffd1c1" : "#bde6c6";
+    context.fillText(`Errors ${validation.errors.length} | Warnings ${validation.warnings.length}`, 18, 66);
+
+    for (let row = 0; row < editorGridRows; row += 1) {
+      for (let col = 0; col < editorGridCols; col += 1) {
+        const slot = row * editorGridCols + col;
+        const x = grid.x + col * grid.cell;
+        const y = grid.y + row * grid.cell;
+        const entry = partDesignerSlots[slot];
+
+        context.fillStyle = "rgba(39, 56, 76, 0.42)";
+        context.fillRect(x + 2, y + 2, grid.cell - 4, grid.cell - 4);
+        context.strokeStyle = "rgba(121, 148, 180, 0.35)";
+        context.lineWidth = 1;
+        context.strokeRect(x + 1, y + 1, grid.cell - 2, grid.cell - 2);
+
+        if (entry) {
+          if (entry.occupiesFunctionalSpace && entry.occupiesStructureSpace) {
+            context.fillStyle = "rgba(203, 146, 240, 0.86)";
+          } else if (entry.occupiesStructureSpace) {
+            context.fillStyle = "rgba(110, 185, 255, 0.86)";
+          } else if (entry.occupiesFunctionalSpace) {
+            context.fillStyle = "rgba(248, 179, 146, 0.88)";
+          } else {
+            context.fillStyle = "rgba(148, 167, 188, 0.78)";
+          }
+          context.fillRect(x + 4, y + 4, grid.cell - 8, grid.cell - 8);
+          if (entry.takesDamage) {
+            context.fillStyle = "#ff7f7f";
+            context.beginPath();
+            context.arc(x + grid.cell - 8, y + 8, 3, 0, Math.PI * 2);
+            context.fill();
+          }
+          if (entry.needsStructureBehind) {
+            context.fillStyle = "#8effc1";
+            context.fillRect(x + 6, y + grid.cell - 10, 6, 6);
+          }
+          if (entry.isAttachPoint) {
+            context.strokeStyle = "#8fe7ff";
+            context.lineWidth = 1.5;
+            context.beginPath();
+            context.arc(x + grid.cell * 0.5, y + grid.cell * 0.5, 7, 0, Math.PI * 2);
+            context.stroke();
+          }
+          if (entry.isShootingPoint) {
+            context.strokeStyle = "#ffd98b";
+            context.lineWidth = 1.5;
+            context.beginPath();
+            context.moveTo(x + grid.cell - 12, y + grid.cell - 12);
+            context.lineTo(x + grid.cell - 5, y + grid.cell - 12);
+            context.lineTo(x + grid.cell - 5, y + grid.cell - 5);
+            context.stroke();
+          }
+        }
+
+        if (partDesignerAnchorSlot === slot) {
+          context.strokeStyle = "#ffffff";
+          context.lineWidth = 2;
+          context.beginPath();
+          context.moveTo(x + grid.cell / 2 - 6, y + grid.cell / 2);
+          context.lineTo(x + grid.cell / 2 + 6, y + grid.cell / 2);
+          context.moveTo(x + grid.cell / 2, y + grid.cell / 2 - 6);
+          context.lineTo(x + grid.cell / 2, y + grid.cell / 2 + 6);
+          context.stroke();
+        }
+        if (partDesignerSelectedSlot === slot) {
+          context.strokeStyle = "#ffe07f";
+          context.lineWidth = 2;
+          context.strokeRect(x + 2, y + 2, grid.cell - 4, grid.cell - 4);
+        }
+
+        if (partDesignerSupportOffsets.has(slot)) {
+          context.fillStyle = "#79e296";
+          context.fillRect(x + 2, y + 2, 6, 6);
+        }
+        if (partDesignerEmptyStructureOffsets.has(slot)) {
+          context.strokeStyle = "#71d7ff";
+          context.lineWidth = 1.5;
+          context.strokeRect(x + 3, y + 3, grid.cell - 6, grid.cell - 6);
+        }
+        if (partDesignerEmptyFunctionalOffsets.has(slot)) {
+          context.strokeStyle = "#ffd88c";
+          context.lineWidth = 1.5;
+          context.strokeRect(x + 6, y + 6, grid.cell - 12, grid.cell - 12);
+        }
+
+        const coord = slotToCoord(slot);
+        context.fillStyle = "rgba(206, 220, 237, 0.55)";
+        context.font = "8px Trebuchet MS";
+        context.fillText(`(${coord.x},${coord.y})`, x + 4, y + grid.cell - 4);
+      }
+    }
+  };
+
   const drawEditorCanvas = (): void => {
+    if (isPartEditorScreen()) {
+      drawPartDesignerCanvas();
+      return;
+    }
     const context = canvas.getContext("2d");
     if (!context) {
       return;
@@ -1759,7 +2426,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       context.fillText(`Q ccw | E cw`, canvas.width - 160, 47);
     }
 
-    const validation = validateTemplateDetailed(editorDraft);
+    const validation = validateTemplateDetailed(editorDraft, { partCatalog: parts });
     const lineCount = validation.errors.length + validation.warnings.length + 2;
     const issuesHeight = Math.max(34, 16 + Math.min(10, lineCount) * 14);
     const issuesWidth = 360;
@@ -1874,6 +2541,81 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     context.fillText(legend, panelX + 8, panelY + 31);
   };
 
+  const applyPartDesignerCellAction = (slot: number, forceDelete: boolean): void => {
+    const eraseRequested = forceDelete || partDesignerTool === "erase";
+    partDesignerSelectedSlot = slot;
+    const toggleSet = (setRef: Set<number>): void => {
+      if (setRef.has(slot)) {
+        setRef.delete(slot);
+      } else {
+        setRef.add(slot);
+      }
+    };
+
+    if (eraseRequested) {
+      partDesignerSlots[slot] = null;
+      partDesignerSupportOffsets.delete(slot);
+      partDesignerEmptyStructureOffsets.delete(slot);
+      partDesignerEmptyFunctionalOffsets.delete(slot);
+      if (partDesignerAnchorSlot === slot) {
+        partDesignerAnchorSlot = null;
+      }
+      recalcPartDraftFromSlots();
+      return;
+    }
+
+    if (partDesignerTool === "setAnchor") {
+      ensurePartDesignerSlot(slot);
+      partDesignerAnchorSlot = slot;
+      recalcPartDraftFromSlots();
+      return;
+    }
+    if (partDesignerTool === "markSupport") {
+      toggleSet(partDesignerSupportOffsets);
+      recalcPartDraftFromSlots();
+      return;
+    }
+    if (partDesignerTool === "markEmptyStructure") {
+      toggleSet(partDesignerEmptyStructureOffsets);
+      recalcPartDraftFromSlots();
+      return;
+    }
+    if (partDesignerTool === "markEmptyFunctional") {
+      toggleSet(partDesignerEmptyFunctionalOffsets);
+      recalcPartDraftFromSlots();
+      return;
+    }
+
+    if (partDesignerTool === "select") {
+      ensurePartDesignerSlot(slot);
+      if (partDesignerAnchorSlot === null) {
+        partDesignerAnchorSlot = slot;
+      }
+      recalcPartDraftFromSlots();
+      return;
+    }
+
+    const next = ensurePartDesignerSlot(slot);
+    if (partDesignerTool === "paintFunctional") {
+      next.isAttachPoint = false;
+      next.occupiesFunctionalSpace = true;
+      if (!next.occupiesStructureSpace) {
+        next.needsStructureBehind = true;
+      }
+    } else if (partDesignerTool === "paintStructure") {
+      next.isAttachPoint = false;
+      next.occupiesStructureSpace = true;
+      next.needsStructureBehind = false;
+    } else if (partDesignerTool === "paintDamage") {
+      next.takesDamage = true;
+    }
+    partDesignerSlots[slot] = next;
+    if (partDesignerAnchorSlot === null) {
+      partDesignerAnchorSlot = slot;
+    }
+    recalcPartDraftFromSlots();
+  };
+
   const applyEditorCellAction = (mouseX: number, mouseY: number, forceDelete = false): void => {
     const grid = getEditorGridRect();
     const relX = mouseX - grid.x;
@@ -1885,6 +2627,11 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     const row = Math.floor(relY / grid.cell);
     const slot = row * editorGridCols + col;
     const deleteRequested = forceDelete || editorDeleteMode;
+
+    if (isPartEditorScreen()) {
+      applyPartDesignerCellAction(slot, forceDelete);
+      return;
+    }
 
     if (editorLayer === "structure") {
       if (deleteRequested) {
@@ -1902,36 +2649,66 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       return;
     }
 
-    if (!editorStructureSlots[slot]) {
-      addLog("Select a structure cell first", "warn");
-      return;
-    }
-
     if (editorLayer === "functional") {
       if (deleteRequested) {
         const hadFunctional = clearFunctionalGroupAtSlot(slot);
         if (!hadFunctional) {
           addLog(`No functional component at row ${row + 1}, col ${col + 1}`, "warn");
         }
-      } else if (editorSelection in COMPONENTS) {
-        const component = editorSelection as ComponentId;
-        const rotateQuarter = COMPONENTS[component].directional ? editorWeaponRotateQuarter : 0;
-        const placement = getFootprintSlots(slot, component, rotateQuarter);
-        if (!placement || placement.slots.length <= 0) {
-          addLog("Component footprint out of editor bounds", "warn");
+      } else {
+        const part = resolvePartForSelection(editorSelection);
+        if (!part) {
+          addLog("Select a valid part first", "warn");
           return;
         }
-        const check = validateFunctionalPlacement(component, rotateQuarter, slot, placement.slots, placement.anchorCoord);
+        const rotateQuarter = isDirectionalPart(part) ? editorWeaponRotateQuarter : 0;
+
+        let anchorSlot = slot;
+        if (editorPlaceByCenter) {
+          const centerCells = getPartFootprintOffsets(part, normalizePartAttachmentRotate(part, rotateQuarter));
+          let minX = 0;
+          let maxX = 0;
+          let minY = 0;
+          let maxY = 0;
+          if (centerCells.length > 0) {
+            minX = centerCells[0]?.x ?? 0;
+            maxX = centerCells[0]?.x ?? 0;
+            minY = centerCells[0]?.y ?? 0;
+            maxY = centerCells[0]?.y ?? 0;
+          }
+          for (const cell of centerCells) {
+            minX = Math.min(minX, cell.x);
+            maxX = Math.max(maxX, cell.x);
+            minY = Math.min(minY, cell.y);
+            maxY = Math.max(maxY, cell.y);
+          }
+          const centerOffsetX = Math.round((minX + maxX) * 0.5);
+          const centerOffsetY = Math.round((minY + maxY) * 0.5);
+          const clickCoord = slotToCoord(slot);
+          const centeredAnchorSlot = coordToSlot(clickCoord.x - centerOffsetX, clickCoord.y - centerOffsetY);
+          if (centeredAnchorSlot === null) {
+            addLog("Centered placement is out of editor bounds", "warn");
+            return;
+          }
+          anchorSlot = centeredAnchorSlot;
+        }
+
+        const placement = getFootprintSlots(anchorSlot, part, rotateQuarter);
+        if (!placement || placement.slots.length <= 0) {
+          addLog("Part footprint out of editor bounds", "warn");
+          return;
+        }
+        const check = validateFunctionalPlacement(part, rotateQuarter, anchorSlot, placement.slots, placement.anchorCoord);
         if (!check.ok) {
           addLog(check.reason ?? "Invalid component placement", "warn");
           return;
         }
-        if (component === "control") {
+        if (part.baseComponent === "control") {
           editorFunctionalSlots = editorFunctionalSlots.map((entry) => (entry?.component === "control" ? null : entry));
         }
         const occupiedGroupIds = new Set(
           placement.slots
-            .map((occupiedSlot) => editorFunctionalSlots[occupiedSlot]?.groupId ?? null)
+            .map((occupiedSlot) => editorFunctionalSlots[occupiedSlot.slot]?.groupId ?? null)
             .filter((groupId): groupId is number => groupId !== null),
         );
         if (occupiedGroupIds.size > 0) {
@@ -1945,15 +2722,21 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         const groupId = editorFunctionalGroupSeq;
         editorFunctionalGroupSeq += 1;
         for (const occupiedSlot of placement.slots) {
-          editorFunctionalSlots[occupiedSlot] = {
-            component,
+          editorFunctionalSlots[occupiedSlot.slot] = {
+            component: part.baseComponent,
+            partId: part.id,
             rotateQuarter,
             groupId,
-            isAnchor: occupiedSlot === slot,
+            isAnchor: occupiedSlot.slot === anchorSlot,
           };
         }
       }
       recalcEditorDraftFromSlots();
+      return;
+    }
+
+    if (!editorStructureSlots[slot]) {
+      addLog("Select a structure cell first", "warn");
       return;
     }
 
@@ -1993,10 +2776,11 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       </div>
     `;
 
+    const isTestArenaActive = battle.getState().active && battle.getState().nodeId === testArenaNode.id;
     mapPanel.innerHTML = `
       <h3>Map</h3>
       <div class="small">Choose where to fight from your base.</div>
-      ${battle.getState().active && !battle.getState().outcome ? `<div class="small warn">Battle resolves when you press Next Round.</div>` : ""}
+      ${battle.getState().active && !battle.getState().outcome && !isTestArenaActive ? `<div class="small warn">Battle resolves when you press Next Round.</div>` : ""}
       ${mapNodes
         .map((node) => {
           const ownerClass = node.owner === "player" ? "good" : node.owner === "enemy" ? "bad" : "warn";
@@ -2015,69 +2799,255 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       <div class="small">Call reinforcements using global gas. Active cap from commander skill.</div>
       <div class="small">Turn-based: battle ends at end of round (press Next Round to resolve).</div>
       <div class="row">${templates.map((template) => `<button data-deploy="${template.id}">${template.name} (${template.gasCost} gas)</button>`).join("")}</div>
-      <div class="row"><button id="btnToggleDisplay">Toggle Display Layer (${battle.isDisplayEnabled() ? "ON" : "OFF"})</button></div>
       <div id="friendlyActive" class="small"></div>
       ${battle.getState().outcome ? `<div class="row"><button id="btnBackToMap">Return to Map</button></div>` : ""}
     `;
 
-    ensureEditorSelectionForLayer();
-    if (editorTemplateDialogSelectedId === null || !templates.some((template) => template.id === editorTemplateDialogSelectedId)) {
-      editorTemplateDialogSelectedId = templates[0]?.id ?? null;
-    }
-    const templateOpenRows = templates
-      .map((template) => {
-        const selectedClass = template.id === editorTemplateDialogSelectedId ? "active" : "";
-        return `<div class="row" style="justify-content:space-between; gap:8px;">
-          <button data-editor-open-select="${template.id}" class="${selectedClass}" style="flex:1; text-align:left;">${template.name} (${template.type})</button>
-          <button data-editor-open-copy="${template.id}">Copy</button>
-        </div>`;
-      })
+    const enemyTemplateOptions = templates
+      .map((template) => `<option value="${template.id}" ${template.id === testArenaSpawnTemplateId ? "selected" : ""}>${template.name}</option>`)
       .join("");
-    editorPanel.innerHTML = `
-      <h3>Object Editor</h3>
-      <div class="small">Choose a layer, pick a component card on the right panel, then click the ${editorGridCols}x${editorGridRows} grid on canvas. Drag with left mouse to move the grid. Origin is (0,0), negative coordinates supported.</div>
+    const enemyCountLabel = Math.max(0, Math.floor(testArenaEnemyCount));
+    const enemyCountActive = isTestArenaActive
+      ? battle.getAliveEnemyCount()
+      : enemyCountLabel;
+    testArenaPanel.innerHTML = `
+      <h3>Test Arena</h3>
+      <div class="small">Debug arena for spawn pressure and survivability. Starts a battle without campaign rewards.</div>
+      <div class="small">Not turn-based: Next Round is disabled while in Test Arena.</div>
       <div class="row">
-        <button id="btnOpenTemplateWindow">Open</button>
-        <span class="small">Current object: ${editorDraft.name}</span>
-      </div>
-      ${editorTemplateDialogOpen ? `<div class="node-card">
-        <div><strong>Open Template</strong></div>
-        <div class="small">Click a template row to open it directly, or use Copy to create an editable copy with "-copy" suffix.</div>
-        <div style="display:flex; flex-direction:column; gap:6px; margin-top:8px; max-height:220px; overflow:auto;">
-          ${templateOpenRows || `<div class="small">No template available.</div>`}
-        </div>
-        <div class="row" style="margin-top:8px;">
-          <button id="btnOpenTemplateClose">Close</button>
-        </div>
-      </div>` : ""}
-      <div class="row">
-        <label class="small">Name <input id="editorName" value="${editorDraft.name}" /></label>
+        <button id="btnStartTestArena">${isTestArenaActive ? "Restart Test Arena" : "Start Test Arena"}</button>
+        ${isTestArenaActive ? `<button id="btnEndTestArena">End Test Arena</button>` : ""}
       </div>
       <div class="row">
-        <label class="small">Type
-          <select id="editorType">
-            <option value="ground" ${editorDraft.type === "ground" ? "selected" : ""}>Ground</option>
-            <option value="air" ${editorDraft.type === "air" ? "selected" : ""}>Air</option>
+        <label class="small">Enemy count
+          <input id="testArenaEnemyCount" type="number" min="0" max="40" step="1" value="${enemyCountLabel}" />
+        </label>
+        <button id="btnApplyEnemyCount">Apply</button>
+        <span class="small">Active: ${enemyCountActive}</span>
+      </div>
+      <div class="row">
+        <label class="small">Spawn enemy
+          <select id="testArenaSpawnTemplate">
+            <option value="">Select...</option>
+            ${enemyTemplateOptions}
           </select>
         </label>
-        <span class="small">Template cost is configured outside part composition.</span>
+        <button id="btnSpawnTestEnemy">Spawn</button>
       </div>
       <div class="row">
-        <label class="small"><input id="editorDeleteMode" type="checkbox" ${editorDeleteMode ? "checked" : ""} /> Delete mode</label>
-        <span class="small">Selected: ${editorSelection || "none"}</span>
+        <label class="small"><input id="testArenaInvinciblePlayer" type="checkbox" ${testArenaInvinciblePlayer ? "checked" : ""} /> Player controlled invincible</label>
       </div>
-      <div class="row">
-        <span class="small">${isCurrentEditorSelectionDirectional() ? `Direction: ${editorWeaponRotateQuarter * 90}deg (${getRotationSymbol()})` : "Direction: n/a (undirectional component)"}</span>
-      </div>
-      <div class="row">
-        <button id="btnNewDraft">New Draft</button>
-        <button id="btnClearGrid">Clear Grid</button>
-      </div>
-      <div class="row">
-        <button id="btnSaveDraft">Save</button>
-        <button id="btnSaveDraftDefault">Save to Default</button>
-      </div>
+      <div class="small">Invincible player still collides and can be targeted, but takes no damage.</div>
     `;
+
+    ensureEditorSelectionForLayer();
+    if (isTemplateEditorScreen()) {
+      if (editorTemplateDialogSelectedId === null || !templates.some((template) => template.id === editorTemplateDialogSelectedId)) {
+        editorTemplateDialogSelectedId = templates[0]?.id ?? null;
+      }
+      const templateOpenRows = templates
+        .map((template) => {
+          const selectedClass = template.id === editorTemplateDialogSelectedId ? "active" : "";
+          return `<div class="row" style="justify-content:space-between; gap:8px;">
+            <button data-editor-open-select="${template.id}" class="${selectedClass}" style="flex:1; text-align:left;">${template.name} (${template.type})</button>
+            <button data-editor-open-copy="${template.id}">Copy</button>
+          </div>`;
+        })
+        .join("");
+      editorPanel.innerHTML = `
+        <h3>Template Editor</h3>
+        <div class="small">Choose a layer, pick a part card on the right panel, then click the ${editorGridCols}x${editorGridRows} grid on canvas. Drag with left mouse to move the grid. Origin is (0,0), negative coordinates supported.</div>
+        <div class="row">
+          <button id="btnOpenTemplateWindow">Open</button>
+          <span class="small">Current object: ${editorDraft.name}</span>
+        </div>
+        ${editorTemplateDialogOpen ? `<div class="node-card">
+          <div><strong>Open Template</strong></div>
+          <div class="small">Click a template row to open it directly, or use Copy to create an editable copy with "-copy" suffix.</div>
+          <div style="display:flex; flex-direction:column; gap:6px; margin-top:8px; max-height:220px; overflow:auto;">
+            ${templateOpenRows || `<div class="small">No template available.</div>`}
+          </div>
+          <div class="row" style="margin-top:8px;">
+            <button id="btnOpenTemplateClose">Close</button>
+          </div>
+        </div>` : ""}
+        <div class="row">
+          <label class="small">Name <input id="editorName" value="${editorDraft.name}" /></label>
+        </div>
+        <div class="row">
+          <label class="small">Type
+            <select id="editorType">
+              <option value="ground" ${editorDraft.type === "ground" ? "selected" : ""}>Ground</option>
+              <option value="air" ${editorDraft.type === "air" ? "selected" : ""}>Air</option>
+            </select>
+          </label>
+          <span class="small">Template cost is configured outside part composition.</span>
+        </div>
+        <div class="row">
+          <label class="small"><input id="editorDeleteMode" type="checkbox" ${editorDeleteMode ? "checked" : ""} /> Delete mode</label>
+          <label class="small"><input id="editorPlaceByCenter" type="checkbox" ${editorPlaceByCenter ? "checked" : ""} /> Center place on click</label>
+          <span class="small">Selected: ${editorSelection || "none"}</span>
+        </div>
+        <div class="row">
+          <span class="small">${isCurrentEditorSelectionDirectional() ? `Direction: ${editorWeaponRotateQuarter * 90}deg (${getRotationSymbol()})` : "Direction: n/a (undirectional component)"}</span>
+        </div>
+        <div class="row">
+          <button id="btnNewDraft">New Draft</button>
+          <button id="btnClearGrid">Clear Grid</button>
+        </div>
+        <div class="row">
+          <button id="btnSaveDraft">Save</button>
+          <button id="btnSaveDraftDefault">Save to Default</button>
+        </div>
+      `;
+    } else {
+      if (partDesignerSelectedId === null) {
+        partDesignerSelectedId = (partDesignerDraft.id || parts[0]?.id) ?? null;
+      }
+      if (partDesignerSelectedId !== partDesignerDraft.id && !parts.some((part) => part.id === partDesignerSelectedId)) {
+        partDesignerSelectedId = parts[0]?.id ?? null;
+      }
+      const partOpenRows = parts
+        .map((part) => {
+          const selectedClass = part.id === partDesignerSelectedId ? "active" : "";
+          return `<div class="row" style="justify-content:space-between; gap:8px;">
+            <button data-part-open-select="${part.id}" class="${selectedClass}" style="flex:1; text-align:left;">${part.name} (${part.baseComponent})</button>
+            <button data-part-open-copy="${part.id}">Copy</button>
+          </div>`;
+        })
+        .join("");
+      const baseComponentOptions = Object.keys(COMPONENTS)
+        .map((component) => `<option value="${component}" ${partDesignerDraft.baseComponent === component ? "selected" : ""}>${component}</option>`)
+        .join("");
+      const baseStats = COMPONENTS[partDesignerDraft.baseComponent];
+      const runtimePlaceholders = {
+        mass: String(baseStats.mass),
+        hpMul: String(baseStats.hpMul),
+        power: baseStats.power !== undefined ? String(baseStats.power) : "none",
+        maxSpeed: baseStats.maxSpeed !== undefined ? String(baseStats.maxSpeed) : "none",
+        damage: baseStats.damage !== undefined ? String(baseStats.damage) : "none",
+        range: baseStats.range !== undefined ? String(baseStats.range) : "none",
+        cooldown: baseStats.cooldown !== undefined ? String(baseStats.cooldown) : "none",
+        shootAngleDeg: baseStats.shootAngleDeg !== undefined ? String(baseStats.shootAngleDeg) : "none",
+        spreadDeg: baseStats.spreadDeg !== undefined ? String(baseStats.spreadDeg) : "none",
+      };
+      const categoryOptionsBase: string[] = ["functional", "weapon", "mobility", "support", "defense", "utility", "other"];
+      const weaponTypeOptions: Array<{ value: NonNullable<PartDefinition["properties"]>["weaponType"]; label: string }> = [
+        { value: "rapid-fire", label: "rapid-fire" },
+        { value: "heavy-shot", label: "heavy-shot" },
+        { value: "explosive", label: "explosive" },
+        { value: "tracking", label: "tracking" },
+        { value: "beam-precision", label: "beam-precision" },
+        { value: "control-utility", label: "control-utility" },
+      ];
+      const partProps = partDesignerDraft.properties ?? {};
+      const categoryOptions = partProps.category && !categoryOptionsBase.includes(partProps.category)
+        ? [partProps.category, ...categoryOptionsBase]
+        : categoryOptionsBase;
+      const propIsEngine = partProps.isEngine === true;
+      const propIsWeapon = partProps.isWeapon === true;
+      const propIsLoader = partProps.isLoader === true;
+      const propIsArmor = partProps.isArmor === true;
+      const propHasCoreTuning = partProps.hasCoreTuning === true;
+      editorPanel.innerHTML = `
+        <h3>Part Designer</h3>
+        <div class="small">Left panel edits part-level metadata and runtime values. Right panel edits single-box properties for the currently selected cell.</div>
+        <div class="row">
+          <button id="btnOpenPartWindow">Open</button>
+          <span class="small">Current part: ${partDesignerDraft.name}</span>
+        </div>
+        ${partDesignerDialogOpen ? `<div class="node-card">
+          <div><strong>Open Part</strong></div>
+          <div class="small">Click a part row to open it, or Copy to create an editable clone.</div>
+          <div style="display:flex; flex-direction:column; gap:6px; margin-top:8px; max-height:220px; overflow:auto;">
+            ${partOpenRows || `<div class="small">No part available.</div>`}
+          </div>
+          <div class="row" style="margin-top:8px;">
+            <button id="btnOpenPartClose">Close</button>
+          </div>
+        </div>` : ""}
+        <div class="row">
+          <label class="small">Part Name <input id="partName" value="${partDesignerDraft.name}" /></label>
+        </div>
+        <div class="row">
+          <label class="small">Part ID <input id="partId" value="${partDesignerDraft.id}" /></label>
+        </div>
+        <div class="row">
+          <label class="small">Base Component
+            <select id="partBaseComponent">${baseComponentOptions}</select>
+          </label>
+          <label class="small"><input id="partDirectional" type="checkbox" ${partDesignerDraft.directional ? "checked" : ""} /> Directional</label>
+        </div>
+        <div><strong>Editor Meta</strong></div>
+        <div class="row">
+          <label class="small">Category
+            <select id="partCategorySelect">
+              ${categoryOptions.map((option) => `<option value="${option}" ${(partProps.category ?? "") === option ? "selected" : ""}>${option}</option>`).join("")}
+            </select>
+          </label>
+          <label class="small">Subcategory <input id="partSubcategory" value="${partProps.subcategory ?? ""}" /></label>
+        </div>
+        <div><strong>Part Properties</strong></div>
+        <div class="row">
+          <label class="small" style="flex:1;">Tags (comma separated) <input id="partTags" value="${(partDesignerDraft.tags ?? []).join(", ")}" /></label>
+        </div>
+        <div class="row">
+          <label class="small"><input id="partPropIsEngine" type="checkbox" ${propIsEngine ? "checked" : ""} /> is_engine</label>
+          <label class="small"><input id="partPropIsWeapon" type="checkbox" ${propIsWeapon ? "checked" : ""} /> is_weapon</label>
+          <label class="small"><input id="partPropIsLoader" type="checkbox" ${propIsLoader ? "checked" : ""} /> is_loader</label>
+          <label class="small"><input id="partPropIsArmor" type="checkbox" ${propIsArmor ? "checked" : ""} /> is_armor</label>
+          <label class="small"><input id="partPropCoreTuning" type="checkbox" ${propHasCoreTuning ? "checked" : ""} /> core_tuning</label>
+        </div>
+        ${propIsEngine ? `<div class="row">
+          <label class="small">Engine Type
+            <select id="partEngineType">
+              <option value="ground" ${partProps.engineType === "ground" ? "selected" : ""}>ground</option>
+              <option value="air" ${partProps.engineType === "air" ? "selected" : ""}>air</option>
+            </select>
+          </label>
+          <label class="small">Power <input id="partPower" type="number" step="1" value="${partDesignerDraft.runtimeOverrides?.power ?? ""}" placeholder="${runtimePlaceholders.power}" /></label>
+          <label class="small">Max Speed <input id="partMaxSpeed" type="number" step="1" value="${partDesignerDraft.runtimeOverrides?.maxSpeed ?? ""}" placeholder="${runtimePlaceholders.maxSpeed}" /></label>
+        </div>` : ""}
+        ${propIsWeapon ? `<div class="row">
+          <label class="small">Weapon Type
+            <select id="partWeaponType">
+              ${weaponTypeOptions.map((option) => `<option value="${option.value}" ${partProps.weaponType === option.value ? "selected" : ""}>${option.label}</option>`).join("")}
+            </select>
+          </label>
+          <label class="small">Damage <input id="partDamage" type="number" step="1" value="${partDesignerDraft.runtimeOverrides?.damage ?? ""}" placeholder="${runtimePlaceholders.damage}" /></label>
+          <label class="small">Range <input id="partRange" type="number" step="1" value="${partDesignerDraft.runtimeOverrides?.range ?? ""}" placeholder="${runtimePlaceholders.range}" /></label>
+        </div>
+        <div class="row">
+          <label class="small">Cooldown <input id="partCooldown" type="number" step="0.05" value="${partDesignerDraft.runtimeOverrides?.cooldown ?? ""}" placeholder="${runtimePlaceholders.cooldown}" /></label>
+          <label class="small">Shoot Angle <input id="partShootAngle" type="number" step="1" value="${partDesignerDraft.runtimeOverrides?.shootAngleDeg ?? ""}" placeholder="${runtimePlaceholders.shootAngleDeg}" /></label>
+          <label class="small">Spread <input id="partSpread" type="number" step="0.1" value="${partDesignerDraft.runtimeOverrides?.spreadDeg ?? ""}" placeholder="${runtimePlaceholders.spreadDeg}" /></label>
+        </div>` : ""}
+        ${propIsLoader ? `<div class="row">
+          <label class="small" style="flex:1;">Loader serves tags (comma separated) <input id="partLoaderServesTags" value="${(partProps.loaderServesTags ?? []).join(", ")}" /></label>
+          <label class="small">Cooldown Multiplier <input id="partLoaderCooldownMultiplier" type="number" step="0.01" value="${partProps.loaderCooldownMultiplier ?? ""}" placeholder="1.0" /></label>
+        </div>` : ""}
+        ${propIsArmor ? `<div class="row">
+          <label class="small">HP <input id="partMetaHp" type="number" step="1" value="${partProps.hp ?? ""}" /></label>
+        </div>` : ""}
+        ${propHasCoreTuning ? `<div class="row">
+          <label class="small">Mass <input id="partMass" type="number" step="0.1" value="${partDesignerDraft.runtimeOverrides?.mass ?? ""}" placeholder="${runtimePlaceholders.mass}" /></label>
+          <label class="small">HP Mul <input id="partHpMul" type="number" step="0.05" value="${partDesignerDraft.runtimeOverrides?.hpMul ?? ""}" placeholder="${runtimePlaceholders.hpMul}" /></label>
+        </div>
+        ` : ""}
+        <div class="row">
+          <label class="small"><input id="partRequireStructureBelowAnchor" type="checkbox" ${partDesignerRequireStructureBelowAnchor ? "checked" : ""} /> Require structure below anchor</label>
+          <label class="small"><input id="partRequireStructureOnFunctional" type="checkbox" ${(partDesignerDraft.placement?.requireStructureOnFunctionalOccupiedBoxes ?? true) ? "checked" : ""} /> Functional boxes require structure</label>
+          <label class="small"><input id="partRequireStructureOnStructure" type="checkbox" ${(partDesignerDraft.placement?.requireStructureOnStructureOccupiedBoxes ?? true) ? "checked" : ""} /> Structure boxes require structure support</label>
+        </div>
+        <div class="row">
+          <button id="btnNewPartDraft">New Part</button>
+          <button id="btnClearPartGrid">Clear Grid</button>
+        </div>
+        <div class="row">
+          <button id="btnSavePartDraft">Save</button>
+        </div>
+      `;
+    }
 
     updateBattleOpsInfo();
     updateSelectedInfo();
@@ -2103,6 +3073,18 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       }
       template.gasCost += material === "combined" ? 8 : 4;
     }
+  };
+
+  const startTestArena = (): void => {
+    if (battle.getState().active && !battle.getState().outcome) {
+      battle.resetToMapMode();
+    }
+    battle.start(testArenaNode);
+    battle.setControlledUnitInvincible(testArenaInvinciblePlayer);
+    battle.setEnemyActiveCount(testArenaEnemyCount);
+    addLog("Test Arena started.");
+    setScreen("testArena");
+    renderPanels();
   };
 
   const bindPanelActions = (): void => {
@@ -2171,8 +3153,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     document.querySelectorAll<HTMLButtonElement>("button.nodeAttack").forEach((button) => {
       button.addEventListener("click", () => {
         if (battle.getState().active && !battle.getState().outcome) {
-          addLog("Battle already active. Press Next Round to resolve.", "warn");
-          return;
+          battle.resetToMapMode();
         }
         const nodeId = button.getAttribute("data-attack");
         if (!nodeId) {
@@ -2220,8 +3201,52 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       renderPanels();
     });
 
-    getOptionalElement<HTMLButtonElement>("#btnToggleDisplay")?.addEventListener("click", () => {
-      battle.toggleDisplayLayer();
+    getOptionalElement<HTMLButtonElement>("#btnStartTestArena")?.addEventListener("click", () => {
+      startTestArena();
+    });
+
+    getOptionalElement<HTMLButtonElement>("#btnEndTestArena")?.addEventListener("click", () => {
+      battle.resetToMapMode();
+      setScreen("testArena");
+      renderPanels();
+    });
+
+    getOptionalElement<HTMLButtonElement>("#btnApplyEnemyCount")?.addEventListener("click", () => {
+      const raw = getOptionalElement<HTMLInputElement>("#testArenaEnemyCount")?.value ?? "";
+      const value = Number.parseInt(raw, 10);
+      if (!Number.isFinite(value)) {
+        addLog("Enemy count must be a number.", "warn");
+        return;
+      }
+      testArenaEnemyCount = Math.max(0, Math.min(40, value));
+      if (battle.getState().active && battle.getState().nodeId === testArenaNode.id) {
+        const updated = battle.setEnemyActiveCount(testArenaEnemyCount);
+        addLog(`Test Arena enemy count set to ${updated}.`, "good");
+      } else {
+        addLog(`Test Arena enemy count queued: ${testArenaEnemyCount}.`, "warn");
+      }
+      renderPanels();
+    });
+
+    getOptionalElement<HTMLButtonElement>("#btnSpawnTestEnemy")?.addEventListener("click", () => {
+      const selection = getOptionalElement<HTMLSelectElement>("#testArenaSpawnTemplate")?.value ?? "";
+      if (!selection) {
+        addLog("Select an enemy template to spawn.", "warn");
+        return;
+      }
+      testArenaSpawnTemplateId = selection;
+      if (!battle.getState().active || battle.getState().nodeId !== testArenaNode.id) {
+        startTestArena();
+      }
+      const spawned = battle.spawnEnemyTemplate(selection);
+      addLog(spawned ? `Spawned enemy: ${selection}.` : `Failed to spawn enemy: ${selection}.`, spawned ? "good" : "bad");
+      renderPanels();
+    });
+
+    getOptionalElement<HTMLInputElement>("#testArenaInvinciblePlayer")?.addEventListener("change", (event) => {
+      testArenaInvinciblePlayer = (event.currentTarget as HTMLInputElement).checked;
+      battle.setControlledUnitInvincible(testArenaInvinciblePlayer);
+      addLog(`Controlled unit invincibility ${testArenaInvinciblePlayer ? "ON" : "OFF"}.`, "warn");
       renderPanels();
     });
 
@@ -2328,7 +3353,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     });
     const saveEditorDraft = async (target: "user" | "default"): Promise<void> => {
       const snapshot = cloneTemplate(editorDraft);
-      const validation = validateTemplateDetailed(snapshot);
+      const validation = validateTemplateDetailed(snapshot, { partCatalog: parts });
       if (validation.errors.length > 0) {
         for (const issue of validation.errors) {
           addLog(`Error: ${issue}`, "bad");
@@ -2357,17 +3382,435 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     getOptionalElement<HTMLButtonElement>("#btnSaveDraftDefault")?.addEventListener("click", async () => {
       await saveEditorDraft("default");
     });
+
+    getOptionalElement<HTMLInputElement>("#editorPlaceByCenter")?.addEventListener("change", (event) => {
+      editorPlaceByCenter = (event.currentTarget as HTMLInputElement).checked;
+      renderPanels();
+    });
+
+    getOptionalElement<HTMLButtonElement>("#btnOpenPartWindow")?.addEventListener("click", () => {
+      partDesignerDialogOpen = !partDesignerDialogOpen;
+      if (partDesignerDialogOpen && !partDesignerSelectedId) {
+        partDesignerSelectedId = parts[0]?.id ?? null;
+      }
+      renderPanels();
+    });
+
+    document.querySelectorAll<HTMLButtonElement>("button[data-part-open-select]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const partId = button.getAttribute("data-part-open-select");
+        if (!partId) {
+          return;
+        }
+        const source = parts.find((part) => part.id === partId);
+        if (!source) {
+          return;
+        }
+        partDesignerSelectedId = partId;
+        partDesignerDialogOpen = false;
+        loadPartIntoDesignerSlots(source);
+        renderPanels();
+      });
+    });
+
+    document.querySelectorAll<HTMLButtonElement>("button[data-part-open-copy]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const partId = button.getAttribute("data-part-open-copy");
+        if (!partId) {
+          return;
+        }
+        const source = parts.find((part) => part.id === partId);
+        if (!source) {
+          return;
+        }
+        const copy = makeCopyPart(source);
+        partDesignerSelectedId = copy.id;
+        partDesignerDialogOpen = false;
+        loadPartIntoDesignerSlots(copy);
+        addLog(`Created part copy: ${copy.name}`, "good");
+        renderPanels();
+      });
+    });
+
+    getOptionalElement<HTMLButtonElement>("#btnOpenPartClose")?.addEventListener("click", () => {
+      partDesignerDialogOpen = false;
+      renderPanels();
+    });
+
+    getOptionalElement<HTMLInputElement>("#partName")?.addEventListener("input", (event) => {
+      partDesignerDraft.name = (event.currentTarget as HTMLInputElement).value.trim() || "Custom Part";
+      updateSelectedInfo();
+    });
+
+    getOptionalElement<HTMLInputElement>("#partId")?.addEventListener("input", (event) => {
+      const raw = (event.currentTarget as HTMLInputElement).value;
+      partDesignerDraft.id = makeUniquePartId(slugifyPartId(raw || partDesignerDraft.name || "custom-part"));
+      updateSelectedInfo();
+    });
+
+    getOptionalElement<HTMLSelectElement>("#partBaseComponent")?.addEventListener("change", (event) => {
+      const value = (event.currentTarget as HTMLSelectElement).value;
+      if (!(value in COMPONENTS)) {
+        return;
+      }
+      partDesignerDraft.baseComponent = value as ComponentId;
+      if (partDesignerDraft.directional === undefined) {
+        partDesignerDraft.directional = COMPONENTS[partDesignerDraft.baseComponent].directional === true;
+      }
+      const defaults = getPartMetadataDefaults(partDesignerDraft.baseComponent);
+      partDesignerDraft.properties = {
+        ...(partDesignerDraft.properties ?? {}),
+        isEngine: defaults.isEngine,
+        isWeapon: defaults.isWeapon,
+        isLoader: defaults.isLoader,
+        engineType: defaults.engineType,
+        weaponType: defaults.weaponType,
+        loaderServesTags: defaults.loaderServesTags,
+        loaderCooldownMultiplier: defaults.loaderCooldownMultiplier,
+      };
+      recalcPartDraftFromSlots();
+      renderPanels();
+    });
+
+    getOptionalElement<HTMLInputElement>("#partDirectional")?.addEventListener("change", (event) => {
+      partDesignerDraft.directional = (event.currentTarget as HTMLInputElement).checked;
+      renderPanels();
+    });
+
+    getOptionalElement<HTMLSelectElement>("#partCategorySelect")?.addEventListener("change", (event) => {
+      const value = (event.currentTarget as HTMLSelectElement).value.trim();
+      partDesignerDraft.properties = {
+        ...(partDesignerDraft.properties ?? {}),
+        category: value || undefined,
+      };
+      updateSelectedInfo();
+    });
+    getOptionalElement<HTMLInputElement>("#partSubcategory")?.addEventListener("input", (event) => {
+      const value = (event.currentTarget as HTMLInputElement).value.trim();
+      partDesignerDraft.properties = {
+        ...(partDesignerDraft.properties ?? {}),
+        subcategory: value || undefined,
+      };
+      updateSelectedInfo();
+    });
+    getOptionalElement<HTMLInputElement>("#partTags")?.addEventListener("input", (event) => {
+      const raw = (event.currentTarget as HTMLInputElement).value;
+      const tags = raw
+        .split(",")
+        .map((tag) => tag.trim())
+        .filter((tag) => tag.length > 0);
+      partDesignerDraft.tags = tags.length > 0 ? tags : undefined;
+      updateSelectedInfo();
+    });
+    getOptionalElement<HTMLInputElement>("#partMetaHp")?.addEventListener("input", (event) => {
+      const raw = (event.currentTarget as HTMLInputElement).value.trim();
+      const numeric = raw.length > 0 ? Number(raw) : Number.NaN;
+      partDesignerDraft.properties = {
+        ...(partDesignerDraft.properties ?? {}),
+        hp: Number.isFinite(numeric) ? numeric : undefined,
+      };
+      updateSelectedInfo();
+    });
+    getOptionalElement<HTMLInputElement>("#partPropIsEngine")?.addEventListener("change", (event) => {
+      const checked = (event.currentTarget as HTMLInputElement).checked;
+      const props = partDesignerDraft.properties ?? {};
+      partDesignerDraft.properties = { ...props, isEngine: checked };
+      if (!checked) {
+        partDesignerDraft.properties.engineType = undefined;
+        partDesignerDraft.runtimeOverrides = {
+          ...(partDesignerDraft.runtimeOverrides ?? {}),
+          power: undefined,
+          maxSpeed: undefined,
+        };
+      } else if (!partDesignerDraft.properties.engineType) {
+        partDesignerDraft.properties.engineType = "ground";
+      }
+      renderPanels();
+    });
+    getOptionalElement<HTMLInputElement>("#partPropIsWeapon")?.addEventListener("change", (event) => {
+      const checked = (event.currentTarget as HTMLInputElement).checked;
+      const props = partDesignerDraft.properties ?? {};
+      partDesignerDraft.properties = { ...props, isWeapon: checked };
+      if (!checked) {
+        partDesignerDraft.properties.weaponType = undefined;
+        partDesignerDraft.runtimeOverrides = {
+          ...(partDesignerDraft.runtimeOverrides ?? {}),
+          damage: undefined,
+          range: undefined,
+          cooldown: undefined,
+          shootAngleDeg: undefined,
+          spreadDeg: undefined,
+        };
+      } else if (!partDesignerDraft.properties.weaponType) {
+        partDesignerDraft.properties.weaponType = "rapid-fire";
+      }
+      renderPanels();
+    });
+    getOptionalElement<HTMLInputElement>("#partPropIsLoader")?.addEventListener("change", (event) => {
+      const checked = (event.currentTarget as HTMLInputElement).checked;
+      const props = partDesignerDraft.properties ?? {};
+      partDesignerDraft.properties = {
+        ...props,
+        isLoader: checked,
+        loaderServesTags: checked ? (props.loaderServesTags ?? []) : undefined,
+        loaderCooldownMultiplier: checked ? props.loaderCooldownMultiplier : undefined,
+      };
+      renderPanels();
+    });
+    getOptionalElement<HTMLInputElement>("#partPropIsArmor")?.addEventListener("change", (event) => {
+      const checked = (event.currentTarget as HTMLInputElement).checked;
+      const props = partDesignerDraft.properties ?? {};
+      partDesignerDraft.properties = {
+        ...props,
+        isArmor: checked,
+        hp: checked ? props.hp : undefined,
+      };
+      renderPanels();
+    });
+    getOptionalElement<HTMLInputElement>("#partPropCoreTuning")?.addEventListener("change", (event) => {
+      const checked = (event.currentTarget as HTMLInputElement).checked;
+      const props = partDesignerDraft.properties ?? {};
+      partDesignerDraft.properties = {
+        ...props,
+        hasCoreTuning: checked,
+      };
+      if (!checked) {
+        partDesignerDraft.runtimeOverrides = {
+          ...(partDesignerDraft.runtimeOverrides ?? {}),
+          mass: undefined,
+          hpMul: undefined,
+        };
+      }
+      renderPanels();
+    });
+    getOptionalElement<HTMLSelectElement>("#partEngineType")?.addEventListener("change", (event) => {
+      const value = (event.currentTarget as HTMLSelectElement).value;
+      partDesignerDraft.properties = {
+        ...(partDesignerDraft.properties ?? {}),
+        engineType: value === "air" ? "air" : "ground",
+      };
+      renderPanels();
+    });
+    getOptionalElement<HTMLSelectElement>("#partWeaponType")?.addEventListener("change", (event) => {
+      const value = (event.currentTarget as HTMLSelectElement).value;
+      partDesignerDraft.properties = {
+        ...(partDesignerDraft.properties ?? {}),
+        weaponType: value as NonNullable<PartDefinition["properties"]>["weaponType"],
+      };
+      renderPanels();
+    });
+    getOptionalElement<HTMLInputElement>("#partLoaderServesTags")?.addEventListener("input", (event) => {
+      const raw = (event.currentTarget as HTMLInputElement).value;
+      const tags = raw
+        .split(",")
+        .map((tag) => tag.trim())
+        .filter((tag) => tag.length > 0);
+      partDesignerDraft.properties = {
+        ...(partDesignerDraft.properties ?? {}),
+        loaderServesTags: tags.length > 0 ? tags : undefined,
+      };
+      updateSelectedInfo();
+    });
+    getOptionalElement<HTMLInputElement>("#partLoaderCooldownMultiplier")?.addEventListener("input", (event) => {
+      const raw = (event.currentTarget as HTMLInputElement).value.trim();
+      const numeric = raw.length > 0 ? Number(raw) : Number.NaN;
+      partDesignerDraft.properties = {
+        ...(partDesignerDraft.properties ?? {}),
+        loaderCooldownMultiplier: Number.isFinite(numeric) ? numeric : undefined,
+      };
+      updateSelectedInfo();
+    });
+
+    getOptionalElement<HTMLInputElement>("#partRequireStructureBelowAnchor")?.addEventListener("change", (event) => {
+      partDesignerRequireStructureBelowAnchor = (event.currentTarget as HTMLInputElement).checked;
+      recalcPartDraftFromSlots();
+      renderPanels();
+    });
+
+    getOptionalElement<HTMLInputElement>("#partRequireStructureOnFunctional")?.addEventListener("change", (event) => {
+      const checked = (event.currentTarget as HTMLInputElement).checked;
+      partDesignerDraft.placement = {
+        ...(partDesignerDraft.placement ?? {}),
+        requireStructureOnFunctionalOccupiedBoxes: checked,
+      };
+      recalcPartDraftFromSlots();
+      renderPanels();
+    });
+
+    getOptionalElement<HTMLInputElement>("#partRequireStructureOnStructure")?.addEventListener("change", (event) => {
+      const checked = (event.currentTarget as HTMLInputElement).checked;
+      partDesignerDraft.placement = {
+        ...(partDesignerDraft.placement ?? {}),
+        requireStructureOnStructureOccupiedBoxes: checked,
+      };
+      recalcPartDraftFromSlots();
+      renderPanels();
+    });
+
+    const bindRuntimeInput = (
+      selector: string,
+      key: keyof NonNullable<PartDefinition["runtimeOverrides"]>,
+    ): void => {
+      getOptionalElement<HTMLInputElement>(selector)?.addEventListener("input", (event) => {
+        const raw = (event.currentTarget as HTMLInputElement).value;
+        const numeric = raw.trim().length > 0 ? Number(raw) : Number.NaN;
+        const next = Number.isFinite(numeric) ? numeric : undefined;
+        partDesignerDraft.runtimeOverrides = {
+          ...(partDesignerDraft.runtimeOverrides ?? {}),
+          [key]: next,
+        };
+      });
+    };
+    bindRuntimeInput("#partMass", "mass");
+    bindRuntimeInput("#partHpMul", "hpMul");
+    bindRuntimeInput("#partPower", "power");
+    bindRuntimeInput("#partMaxSpeed", "maxSpeed");
+    bindRuntimeInput("#partDamage", "damage");
+    bindRuntimeInput("#partRange", "range");
+    bindRuntimeInput("#partCooldown", "cooldown");
+    bindRuntimeInput("#partShootAngle", "shootAngleDeg");
+    bindRuntimeInput("#partSpread", "spreadDeg");
+
+    getOptionalElement<HTMLButtonElement>("#btnNewPartDraft")?.addEventListener("click", () => {
+      const newName = "Custom Part";
+      const nextId = makeUniquePartId(slugifyPartId(newName));
+      partDesignerDraft = {
+        id: nextId,
+        name: newName,
+        layer: "functional",
+        baseComponent: "control",
+        directional: false,
+        anchor: { x: 0, y: 0 },
+        boxes: [{
+          x: 0,
+          y: 0,
+          occupiesFunctionalSpace: true,
+          occupiesStructureSpace: false,
+          needsStructureBehind: true,
+          isAttachPoint: false,
+          isAnchorPoint: true,
+          isShootingPoint: false,
+          takesDamage: true,
+          takesFunctionalDamage: true,
+        }],
+        properties: {
+          category: "functional",
+          subcategory: "custom",
+          hp: undefined,
+          isEngine: false,
+          isWeapon: false,
+          isLoader: false,
+          isArmor: false,
+          engineType: undefined,
+          weaponType: undefined,
+          loaderServesTags: undefined,
+          loaderCooldownMultiplier: undefined,
+          hasCoreTuning: false,
+        },
+      };
+      partDesignerSelectedId = partDesignerDraft.id;
+      partDesignerTool = "select";
+      partDesignerDialogOpen = false;
+      loadPartIntoDesignerSlots(partDesignerDraft);
+      renderPanels();
+    });
+
+    getOptionalElement<HTMLButtonElement>("#btnClearPartGrid")?.addEventListener("click", () => {
+      partDesignerSlots = new Array<PartDesignerSlot>(EDITOR_GRID_MAX_SIZE).fill(null);
+      partDesignerSupportOffsets = new Set<number>();
+      partDesignerEmptyStructureOffsets = new Set<number>();
+      partDesignerEmptyFunctionalOffsets = new Set<number>();
+      partDesignerAnchorSlot = coordToSlot(0, 0);
+      partDesignerSelectedSlot = partDesignerAnchorSlot;
+      recalcPartDraftFromSlots();
+      renderPanels();
+    });
+
+    const savePartDraft = async (): Promise<void> => {
+      recalcPartDraftFromSlots();
+      const snapshot = clonePartDefinition(partDesignerDraft);
+      const validation = validatePartDefinitionDetailed(snapshot);
+      for (const issue of validation.errors) {
+        addLog(`Part Error: ${issue}`, "bad");
+      }
+      for (const issue of validation.warnings) {
+        addLog(`Part Warning: ${issue}`, "warn");
+      }
+      const saved = await saveDefaultPartToStore(snapshot);
+      if (!saved) {
+        addLog("Failed to save part", "bad");
+        return;
+      }
+      await refreshPartsFromStore();
+      await refreshTemplatesFromStore();
+      partDesignerSelectedId = snapshot.id;
+      const reloaded = parts.find((part) => part.id === snapshot.id) ?? snapshot;
+      loadPartIntoDesignerSlots(reloaded);
+      addLog(`Saved part: ${snapshot.name}`, "good");
+      renderPanels();
+    };
+
+    getOptionalElement<HTMLButtonElement>("#btnSavePartDraft")?.addEventListener("click", async () => {
+      await savePartDraft();
+    });
   };
 
   tabs.base.addEventListener("click", () => setScreen("base"));
   tabs.map.addEventListener("click", () => setScreen("map"));
   tabs.battle.addEventListener("click", () => setScreen("battle"));
-  tabs.editor.addEventListener("click", () => setScreen("editor"));
+  tabs.testArena.addEventListener("click", () => {
+    setScreen("testArena");
+    renderPanels();
+  });
+  tabs.templateEditor.addEventListener("click", () => setScreen("templateEditor"));
+  tabs.partEditor.addEventListener("click", () => {
+    setScreen("partEditor");
+    const selected = parts.find((part) => part.id === partDesignerSelectedId) ?? parts[0];
+    if (selected) {
+      partDesignerSelectedId = selected.id;
+      loadPartIntoDesignerSlots(selected);
+    }
+    renderPanels();
+  });
 
   selectedInfo.addEventListener("click", (event) => {
+    if (!isEditorScreen()) {
+      return;
+    }
     const target = event.target as HTMLElement;
     const button = target.closest<HTMLButtonElement>("button");
     if (!button) {
+      return;
+    }
+    if (isPartEditorScreen()) {
+      if (button.id === "btnPartCreateSelected") {
+        if (partDesignerSelectedSlot === null) {
+          return;
+        }
+        ensurePartDesignerSlot(partDesignerSelectedSlot);
+        if (partDesignerAnchorSlot === null) {
+          partDesignerAnchorSlot = partDesignerSelectedSlot;
+        }
+        recalcPartDraftFromSlots();
+        renderPanels();
+      } else if (button.id === "btnPartDeleteSelected") {
+        if (partDesignerSelectedSlot === null) {
+          return;
+        }
+        const slot = partDesignerSelectedSlot;
+        partDesignerSlots[slot] = null;
+        partDesignerSupportOffsets.delete(slot);
+        partDesignerEmptyStructureOffsets.delete(slot);
+        partDesignerEmptyFunctionalOffsets.delete(slot);
+        if (partDesignerAnchorSlot === slot) {
+          partDesignerAnchorSlot = null;
+        }
+        recalcPartDraftFromSlots();
+        renderPanels();
+      }
+      return;
+    }
+    if (!isTemplateEditorScreen()) {
       return;
     }
     if (button.id === "editorLayerStructureRight") {
@@ -2385,7 +3828,75 @@ export function bootstrap(options: BootstrapOptions = {}): void {
   });
 
   selectedInfo.addEventListener("change", (event) => {
+    if (!isEditorScreen()) {
+      return;
+    }
     const target = event.target as HTMLElement;
+    if (isPartEditorScreen()) {
+      if (target instanceof HTMLSelectElement && target.id === "partToolRight") {
+        partDesignerTool = target.value as PartDesignerTool;
+        updateWeaponHud();
+        updateSelectedInfo();
+        return;
+      }
+      if (!(target instanceof HTMLInputElement)) {
+        return;
+      }
+      if (partDesignerSelectedSlot === null) {
+        return;
+      }
+      const slotIndex = partDesignerSelectedSlot;
+      const slot = ensurePartDesignerSlot(slotIndex);
+      const checked = target.checked;
+      if (target.id === "partBoxOccupiesStructure") {
+        slot.occupiesStructureSpace = checked;
+        if (checked) {
+          slot.isAttachPoint = false;
+          slot.needsStructureBehind = false;
+        } else if (!slot.occupiesFunctionalSpace && !slot.isAttachPoint) {
+          slot.occupiesFunctionalSpace = true;
+          slot.needsStructureBehind = true;
+        }
+      } else if (target.id === "partBoxOccupiesFunctional") {
+        slot.occupiesFunctionalSpace = checked;
+        if (checked) {
+          slot.isAttachPoint = false;
+        } else if (!slot.occupiesStructureSpace && !slot.isAttachPoint) {
+          slot.needsStructureBehind = false;
+        }
+      } else if (target.id === "partBoxNeedsStructureBehind") {
+        slot.needsStructureBehind = checked && !slot.isAttachPoint && !slot.occupiesStructureSpace && slot.occupiesFunctionalSpace;
+      } else if (target.id === "partBoxTakeDamage") {
+        slot.takesDamage = checked;
+      } else if (target.id === "partBoxAttachPoint") {
+        slot.isAttachPoint = checked;
+        if (checked) {
+          slot.occupiesStructureSpace = false;
+          slot.occupiesFunctionalSpace = false;
+          slot.needsStructureBehind = false;
+        } else if (!slot.occupiesStructureSpace && !slot.occupiesFunctionalSpace) {
+          slot.occupiesFunctionalSpace = true;
+          slot.needsStructureBehind = true;
+        }
+      } else if (target.id === "partBoxAnchor") {
+        if (checked) {
+          partDesignerAnchorSlot = slotIndex;
+        } else if (partDesignerAnchorSlot === slotIndex) {
+          partDesignerAnchorSlot = null;
+        }
+      } else if (target.id === "partBoxShootingPoint") {
+        slot.isShootingPoint = checked;
+      } else {
+        return;
+      }
+      partDesignerSlots[slotIndex] = slot;
+      recalcPartDraftFromSlots();
+      renderPanels();
+      return;
+    }
+    if (!isTemplateEditorScreen()) {
+      return;
+    }
     if (!(target instanceof HTMLSelectElement)) {
       return;
     }
@@ -2407,6 +3918,9 @@ export function bootstrap(options: BootstrapOptions = {}): void {
   });
 
   selectedInfo.addEventListener("mouseover", (event) => {
+    if (!isTemplateEditorScreen()) {
+      return;
+    }
     const target = event.target as HTMLElement;
     const card = target.closest<HTMLButtonElement>("button.editor-comp-card[data-comp-value]");
     if (!card) {
@@ -2420,6 +3934,9 @@ export function bootstrap(options: BootstrapOptions = {}): void {
   });
 
   selectedInfo.addEventListener("mousemove", (event) => {
+    if (!isTemplateEditorScreen()) {
+      return;
+    }
     const target = event.target as HTMLElement;
     const card = target.closest<HTMLButtonElement>("button.editor-comp-card[data-comp-value]");
     if (!card || editorTooltip.classList.contains("hidden")) {
@@ -2431,6 +3948,9 @@ export function bootstrap(options: BootstrapOptions = {}): void {
   });
 
   selectedInfo.addEventListener("mouseout", (event) => {
+    if (!isTemplateEditorScreen()) {
+      return;
+    }
     const target = event.target as HTMLElement;
     if (!target.closest("button.editor-comp-card[data-comp-value]")) {
       return;
@@ -2459,6 +3979,9 @@ export function bootstrap(options: BootstrapOptions = {}): void {
   };
 
   selectedInfo.addEventListener("pointerdown", (event) => {
+    if (!isTemplateEditorScreen()) {
+      return;
+    }
     if (event.button !== 0) {
       return;
     }
@@ -2470,26 +3993,50 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       debugUnlimitedResources = false;
       debugVisual = false;
       debugTargetLines = false;
+      debugDisplayLayer = false;
+      debugPartHpOverlay = false;
       battle.setDebugDrawEnabled(false);
       battle.setDebugTargetLineEnabled(false);
+      battle.setDisplayLayerEnabled(false);
+      battle.setDebugPartHpEnabled(false);
       return;
     }
     debugUnlimitedResources = debugResourcesChk.checked;
     debugVisual = debugVisualChk.checked;
     debugTargetLines = debugTargetLineChk.checked;
+    debugDisplayLayer = debugDisplayLayerChk.checked;
+    debugPartHpOverlay = debugPartHpChk.checked;
     syncDebugServerState();
     battle.setDebugDrawEnabled(isDebugVisual());
     battle.setDebugTargetLineEnabled(isDebugTargetLines());
-    addLog(`Debug options: resources=${debugUnlimitedResources ? "on" : "off"}, visual=${debugVisual ? "on" : "off"}, targetLines=${debugTargetLines ? "on" : "off"}`, "warn");
+    battle.setDisplayLayerEnabled(debugDisplayLayer);
+    battle.setDebugPartHpEnabled(debugPartHpOverlay);
+    addLog(
+      `Debug options: resources=${debugUnlimitedResources ? "on" : "off"}, visual=${debugVisual ? "on" : "off"}, targetLines=${debugTargetLines ? "on" : "off"}, display=${debugDisplayLayer ? "on" : "off"}, partHp=${debugPartHpOverlay ? "on" : "off"}`,
+      "warn",
+    );
     renderPanels();
   };
 
   debugResourcesChk.addEventListener("change", applyDebugFlags);
   debugVisualChk.addEventListener("change", applyDebugFlags);
   debugTargetLineChk.addEventListener("change", applyDebugFlags);
+  debugDisplayLayerChk.addEventListener("change", applyDebugFlags);
+  debugPartHpChk.addEventListener("change", applyDebugFlags);
+  btnOpenPartDesigner.addEventListener("click", () => {
+    setScreen("partEditor");
+    const selected = parts.find((part) => part.id === partDesignerSelectedId) ?? parts[0];
+    if (selected) {
+      partDesignerSelectedId = selected.id;
+      loadPartIntoDesignerSlots(selected);
+    }
+    renderPanels();
+  });
   debugResourcesChk.checked = replayMode ? false : true;
   debugVisualChk.checked = replayMode ? false : true;
   debugTargetLineChk.checked = replayMode ? false : true;
+  debugDisplayLayerChk.checked = false;
+  debugPartHpChk.checked = false;
   applyDebugFlags();
 
   window.addEventListener("keydown", (event) => {
@@ -2497,7 +4044,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       return;
     }
 
-    if (screen === "editor") {
+    if (isEditorScreen()) {
       if (event.key === "q" || event.key === "Q") {
         event.preventDefault();
         editorWeaponRotateQuarter = ((editorWeaponRotateQuarter + 3) % 4) as 0 | 1 | 2 | 3;
@@ -2512,7 +4059,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       }
     }
 
-    if (screen !== "battle") {
+    if (!isBattleScreen()) {
       return;
     }
 
@@ -2532,7 +4079,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
           event.preventDefault();
           battle.toggleControlledWeaponAutoFire(slot);
         } else {
-          battle.selectControlledWeapon(slot);
+          battle.toggleControlledWeaponManualControl(slot);
         }
         renderPanels();
       }
@@ -2540,7 +4087,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
   });
 
   window.addEventListener("keyup", (event) => {
-    if (isTypingInFormField(event.target) || screen !== "battle") {
+    if (isTypingInFormField(event.target) || !isBattleScreen()) {
       return;
     }
     if (event.key === "a" || event.key === "A") keys.a = false;
@@ -2556,7 +4103,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     const rect = canvas.getBoundingClientRect();
     const x = (event.clientX - rect.left) * (canvas.width / rect.width);
     const y = (event.clientY - rect.top) * (canvas.height / rect.height);
-    if (screen === "editor") {
+    if (isEditorScreen()) {
       const rightClickDelete = event.button === 2;
       if (rightClickDelete) {
         event.preventDefault();
@@ -2584,13 +4131,13 @@ export function bootstrap(options: BootstrapOptions = {}): void {
   });
 
   canvas.addEventListener("contextmenu", (event) => {
-    if (screen === "editor" || screen === "battle") {
+    if (isEditorScreen() || isBattleScreen()) {
       event.preventDefault();
     }
   });
 
   window.addEventListener("mouseup", () => {
-    if (screen === "editor" && editorDragActive) {
+    if (isEditorScreen() && editorDragActive) {
       if (!editorDragMoved) {
         applyEditorCellAction(editorPendingClickX, editorPendingClickY);
         renderPanels();
@@ -2602,7 +4149,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
   });
 
   canvas.addEventListener("mouseleave", () => {
-    if (screen === "editor") {
+    if (isEditorScreen()) {
       editorDragActive = false;
       editorDragMoved = false;
     }
@@ -2610,7 +4157,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
   });
 
   canvas.addEventListener("mousemove", (event) => {
-    if (screen === "editor") {
+    if (isEditorScreen()) {
       if (editorDragActive) {
         const dx = event.clientX - editorDragLastClientX;
         const dy = event.clientY - editorDragLastClientY;
@@ -2634,21 +4181,34 @@ export function bootstrap(options: BootstrapOptions = {}): void {
   });
 
   loadTemplateIntoEditorSlots(editorDraft);
+  partDesignerSelectedId = partDesignerDraft.id;
+  loadPartIntoDesignerSlots(partDesignerDraft);
   ensureEditorSelectionForLayer();
   setScreen("base");
   addLog("Campaign initialized");
   renderPanels();
-  void refreshTemplatesFromStore().then(() => {
-    addLog("Loaded default and user object templates", "good");
-    renderPanels();
-  });
+  void refreshPartsFromStore()
+    .then(async () => {
+      const selectedPart = parts.find((part) => part.id === partDesignerSelectedId) ?? parts[0];
+      if (selectedPart) {
+        partDesignerSelectedId = selectedPart.id;
+        loadPartIntoDesignerSlots(selectedPart);
+      }
+      await refreshTemplatesFromStore();
+      addLog("Loaded part catalog and object templates", "good");
+      renderPanels();
+    })
+    .catch(() => {
+      addLog("Failed to load part/template data from store", "bad");
+      renderPanels();
+    });
   let panelBucket = -1;
 
   let loopUpdate = (dt: number): void => {
       if (!running) {
         return;
       }
-      if (screen === "battle" && battle.getState().active) {
+      if (isBattleScreen() && battle.getState().active) {
         battle.update(dt, keys);
       }
     };
@@ -2658,7 +4218,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       loopUpdate(dt);
     },
     (_alpha, now) => {
-      if (screen === "editor") {
+      if (isEditorScreen()) {
         drawEditorCanvas();
       } else {
         battle.draw(now);
@@ -2668,7 +4228,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         panelBucket = nextBucket;
         updateMetaBar();
         updateBattleOpsInfo();
-        if (screen === "editor") {
+        if (isEditorScreen()) {
           // Avoid remounting editor palette DOM on a timer, which causes visible flicker.
           return;
         }
@@ -2689,8 +4249,9 @@ export function bootstrap(options: BootstrapOptions = {}): void {
 
   if (replayMode) {
     blockUserInputForReplay();
-    // Ensure we use MVP templates from the server endpoints before starting replay.
-    void refreshTemplatesFromStore().then(() => {
+    // Ensure we use latest parts/templates before starting replay.
+    void refreshPartsFromStore().then(async () => {
+      await refreshTemplatesFromStore();
       startArenaReplay();
     });
   }

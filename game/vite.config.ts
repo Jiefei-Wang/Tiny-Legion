@@ -2,6 +2,11 @@ import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, unlin
 import { resolve } from "node:path";
 import { defineConfig } from "vite";
 import { parseTemplate } from "../packages/game-core/src/templates/template-schema.ts";
+import {
+  createDefaultPartDefinitions,
+  mergePartCatalogs,
+  parsePartDefinition,
+} from "../packages/game-core/src/parts/part-schema.ts";
 
 function debugLogPlugin() {
   const logDir = resolve(process.cwd(), ".debug");
@@ -239,6 +244,8 @@ function templateStorePlugin() {
   const rootDir = process.cwd();
   const defaultDir = resolve(rootDir, "templates", "default");
   const userDir = resolve(rootDir, "templates", "user");
+  const partDefaultDir = resolve(rootDir, "parts", "default");
+  const partUserDir = resolve(rootDir, "parts", "user");
 
   const ensureDir = (dirPath: string): void => {
     if (!existsSync(dirPath)) {
@@ -251,16 +258,53 @@ function templateStorePlugin() {
     return /^[a-z0-9-]+$/.test(id) ? id : null;
   };
 
-  const readTemplatesInDir = (dirPath: string): unknown[] => {
+  const readPartsInDir = (dirPath: string): ReturnType<typeof createDefaultPartDefinitions> => {
     ensureDir(dirPath);
     const files = readdirSync(dirPath).filter((name) => name.endsWith(".json"));
-    const results: unknown[] = [];
+    const results = createDefaultPartDefinitions().slice(0, 0);
     for (const fileName of files) {
       const filePath = resolve(dirPath, fileName);
       try {
         const raw = readFileSync(filePath, "utf8");
         const parsed = JSON.parse(raw);
-        const normalized = parseTemplate(parsed, { injectLoaders: true, sanitizePlacement: true });
+        const normalized = parsePartDefinition(parsed);
+        if (!normalized) {
+          continue;
+        }
+        const normalizedRaw = `${JSON.stringify(normalized, null, 2)}\n`;
+        if (raw !== normalizedRaw) {
+          writeFileSync(filePath, normalizedRaw, "utf8");
+        }
+        results.push(normalized);
+      } catch {
+        continue;
+      }
+    }
+    return results;
+  };
+
+  const loadPartCatalog = (): ReturnType<typeof createDefaultPartDefinitions> => {
+    const builtIn = createDefaultPartDefinitions();
+    const fromDefault = readPartsInDir(partDefaultDir);
+    const fromUser = readPartsInDir(partUserDir);
+    return mergePartCatalogs(builtIn, mergePartCatalogs(fromDefault, fromUser));
+  };
+
+  const readTemplatesInDir = (dirPath: string): unknown[] => {
+    ensureDir(dirPath);
+    const files = readdirSync(dirPath).filter((name) => name.endsWith(".json"));
+    const results: unknown[] = [];
+    const partCatalog = loadPartCatalog();
+    for (const fileName of files) {
+      const filePath = resolve(dirPath, fileName);
+      try {
+        const raw = readFileSync(filePath, "utf8");
+        const parsed = JSON.parse(raw);
+        const normalized = parseTemplate(parsed, {
+          injectLoaders: true,
+          sanitizePlacement: true,
+          partCatalog,
+        });
         if (!normalized) {
           continue;
         }
@@ -307,7 +351,11 @@ function templateStorePlugin() {
         req.on("end", () => {
           try {
             const parsed = JSON.parse(body || "{}");
-            const normalized = parseTemplate(parsed, { injectLoaders: true, sanitizePlacement: true });
+            const normalized = parseTemplate(parsed, {
+              injectLoaders: true,
+              sanitizePlacement: true,
+              partCatalog: loadPartCatalog(),
+            });
             if (!normalized) {
               res.statusCode = 400;
               res.end("invalid template payload");
@@ -363,7 +411,11 @@ function templateStorePlugin() {
         req.on("end", () => {
           try {
             const parsed = JSON.parse(body || "{}");
-            const normalized = parseTemplate(parsed, { injectLoaders: true, sanitizePlacement: true });
+            const normalized = parseTemplate(parsed, {
+              injectLoaders: true,
+              sanitizePlacement: true,
+              partCatalog: loadPartCatalog(),
+            });
             if (!normalized) {
               res.statusCode = 400;
               res.end("invalid template payload");
@@ -383,6 +435,160 @@ function templateStorePlugin() {
   };
 }
 
+function partStorePlugin() {
+  const rootDir = process.cwd();
+  const defaultDir = resolve(rootDir, "parts", "default");
+  const userDir = resolve(rootDir, "parts", "user");
+
+  const ensureDir = (dirPath: string): void => {
+    if (!existsSync(dirPath)) {
+      mkdirSync(dirPath, { recursive: true });
+    }
+  };
+
+  const safeId = (raw: string): string | null => {
+    const id = raw.trim();
+    return /^[a-z0-9-]+$/.test(id) ? id : null;
+  };
+
+  const readPartsInDir = (dirPath: string): ReturnType<typeof createDefaultPartDefinitions> => {
+    ensureDir(dirPath);
+    const files = readdirSync(dirPath).filter((name) => name.endsWith(".json"));
+    const results = createDefaultPartDefinitions().slice(0, 0);
+    for (const fileName of files) {
+      const filePath = resolve(dirPath, fileName);
+      try {
+        const raw = readFileSync(filePath, "utf8");
+        const parsed = JSON.parse(raw);
+        const normalized = parsePartDefinition(parsed);
+        if (!normalized) {
+          continue;
+        }
+        const normalizedRaw = `${JSON.stringify(normalized, null, 2)}\n`;
+        if (raw !== normalizedRaw) {
+          writeFileSync(filePath, normalizedRaw, "utf8");
+        }
+        results.push(normalized);
+      } catch {
+        continue;
+      }
+    }
+    return results;
+  };
+
+  const readDefaultParts = (): ReturnType<typeof createDefaultPartDefinitions> => {
+    const builtIn = createDefaultPartDefinitions();
+    const fileBacked = readPartsInDir(defaultDir);
+    return mergePartCatalogs(builtIn, fileBacked);
+  };
+
+  return {
+    name: "part-store",
+    configureServer(server: import("vite").ViteDevServer) {
+      server.middlewares.use("/__parts/default", (req, res) => {
+        if (req.method === "GET") {
+          const parts = readDefaultParts();
+          res.setHeader("content-type", "application/json");
+          res.end(JSON.stringify({ parts }));
+          return;
+        }
+        if (req.method !== "PUT") {
+          res.statusCode = 405;
+          res.end("method not allowed");
+          return;
+        }
+        const rawUrl = req.url ?? "";
+        const idSegment = rawUrl.split("/").filter(Boolean).at(-1) ?? "";
+        const id = safeId(idSegment);
+        if (!id) {
+          res.statusCode = 400;
+          res.end("invalid part id");
+          return;
+        }
+        ensureDir(defaultDir);
+        let body = "";
+        req.on("data", (chunk) => {
+          body += chunk;
+        });
+        req.on("end", () => {
+          try {
+            const parsed = JSON.parse(body || "{}");
+            const normalized = parsePartDefinition({ ...parsed, id });
+            if (!normalized) {
+              res.statusCode = 400;
+              res.end("invalid part payload");
+              return;
+            }
+            const filePath = resolve(defaultDir, `${id}.json`);
+            writeFileSync(filePath, `${JSON.stringify(normalized, null, 2)}\n`, "utf8");
+            res.setHeader("content-type", "application/json");
+            res.end(JSON.stringify({ ok: true }));
+          } catch {
+            res.statusCode = 400;
+            res.end("bad request");
+          }
+        });
+      });
+
+      server.middlewares.use("/__parts/user", (req, res) => {
+        if (req.method === "GET") {
+          const parts = readPartsInDir(userDir);
+          res.setHeader("content-type", "application/json");
+          res.end(JSON.stringify({ parts }));
+          return;
+        }
+        if (req.method !== "PUT" && req.method !== "DELETE") {
+          res.statusCode = 405;
+          res.end("method not allowed");
+          return;
+        }
+        const rawUrl = req.url ?? "";
+        const idSegment = rawUrl.split("/").filter(Boolean).at(-1) ?? "";
+        const id = safeId(idSegment);
+        if (!id) {
+          res.statusCode = 400;
+          res.end("invalid part id");
+          return;
+        }
+        ensureDir(userDir);
+
+        if (req.method === "DELETE") {
+          const filePath = resolve(userDir, `${id}.json`);
+          if (existsSync(filePath)) {
+            unlinkSync(filePath);
+          }
+          res.setHeader("content-type", "application/json");
+          res.end(JSON.stringify({ ok: true }));
+          return;
+        }
+
+        let body = "";
+        req.on("data", (chunk) => {
+          body += chunk;
+        });
+        req.on("end", () => {
+          try {
+            const parsed = JSON.parse(body || "{}");
+            const normalized = parsePartDefinition({ ...parsed, id });
+            if (!normalized) {
+              res.statusCode = 400;
+              res.end("invalid part payload");
+              return;
+            }
+            const filePath = resolve(userDir, `${id}.json`);
+            writeFileSync(filePath, `${JSON.stringify(normalized, null, 2)}\n`, "utf8");
+            res.setHeader("content-type", "application/json");
+            res.end(JSON.stringify({ ok: true }));
+          } catch {
+            res.statusCode = 400;
+            res.end("bad request");
+          }
+        });
+      });
+    },
+  };
+}
+
 export default defineConfig({
-  plugins: [debugLogPlugin(), templateStorePlugin(), debugProbePlugin()],
+  plugins: [debugLogPlugin(), templateStorePlugin(), partStorePlugin(), debugProbePlugin()],
 });
