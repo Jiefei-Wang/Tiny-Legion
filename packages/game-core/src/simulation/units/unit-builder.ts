@@ -185,17 +185,17 @@ export function instantiateUnit(
       alive: true,
       occupiedOffsets,
       shootingOffset: shootingOffset ? { x: shootingOffset.x, y: shootingOffset.y } : undefined,
-      runtimeOverrides: part?.runtimeOverrides
+      stats: part?.stats
         ? {
-            mass: part.runtimeOverrides.mass,
-            hpMul: part.runtimeOverrides.hpMul,
-            power: part.runtimeOverrides.power,
-            maxSpeed: part.runtimeOverrides.maxSpeed,
-            damage: part.runtimeOverrides.damage,
-            range: part.runtimeOverrides.range,
-            cooldown: part.runtimeOverrides.cooldown,
-            shootAngleDeg: part.runtimeOverrides.shootAngleDeg,
-            spreadDeg: part.runtimeOverrides.spreadDeg,
+            mass: part.stats.mass,
+            hpMul: part.stats.hpMul,
+            power: part.stats.power,
+            maxSpeed: part.stats.maxSpeed,
+            damage: part.stats.damage,
+            range: part.stats.range,
+            cooldown: part.stats.cooldown,
+            shootAngleDeg: part.stats.shootAngleDeg,
+            spreadDeg: part.stats.spreadDeg,
           }
         : undefined,
     };

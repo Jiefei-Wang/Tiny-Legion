@@ -66,7 +66,7 @@ export function applyHitToUnit(
       const localIndex = Math.floor(Math.random() * localAttachments.length);
       const pick = localAttachments[localIndex];
       if (pick) {
-        const hpMul = pick.runtimeOverrides?.hpMul ?? COMPONENTS[pick.component].hpMul;
+        const hpMul = pick.stats?.hpMul ?? COMPONENTS[pick.component].hpMul;
         const fragility = clamp(1 / Math.max(0.35, hpMul), 1, 2.4);
         if (Math.random() < Math.min(0.98, attachmentStressChance * fragility)) {
           pick.alive = false;

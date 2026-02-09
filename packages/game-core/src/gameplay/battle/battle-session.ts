@@ -22,7 +22,7 @@ import { evaluateCombatDecisionTree } from "../../ai/decision-tree/combat-decisi
 import { validateTemplateDetailed } from "../../templates/template-validation.ts";
 import { createDefaultPartDefinitions, mergePartCatalogs } from "../../parts/part-schema.ts";
 import type { CombatDecision } from "../../ai/decision-tree/combat-decision-tree.ts";
-import type { BattleState, KeyState, MapNode, PartDefinition, Side, UnitInstance, UnitTemplate } from "../../types.ts";
+import type { BattleState, CommandResult, FireBlockDetail, FireRequest, KeyState, MapNode, PartDefinition, Side, UnitCommand, UnitInstance, UnitTemplate } from "../../types.ts";
 
 const GROUND_MIN_Y = 250;
 const GROUND_MAX_Y = 485;
@@ -52,7 +52,7 @@ export interface BattleAiInput {
   dt: number;
   desiredRange: number;
   baseTarget: { x: number; y: number };
-  canShootAtAngle: (componentId: keyof typeof COMPONENTS, dx: number, dy: number) => boolean;
+  canShootAtAngle: (componentId: keyof typeof COMPONENTS, dx: number, dy: number, shootAngleDegOverride?: number) => boolean;
   getEffectiveWeaponRange: (baseRange: number) => number;
 }
 
@@ -286,7 +286,22 @@ export class BattleSession {
       return;
     }
     this.manualFireHeld = true;
-    this.fireUnit(controlled, true, { x: this.aimX, y: this.aimY });
+    const fireReqs: FireRequest[] = [];
+    for (let slot = 0; slot < controlled.weaponAttachmentIds.length; slot += 1) {
+      if (this.isWeaponManualControlEnabled(controlled, slot)) {
+        fireReqs.push({
+          slot,
+          aimX: this.aimX,
+          aimY: this.aimY,
+          intendedTargetId: null,
+          intendedTargetY: null,
+          manual: true,
+        });
+      }
+    }
+    if (fireReqs.length > 0) {
+      this.executeCommand(controlled, { move: { dirX: 0, dirY: 0 }, facing: null, fire: fireReqs }, 0);
+    }
   }
 
   public handlePointerUp(): void {
@@ -458,24 +473,86 @@ export class BattleSession {
         continue;
       }
       this.refreshUnitMobility(unit);
+
       if (unit.type === "air" && !unit.airDropActive && unit.maxSpeed < AIR_MIN_LIFT_SPEED) {
         unit.airDropActive = true;
         unit.airDropTargetY = GROUND_MIN_Y + Math.random() * (GROUND_MAX_Y - GROUND_MIN_Y);
         unit.aiDebugDecisionPath = "air-no-lift-drop";
       }
-      this.updateAirDropState(unit, dt);
+
       if (unit.controlImpairTimer > 0) {
         unit.controlImpairTimer = Math.max(0, unit.controlImpairTimer - dt);
         if (unit.controlImpairTimer <= 0) {
           unit.controlImpairFactor = 1;
         }
       }
+
       const isControlled = unit.side === "player" && unit.id === this.playerControlledId;
-      if (!unit.airDropActive) {
-        if (isControlled) {
-          this.updateControlledUnit(unit, dt, keys);
-        } else {
-          this.updateUnitAI(unit, dt);
+      let command: UnitCommand;
+
+      if (isControlled && !unit.airDropActive) {
+        command = this.playerInputToCommand(unit, dt, keys);
+      } else if (unit.airDropActive) {
+        command = this.airDropReturnToCommand(unit, dt);
+      } else if (this.hasAliveWeapons(unit)) {
+        if (this.autoEnableAiWeaponAutoFire) {
+          for (let i = 0; i < unit.weaponAutoFire.length; i += 1) {
+            unit.weaponAutoFire[i] = true;
+          }
+        }
+        unit.aiStateTimer += dt;
+        unit.aiDodgeCooldown = Math.max(0, unit.aiDodgeCooldown - dt);
+
+        const desiredRange = this.getDesiredEngageRange(unit);
+        const baseTarget = this.getEnemyBaseCenter(unit.side);
+        const controller = this.aiControllers[unit.side] ?? null;
+        const decision = controller
+          ? controller.decide({
+              unit,
+              state: this.state,
+              dt,
+              desiredRange,
+              baseTarget,
+              canShootAtAngle: (componentId, dx, dy, shootAngleDegOverride) => this.canShootAtAngle(unit, componentId, dx, dy, shootAngleDegOverride),
+              getEffectiveWeaponRange: (baseRange) => this.getEffectiveWeaponRange(unit, baseRange),
+            })
+          : evaluateCombatDecisionTree(
+              unit,
+              this.state,
+              dt,
+              desiredRange,
+              baseTarget,
+              (componentId, dx, dy, shootAngleDegOverride) => this.canShootAtAngle(unit, componentId, dx, dy, shootAngleDegOverride),
+              (baseRange) => this.getEffectiveWeaponRange(unit, baseRange),
+            );
+        command = this.aiDecisionToCommand(unit, decision);
+      } else if (unit.type === "air") {
+        if (!unit.airDropActive) {
+          unit.airDropActive = true;
+          unit.airDropTargetY = GROUND_MIN_Y + Math.random() * (GROUND_MAX_Y - GROUND_MIN_Y);
+          unit.aiDebugDecisionPath = "weaponless-air-drop";
+        }
+        if (unit.id === this.playerControlledId || unit.id === this.selectedUnitId) {
+          this.clearControlSelection();
+          this.hooks.addLog(`${unit.name} has no weapon and is returning to base`, "warn");
+        }
+        command = this.airDropReturnToCommand(unit, dt);
+      } else {
+        if (unit.returnedToBase) continue;
+        if (unit.id === this.playerControlledId || unit.id === this.selectedUnitId) {
+          this.clearControlSelection();
+          this.hooks.addLog(`${unit.name} has no weapon and is returning to base`, "warn");
+        }
+        unit.facing = unit.side === "player" ? 1 : -1;
+        command = this.retreatToCommand(unit);
+      }
+
+      const cmdResult = this.executeCommand(unit, command, dt);
+
+      for (const firedSlot of cmdResult.firedSlots) {
+        const req = command.fire.find((r) => r.slot === firedSlot);
+        if (req && !req.manual) {
+          unit.aiWeaponCycleIndex = (firedSlot + 1) % Math.max(1, unit.weaponAttachmentIds.length);
         }
       }
 
@@ -499,6 +576,7 @@ export class BattleSession {
           unit.vy *= 0.83;
         }
       }
+
       for (let i = 0; i < unit.weaponFireTimers.length; i += 1) {
         unit.weaponFireTimers[i] = Math.max(0, unit.weaponFireTimers[i] - dt);
       }
@@ -517,6 +595,23 @@ export class BattleSession {
       }
       unit.x = clamp(unit.x, 44, this.canvas.width - 44);
 
+      if (unit.airDropActive) {
+        const base = unit.side === "player" ? this.state.playerBase : this.state.enemyBase;
+        if (this.isUnitInsideBase(unit, base)) {
+          this.onUnitReturnedToBase(unit);
+          continue;
+        }
+        if (unit.y >= unit.airDropTargetY - 2) {
+          this.onAirDropImpact(unit);
+        }
+      }
+
+      if (!this.hasAliveWeapons(unit) && unit.type === "ground" && !unit.returnedToBase) {
+        const base = unit.side === "player" ? this.state.playerBase : this.state.enemyBase;
+        if (this.isUnitInsideBase(unit, base)) {
+          this.onUnitReturnedToBase(unit);
+        }
+      }
     }
 
     for (const projectile of this.state.projectiles) {
@@ -1007,101 +1102,6 @@ export class BattleSession {
     });
   }
 
-  private fireUnit(
-    unit: UnitInstance,
-    manual: boolean,
-    target: { x: number; y: number } | null = null,
-    intendedTargetId: string | null = null,
-    intendedTargetY: number | null = null,
-  ): void {
-    if (!canOperate(unit)) {
-      return;
-    }
-    if (manual) {
-      this.fireManualControlledWeapons(unit, target, intendedTargetId, intendedTargetY);
-      return;
-    }
-    this.fireAutoWeapons(unit, target, intendedTargetId, intendedTargetY);
-  }
-
-  private fireManualControlledWeapons(
-    unit: UnitInstance,
-    target: { x: number; y: number } | null,
-    intendedTargetId: string | null,
-    intendedTargetY: number | null,
-  ): void {
-    for (let slot = 0; slot < unit.weaponAttachmentIds.length; slot += 1) {
-      if (!this.isWeaponManualControlEnabled(unit, slot)) {
-        continue;
-      }
-      this.fireWeaponSlot(unit, slot, true, target, intendedTargetId, intendedTargetY);
-    }
-  }
-
-  private fireAutoWeapons(
-    unit: UnitInstance,
-    target: { x: number; y: number } | null,
-    intendedTargetId: string | null,
-    intendedTargetY: number | null,
-    options: { excludeSlot?: number | null; suppressedSlots?: ReadonlySet<number> } = {},
-  ): void {
-    const slotCount = unit.weaponAttachmentIds.length;
-    if (slotCount === 0) {
-      return;
-    }
-    const excludeSlot = options.excludeSlot ?? null;
-    const suppressedSlots = options.suppressedSlots ?? null;
-    for (let offset = 0; offset < slotCount; offset += 1) {
-      const slot = (unit.aiWeaponCycleIndex + offset) % slotCount;
-      if (excludeSlot !== null && slot === excludeSlot) {
-        continue;
-      }
-      if (suppressedSlots?.has(slot)) {
-        continue;
-      }
-      if (!unit.weaponAutoFire[slot]) {
-        continue;
-      }
-      if ((unit.weaponFireTimers[slot] ?? 0) > 0) {
-        continue;
-      }
-      const fired = this.fireWeaponSlot(unit, slot, false, target, intendedTargetId, intendedTargetY);
-      if (fired) {
-        unit.aiWeaponCycleIndex = (slot + 1) % slotCount;
-        break;
-      }
-    }
-  }
-
-  private fireAutoWeaponsWithPriority(
-    unit: UnitInstance,
-    target: { x: number; y: number } | null,
-    intendedTargetId: string | null,
-    intendedTargetY: number | null,
-    preferredSlot: number,
-  ): boolean {
-    const slotCount = unit.weaponAttachmentIds.length;
-    if (slotCount <= 0) {
-      return false;
-    }
-    const start = ((preferredSlot % slotCount) + slotCount) % slotCount;
-    for (let offset = 0; offset < slotCount; offset += 1) {
-      const slot = (start + offset) % slotCount;
-      if (!unit.weaponAutoFire[slot]) {
-        continue;
-      }
-      if ((unit.weaponFireTimers[slot] ?? 0) > 0) {
-        continue;
-      }
-      const fired = this.fireWeaponSlot(unit, slot, false, target, intendedTargetId, intendedTargetY);
-      if (fired) {
-        unit.aiWeaponCycleIndex = (slot + 1) % slotCount;
-        return true;
-      }
-    }
-    return false;
-  }
-
   private fireWeaponSlot(
     unit: UnitInstance,
     slot: number,
@@ -1165,7 +1165,7 @@ export class BattleSession {
     const weaponOriginY = unit.y + weaponOffset.y;
     const dx = targetX - weaponOriginX;
     const dy = targetY - weaponOriginY;
-    const clampedAim = this.clampAimVectorToWeaponAngle(unit, attachment.component, dx, dy);
+    const clampedAim = this.clampAimVectorToWeaponAngle(unit, attachment.component, dx, dy, attachment.stats?.shootAngleDeg);
     const spreadRad = (((Math.random() * 2) - 1) * shot.spreadDeg * Math.PI) / 180;
     const baseAngle = Math.atan2(clampedAim.dy, clampedAim.dx);
     const fireAngle = baseAngle + spreadRad;
@@ -1233,9 +1233,10 @@ export class BattleSession {
     componentId: keyof typeof COMPONENTS,
     dx: number,
     dy: number,
+    shootAngleDegOverride?: number,
   ): { dx: number; dy: number } {
     const stats = COMPONENTS[componentId];
-    const shootAngleDeg = stats.shootAngleDeg ?? 120;
+    const shootAngleDeg = shootAngleDegOverride ?? stats.shootAngleDeg ?? 120;
     const halfAngleRad = (shootAngleDeg * Math.PI / 180) * 0.5;
     const facingAngle = unit.facing === 1 ? 0 : Math.PI;
     const aimAngle = Math.atan2(dy, dx);
@@ -1432,7 +1433,7 @@ export class BattleSession {
       if (!weaponStats || weaponStats.type !== "weapon") {
         continue;
       }
-      const weaponCooldown = weaponAttachment?.runtimeOverrides?.cooldown ?? weaponStats.cooldown ?? 1;
+      const weaponCooldown = weaponAttachment?.stats?.cooldown ?? weaponStats.cooldown ?? 1;
 
       loaderState.targetWeaponSlot = nextSlot;
       loaderState.remaining = this.computeLoaderDuration(loaderStats, weaponCooldown);
@@ -1461,8 +1462,8 @@ export class BattleSession {
       } else if (propulsion?.platform === "air") {
         continue;
       }
-      const enginePower = Math.max(0, attachment.runtimeOverrides?.power ?? stats.power ?? 0);
-      const engineSpeedCap = Math.max(1, attachment.runtimeOverrides?.maxSpeed ?? stats.maxSpeed ?? 90);
+      const enginePower = Math.max(0, attachment.stats?.power ?? stats.power ?? 0);
+      const engineSpeedCap = Math.max(1, attachment.stats?.maxSpeed ?? stats.maxSpeed ?? 90);
       totalPower += enginePower;
       weightedSpeedCap += engineSpeedCap * Math.max(1, enginePower);
       capWeight += Math.max(1, enginePower);
@@ -1513,7 +1514,7 @@ export class BattleSession {
       if (stats.type !== "engine" || stats.propulsion?.platform !== "air") {
         continue;
       }
-      const enginePower = Math.max(0, attachment.runtimeOverrides?.power ?? stats.power ?? 0);
+      const enginePower = Math.max(0, attachment.stats?.power ?? stats.power ?? 0);
       const baseAccel = (enginePower / Math.max(16, unit.mass)) * AIR_THRUST_ACCEL_SCALE;
       if (stats.propulsion.mode === "omni") {
         accel += baseAccel;
@@ -1531,19 +1532,6 @@ export class BattleSession {
       accel += baseAccel * Math.max(inConeScale, sideBleed);
     }
     return accel;
-  }
-
-  private hasPropellerEngine(unit: UnitInstance): boolean {
-    for (const attachment of unit.attachments) {
-      if (!attachment.alive) {
-        continue;
-      }
-      if (attachment.component !== "propeller") {
-        continue;
-      }
-      return true;
-    }
-    return false;
   }
 
   private applyAirThrustMovement(unit: UnitInstance, dt: number, inputX: number, inputY: number, allowDescend: boolean): void {
@@ -1593,38 +1581,297 @@ export class BattleSession {
     }
   }
 
-  private updateAirDropState(unit: UnitInstance, dt: number): void {
-    if (!unit.airDropActive) {
-      return;
+  private executeCommand(unit: UnitInstance, command: UnitCommand, dt: number): CommandResult {
+    const result: CommandResult = { firedSlots: [], fireBlocked: [] };
+
+    // --- Facing ---
+    if (command.facing !== null) {
+      unit.facing = command.facing;
     }
+
+    // --- Movement ---
+    if (unit.airDropActive) {
+      // AIR-DROP 50/50 thrust split
+      const dirX = command.move.dirX;
+
+      // 50% of thrust for horizontal
+      const horizontalAccel = dirX !== 0 ? this.computeDirectedAirAccel(unit, Math.sign(dirX), 0) : 0;
+      const effectiveHorizontal = horizontalAccel * 0.5;
+      const horizontalSpeedRatio = clamp(effectiveHorizontal / Math.max(1, AIR_HOLD_GRAVITY), 0, 1);
+      unit.vx = Math.sign(dirX) * unit.maxSpeed * horizontalSpeedRatio;
+
+      // 50% of thrust for vertical (fighting gravity)
+      unit.vy = Math.max(0, unit.vy);
+      const liftAccel = this.computeDirectedAirAccel(unit, 0, -1);
+      const effectiveVertical = liftAccel * 0.5;
+      const fallAccel = Math.max(0, AIR_DROP_GRAVITY - effectiveVertical);
+      unit.vy += fallAccel * dt;
+    } else if (unit.type === "air") {
+      this.applyAirThrustMovement(unit, dt, command.move.dirX, command.move.dirY, command.move.allowDescend ?? false);
+    } else {
+      // Ground movement
+      unit.vx += command.move.dirX * unit.accel * dt;
+      unit.vy += command.move.dirY * unit.accel * dt;
+    }
+
+    // --- Fire ---
+    if (!canOperate(unit)) {
+      for (const req of command.fire) {
+        result.fireBlocked.push({ slot: req.slot, reason: "cannot-operate" });
+      }
+      return result;
+    }
+    for (const req of command.fire) {
+      const target = { x: req.aimX, y: req.aimY };
+      const fired = this.fireWeaponSlot(unit, req.slot, req.manual, target, req.intendedTargetId, req.intendedTargetY);
+      if (fired) {
+        result.firedSlots.push(req.slot);
+      } else {
+        // Determine block reason
+        let reason: FireBlockDetail["reason"] = "cooldown";
+        if (req.slot < 0 || req.slot >= unit.weaponAttachmentIds.length) {
+          reason = "invalid-slot";
+        } else {
+          const attachmentId = unit.weaponAttachmentIds[req.slot];
+          const attachment = unit.attachments.find((a) => a.id === attachmentId && a.alive);
+          if (!attachment) {
+            reason = "dead-weapon";
+          } else if ((unit.weaponFireTimers[req.slot] ?? 0) > 0) {
+            reason = "cooldown";
+          } else {
+            const stats = COMPONENTS[attachment.component];
+            if (stats.type === "weapon") {
+              const weaponClass = stats.weaponClass ?? "rapid-fire";
+              if (this.requiresDedicatedLoader(weaponClass)) {
+                const charges = unit.weaponReadyCharges[req.slot] ?? 0;
+                if (charges <= 0) {
+                  reason = "no-charges";
+                }
+              }
+            }
+          }
+        }
+        result.fireBlocked.push({ slot: req.slot, reason });
+      }
+    }
+
+    return result;
+  }
+
+  private playerInputToCommand(unit: UnitInstance, _dt: number, keys: KeyState): UnitCommand {
+    let dx = 0;
+    let dy = 0;
+    if (keys.a) dx -= 1;
+    if (keys.d) dx += 1;
+    if (keys.w) dy -= 1;
+    if (keys.s) dy += 1;
+
+    const fire: FireRequest[] = [];
+
+    if (!this.hasAliveWeapons(unit)) {
+      // Weaponless player unit — no fire, just movement
+      return { move: { dirX: dx, dirY: dy, allowDescend: keys.s }, facing: null, fire };
+    }
+
+    // Manual fire from mouse hold
+    if (this.manualFireHeld) {
+      for (let slot = 0; slot < unit.weaponAttachmentIds.length; slot += 1) {
+        if (this.isWeaponManualControlEnabled(unit, slot)) {
+          fire.push({
+            slot,
+            aimX: this.aimX,
+            aimY: this.aimY,
+            intendedTargetId: null,
+            intendedTargetY: null,
+            manual: true,
+          });
+        }
+      }
+    }
+
+    // Auto-fire for non-suppressed slots
+    const suppressedAutoSlots = this.getManualControlSuppressedSlots(unit);
+    const target = this.pickTarget(unit);
+    const baseTarget = this.getEnemyBaseCenter(unit.side);
+    const attackTarget = target ?? baseTarget;
+    unit.aiDebugTargetId = target?.id ?? null;
+
+    let bestRange = 0;
+    const slotCount = unit.weaponAttachmentIds.length;
+    for (let slot = 0; slot < slotCount; slot += 1) {
+      if (!unit.weaponAutoFire[slot]) continue;
+      if (suppressedAutoSlots.has(slot)) continue;
+      const attachmentId = unit.weaponAttachmentIds[slot];
+      const attachment = unit.attachments.find((a) => a.id === attachmentId && a.alive) ?? null;
+      if (!attachment) continue;
+      const stats = COMPONENTS[attachment.component];
+      const range = attachment.stats?.range ?? stats.range;
+      if (range === undefined) continue;
+      bestRange = Math.max(bestRange, this.getEffectiveWeaponRange(unit, range));
+    }
+
+    if (bestRange > 0) {
+      unit.aiDebugLastRange = bestRange;
+      const dxToTarget = Math.abs(attackTarget.x - unit.x);
+      const canHitByAxis = !target || unit.type === "air" || target.type === "air" || Math.abs(target.y - unit.y) <= GROUND_FIRE_Y_TOLERANCE;
+      if (dxToTarget < bestRange && canHitByAxis) {
+        const targetVx = target?.vx ?? 0;
+        const targetVy = target?.vy ?? 0;
+        const solved = solveBallisticAim(unit.x, unit.y, attackTarget.x, attackTarget.y, targetVx, targetVy, bestRange);
+
+        let aim = { x: attackTarget.x, y: attackTarget.y + unit.aiAimCorrectionY };
+        let intendedY: number | null = target ? attackTarget.y : null;
+        if (solved) {
+          unit.aiDebugLastAngleRad = solved.firingAngleRad;
+          intendedY = solved.y;
+          const aimDistance = Math.max(90, Math.min(bestRange, PROJECTILE_SPEED * solved.leadTimeS));
+          aim = {
+            x: unit.x + Math.cos(solved.firingAngleRad) * aimDistance,
+            y: unit.y + Math.sin(solved.firingAngleRad) * aimDistance,
+          };
+        } else {
+          unit.aiDebugLastAngleRad = Math.atan2(aim.y - unit.y, aim.x - unit.x);
+        }
+
+        // Add auto-fire request using round-robin
+        for (let offset = 0; offset < slotCount; offset += 1) {
+          const slot = (unit.aiWeaponCycleIndex + offset) % slotCount;
+          if (suppressedAutoSlots.has(slot)) continue;
+          if (!unit.weaponAutoFire[slot]) continue;
+          if ((unit.weaponFireTimers[slot] ?? 0) > 0) continue;
+          fire.push({
+            slot,
+            aimX: aim.x,
+            aimY: aim.y,
+            intendedTargetId: target ? target.id : null,
+            intendedTargetY: intendedY,
+            manual: false,
+          });
+          break; // Only one auto slot per tick
+        }
+      }
+    }
+
+    return { move: { dirX: dx, dirY: dy, allowDescend: keys.s }, facing: null, fire };
+  }
+
+  private aiDecisionToCommand(unit: UnitInstance, decision: CombatDecision): UnitCommand {
+    const fire: FireRequest[] = [];
+
+    // Debug fields
+    unit.aiState = decision.state;
+    unit.aiDebugShouldEvade = decision.movement.shouldEvade;
+    unit.aiDebugTargetId = decision.debug.targetId;
+    unit.aiDebugDecisionPath = decision.debug.decisionPath;
+    unit.aiDebugFireBlockReason = decision.debug.fireBlockedReason;
+
+    if (!decision.firePlan) {
+      unit.aiDebugLastRange = 0;
+      unit.aiDebugLastAngleRad = 0;
+      unit.aiDebugPreferredWeaponSlot = -1;
+      unit.aiDebugLeadTimeS = 0;
+    } else {
+      unit.aiDebugLastRange = decision.firePlan.effectiveRange;
+      unit.aiDebugLastAngleRad = decision.firePlan.angleRad;
+      unit.aiDebugPreferredWeaponSlot = decision.firePlan.preferredSlot;
+      unit.aiDebugLeadTimeS = decision.firePlan.leadTimeS;
+
+      // Build fire request using priority cycling
+      const slotCount = unit.weaponAttachmentIds.length;
+      if (slotCount > 0) {
+        const start = ((decision.firePlan.preferredSlot % slotCount) + slotCount) % slotCount;
+        for (let offset = 0; offset < slotCount; offset += 1) {
+          const slot = (start + offset) % slotCount;
+          if (!unit.weaponAutoFire[slot]) continue;
+          if ((unit.weaponFireTimers[slot] ?? 0) > 0) continue;
+          fire.push({
+            slot,
+            aimX: decision.firePlan.aim.x,
+            aimY: decision.firePlan.aim.y,
+            intendedTargetId: decision.firePlan.intendedTargetId,
+            intendedTargetY: decision.firePlan.intendedTargetY,
+            manual: false,
+          });
+          break; // Only one slot per tick
+        }
+      }
+    }
+
+    return {
+      move: { dirX: decision.movement.ax, dirY: decision.movement.ay },
+      facing: decision.facing,
+      fire,
+    };
+  }
+
+  private airDropReturnToCommand(unit: UnitInstance, _dt: number): UnitCommand {
+    const fire: FireRequest[] = [];
     const base = unit.side === "player" ? this.state.playerBase : this.state.enemyBase;
     const baseCenterX = base.x + base.w / 2;
     const dx = baseCenterX - unit.x;
     const dirX = Math.abs(dx) < 1 ? 0 : Math.sign(dx);
-    if (dirX !== 0) {
-      unit.facing = dirX < 0 ? -1 : 1;
+
+    // Set debug info
+    unit.aiState = "evade";
+    unit.aiDebugShouldEvade = true;
+    unit.aiDebugDecisionPath = unit.aiDebugDecisionPath || "air-drop-return";
+
+    // Try to fire at closest enemy while dropping
+    if (this.hasAliveWeapons(unit)) {
+      const target = this.pickTarget(unit);
+      if (target) {
+        unit.aiDebugTargetId = target.id;
+        const slotCount = unit.weaponAttachmentIds.length;
+        for (let offset = 0; offset < slotCount; offset += 1) {
+          const slot = (unit.aiWeaponCycleIndex + offset) % slotCount;
+          if (!unit.weaponAutoFire[slot]) continue;
+          if ((unit.weaponFireTimers[slot] ?? 0) > 0) continue;
+          fire.push({
+            slot,
+            aimX: target.x,
+            aimY: target.y,
+            intendedTargetId: target.id,
+            intendedTargetY: target.y,
+            manual: false,
+          });
+          break;
+        }
+      }
     }
 
-    const horizontalAccel = dirX !== 0 ? this.computeDirectedAirAccel(unit, dirX, 0) : 0;
-    const horizontalSpeedRatio = clamp(horizontalAccel / Math.max(1, AIR_HOLD_GRAVITY), 0, 1);
-    unit.vx = dirX * unit.maxSpeed * horizontalSpeedRatio;
+    return {
+      move: { dirX, dirY: 0 },
+      facing: dirX < 0 ? -1 : dirX > 0 ? 1 : null,
+      fire,
+    };
+  }
 
-    unit.vy = Math.max(0, unit.vy);
-    let fallAccel = AIR_DROP_GRAVITY;
-    if (this.hasPropellerEngine(unit)) {
-      const liftAccel = this.computeDirectedAirAccel(unit, 0, -1);
-      const spareLift = Math.max(0, liftAccel - horizontalAccel);
-      fallAccel = Math.max(0, AIR_DROP_GRAVITY - spareLift);
-    }
-    unit.vy += fallAccel * dt;
+  private retreatToCommand(unit: UnitInstance): UnitCommand {
+    const base = unit.side === "player" ? this.state.playerBase : this.state.enemyBase;
+    const baseCenterX = base.x + base.w / 2;
+    const baseCenterY = base.y + base.h / 2;
+    const retreatY = clamp(baseCenterY, GROUND_MIN_Y, GROUND_MAX_Y);
 
-    if (this.isUnitInsideBase(unit, base)) {
-      this.onUnitReturnedToBase(unit);
-      return;
-    }
-    if (unit.y >= unit.airDropTargetY - 2) {
-      this.onAirDropImpact(unit);
-    }
+    const dx = baseCenterX - unit.x;
+    const dy = retreatY - unit.y;
+    const dist = Math.hypot(dx, dy) || 1;
+    const ux = dx / dist;
+    const uy = (dy / dist) * 0.85;
+
+    // Set debug info
+    unit.aiState = "evade";
+    unit.aiDebugShouldEvade = true;
+    unit.aiDebugTargetId = null;
+    unit.aiDebugDecisionPath = "weaponless-retreat";
+    unit.aiDebugFireBlockReason = "no-weapons";
+    unit.aiDebugPreferredWeaponSlot = -1;
+    unit.aiDebugLeadTimeS = 0;
+
+    return {
+      move: { dirX: ux, dirY: uy },
+      facing: unit.side === "player" ? 1 : -1,
+      fire: [],
+    };
   }
 
   private onAirDropImpact(unit: UnitInstance): void {
@@ -1645,9 +1892,9 @@ export class BattleSession {
     this.hooks.addLog(`${unit.name} crashed after losing lift`, "bad");
   }
 
-  private canShootAtAngle(unit: UnitInstance, componentId: keyof typeof COMPONENTS, dx: number, dy: number): boolean {
+  private canShootAtAngle(unit: UnitInstance, componentId: keyof typeof COMPONENTS, dx: number, dy: number, shootAngleDegOverride?: number): boolean {
     const stats = COMPONENTS[componentId];
-    const shootAngleDeg = stats.shootAngleDeg ?? 120;
+    const shootAngleDeg = shootAngleDegOverride ?? stats.shootAngleDeg ?? 120;
     const halfAngleRad = (shootAngleDeg * Math.PI / 180) * 0.5;
     const facingAngle = unit.facing === 1 ? 0 : Math.PI;
     const aimAngle = Math.atan2(dy, dx);
@@ -1720,7 +1967,7 @@ export class BattleSession {
           continue;
         }
         const stats = COMPONENTS[attachment.component];
-        const range = attachment.runtimeOverrides?.range ?? stats.range;
+        const range = attachment.stats?.range ?? stats.range;
         if (range === undefined) {
           continue;
         }
@@ -1741,7 +1988,7 @@ export class BattleSession {
       return 0;
     }
     const stats = COMPONENTS[attachment.component];
-    const range = attachment.runtimeOverrides?.range ?? stats.range;
+    const range = attachment.stats?.range ?? stats.range;
     if (range === undefined) {
       return 0;
     }
@@ -1756,7 +2003,7 @@ export class BattleSession {
     let best = 180;
     for (const weaponAttachment of weapons) {
       const stats = COMPONENTS[weaponAttachment.component];
-      const range = weaponAttachment.runtimeOverrides?.range ?? stats.range;
+      const range = weaponAttachment.stats?.range ?? stats.range;
       if (range === undefined) {
         continue;
       }
@@ -1777,217 +2024,8 @@ export class BattleSession {
     return globalBuff * (1 + airBonus);
   }
 
-  private updateUnitAI(unit: UnitInstance, dt: number): void {
-    if (this.autoEnableAiWeaponAutoFire) {
-      for (let i = 0; i < unit.weaponAutoFire.length; i += 1) {
-        unit.weaponAutoFire[i] = true;
-      }
-    }
-    if (!this.hasAliveWeapons(unit)) {
-      this.updateWeaponlessUnit(unit, dt);
-      return;
-    }
-    unit.aiStateTimer += dt;
-    unit.aiDodgeCooldown = Math.max(0, unit.aiDodgeCooldown - dt);
-
-    const desiredRange = this.getDesiredEngageRange(unit);
-    const baseTarget = this.getEnemyBaseCenter(unit.side);
-    const controller = this.aiControllers[unit.side] ?? null;
-    const decision = controller
-      ? controller.decide({
-          unit,
-          state: this.state,
-          dt,
-          desiredRange,
-          baseTarget,
-          canShootAtAngle: (componentId, dx, dy) => this.canShootAtAngle(unit, componentId, dx, dy),
-          getEffectiveWeaponRange: (baseRange) => this.getEffectiveWeaponRange(unit, baseRange),
-        })
-      : evaluateCombatDecisionTree(
-          unit,
-          this.state,
-          dt,
-          desiredRange,
-          baseTarget,
-          (componentId, dx, dy) => this.canShootAtAngle(unit, componentId, dx, dy),
-          (baseRange) => this.getEffectiveWeaponRange(unit, baseRange),
-        );
-
-    unit.facing = decision.facing;
-    unit.aiState = decision.state;
-    unit.aiDebugShouldEvade = decision.movement.shouldEvade;
-    unit.aiDebugTargetId = decision.debug.targetId;
-    unit.aiDebugDecisionPath = decision.debug.decisionPath;
-    unit.aiDebugFireBlockReason = decision.debug.fireBlockedReason;
-
-    if (unit.type === "air") {
-      this.applyAirThrustMovement(unit, dt, decision.movement.ax, decision.movement.ay, false);
-    } else {
-      unit.vx += decision.movement.ax * unit.accel * dt;
-      unit.vy += decision.movement.ay * unit.accel * dt;
-    }
-
-    if (!decision.firePlan) {
-      unit.aiDebugLastRange = 0;
-      unit.aiDebugLastAngleRad = 0;
-      unit.aiDebugPreferredWeaponSlot = -1;
-      unit.aiDebugLeadTimeS = 0;
-      return;
-    }
-
-    unit.aiDebugLastRange = decision.firePlan.effectiveRange;
-    unit.aiDebugLastAngleRad = decision.firePlan.angleRad;
-    unit.aiDebugPreferredWeaponSlot = decision.firePlan.preferredSlot;
-    unit.aiDebugLeadTimeS = decision.firePlan.leadTimeS;
-
-    this.fireAutoWeaponsWithPriority(
-      unit,
-      decision.firePlan.aim,
-      decision.firePlan.intendedTargetId,
-      decision.firePlan.intendedTargetY,
-      decision.firePlan.preferredSlot,
-    );
-  }
-
-  private updateControlledUnit(unit: UnitInstance, dt: number, keys: KeyState): void {
-    if (!this.hasAliveWeapons(unit)) {
-      this.updateWeaponlessUnit(unit, dt);
-      return;
-    }
-    let dx = 0;
-    let dy = 0;
-    if (keys.a) {
-      dx -= 1;
-    }
-    if (keys.d) {
-      dx += 1;
-    }
-    if (keys.w) {
-      dy -= 1;
-    }
-    if (keys.s) {
-      dy += 1;
-    }
-
-    if (unit.type === "air") {
-      this.applyAirThrustMovement(unit, dt, dx, dy, keys.s);
-    } else {
-      unit.vx += dx * unit.accel * dt;
-      unit.vy += dy * unit.accel * dt;
-    }
-
-    const slotCount = unit.weaponAttachmentIds.length;
-    if (slotCount > 0) {
-      const suppressedAutoSlots = this.getManualControlSuppressedSlots(unit);
-      const target = this.pickTarget(unit);
-      const baseTarget = this.getEnemyBaseCenter(unit.side);
-      const attackTarget = target ?? baseTarget;
-      unit.aiDebugTargetId = target?.id ?? null;
-
-      let bestRange = 0;
-      for (let slot = 0; slot < slotCount; slot += 1) {
-        if (!unit.weaponAutoFire[slot]) {
-          continue;
-        }
-        if (suppressedAutoSlots.has(slot)) {
-          continue;
-        }
-        const attachmentId = unit.weaponAttachmentIds[slot];
-        const attachment = unit.attachments.find((entry) => entry.id === attachmentId && entry.alive) ?? null;
-        if (!attachment) {
-          continue;
-        }
-        const stats = COMPONENTS[attachment.component];
-        const range = attachment.runtimeOverrides?.range ?? stats.range;
-        if (range === undefined) {
-          continue;
-        }
-        bestRange = Math.max(bestRange, this.getEffectiveWeaponRange(unit, range));
-      }
-
-      if (bestRange > 0) {
-        unit.aiDebugLastRange = bestRange;
-        const dxToTarget = Math.abs(attackTarget.x - unit.x);
-        const canHitByAxis = !target || unit.type === "air" || target.type === "air" || Math.abs(target.y - unit.y) <= GROUND_FIRE_Y_TOLERANCE;
-        if (dxToTarget < bestRange && canHitByAxis) {
-          const targetVx = target?.vx ?? 0;
-          const targetVy = target?.vy ?? 0;
-          const solved = solveBallisticAim(unit.x, unit.y, attackTarget.x, attackTarget.y, targetVx, targetVy, bestRange);
-
-          let aim = { x: attackTarget.x, y: attackTarget.y + unit.aiAimCorrectionY };
-          let intendedY: number | null = target ? attackTarget.y : null;
-          if (solved) {
-            unit.aiDebugLastAngleRad = solved.firingAngleRad;
-            intendedY = solved.y;
-            const aimDistance = Math.max(90, Math.min(bestRange, PROJECTILE_SPEED * solved.leadTimeS));
-            aim = {
-              x: unit.x + Math.cos(solved.firingAngleRad) * aimDistance,
-              y: unit.y + Math.sin(solved.firingAngleRad) * aimDistance,
-            };
-          } else {
-            unit.aiDebugLastAngleRad = Math.atan2(aim.y - unit.y, aim.x - unit.x);
-          }
-
-          this.fireAutoWeapons(unit, aim, target ? target.id : null, intendedY, { suppressedSlots: suppressedAutoSlots });
-        }
-      }
-    }
-
-    if (this.manualFireHeld) {
-      this.fireUnit(unit, true, { x: this.aimX, y: this.aimY }, null);
-    }
-
-  }
-
   private hasAliveWeapons(unit: UnitInstance): boolean {
     return getAliveWeaponAttachments(unit).length > 0;
-  }
-
-  private updateWeaponlessUnit(unit: UnitInstance, dt: number): void {
-    if (unit.returnedToBase) {
-      return;
-    }
-
-    if (unit.id === this.playerControlledId || unit.id === this.selectedUnitId) {
-      this.clearControlSelection();
-      this.hooks.addLog(`${unit.name} has no weapon and is returning to base`, "warn");
-    }
-
-    unit.facing = unit.side === "player" ? 1 : -1;
-    unit.aiState = "evade";
-    unit.aiDebugShouldEvade = true;
-    unit.aiDebugTargetId = null;
-    unit.aiDebugDecisionPath = "weaponless-retreat";
-    unit.aiDebugFireBlockReason = "no-weapons";
-    unit.aiDebugPreferredWeaponSlot = -1;
-    unit.aiDebugLeadTimeS = 0;
-
-    if (unit.type === "air") {
-      if (!unit.airDropActive) {
-        unit.airDropActive = true;
-        unit.airDropTargetY = GROUND_MIN_Y + Math.random() * (GROUND_MAX_Y - GROUND_MIN_Y);
-        unit.aiDebugDecisionPath = "weaponless-air-drop";
-      }
-      return;
-    }
-
-    const base = unit.side === "player" ? this.state.playerBase : this.state.enemyBase;
-    const baseCenterX = base.x + base.w / 2;
-    const baseCenterY = base.y + base.h / 2;
-    const retreatY = clamp(baseCenterY, GROUND_MIN_Y, GROUND_MAX_Y);
-
-    const dx = baseCenterX - unit.x;
-    const dy = retreatY - unit.y;
-    const dist = Math.hypot(dx, dy) || 1;
-    const ux = dx / dist;
-    const uy = dy / dist;
-
-    unit.vx += ux * unit.accel * dt;
-    unit.vy += uy * unit.accel * dt * 0.85;
-
-    if (this.isUnitInsideBase(unit, base)) {
-      this.onUnitReturnedToBase(unit);
-    }
   }
 
   private isUnitInsideBase(unit: UnitInstance, base: BattleState["playerBase"]): boolean {

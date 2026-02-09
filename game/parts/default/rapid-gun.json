@@ -18,7 +18,8 @@
       "isAttachPoint": false,
       "isAnchorPoint": true,
       "isShootingPoint": true,
-      "takesDamage": true
+      "takesDamage": true,
+      "takesFunctionalDamage": true
     }
   ],
   "placement": {
@@ -28,6 +29,9 @@
     "requireStructureOnStructureOccupiedBoxes": true,
     "requireEmptyStructureOffsets": [],
     "requireEmptyFunctionalOffsets": []
+  },
+  "stats": {
+    "shootAngleDeg": 360
   },
   "properties": {
     "category": "weapon",

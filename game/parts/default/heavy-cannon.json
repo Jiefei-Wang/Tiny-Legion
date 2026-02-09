@@ -42,7 +42,7 @@
     "requireEmptyStructureOffsets": [],
     "requireEmptyFunctionalOffsets": []
   },
-  "runtimeOverrides": {
+  "stats": {
     "damage": 100,
     "range": 500,
     "spreadDeg": 1

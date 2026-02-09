@@ -117,7 +117,7 @@ export interface PartPlacementTemplate {
   requireEmptyFunctionalOffsets?: ReadonlyArray<{ x: number; y: number }>;
 }
 
-export interface PartRuntimeOverrides {
+export interface PartStats {
   mass?: number;
   hpMul?: number;
   power?: number;
@@ -153,7 +153,7 @@ export interface PartDefinition {
   anchor: { x: number; y: number };
   boxes: PartBoxTemplate[];
   placement?: PartPlacementTemplate;
-  runtimeOverrides?: PartRuntimeOverrides;
+  stats?: PartStats;
   properties?: PartDesignerProperties;
   tags?: string[];
 }
@@ -224,7 +224,7 @@ export interface Attachment {
     takesFunctionalDamage: boolean;
   }>;
   shootingOffset?: { x: number; y: number };
-  runtimeOverrides?: PartRuntimeOverrides;
+  stats?: PartStats;
 }
 
 export interface UnitInstance {
@@ -407,4 +407,52 @@ export interface KeyState {
   w: boolean;
   s: boolean;
   space: boolean;
+}
+
+/** A fire request within a UnitCommand. */
+export interface FireRequest {
+  /** Weapon slot index to fire. */
+  slot: number;
+  /** World-coordinate aim point. The executor clamps to weapon angle limits. */
+  aimX: number;
+  aimY: number;
+  /** For AI shot-feedback tracking. */
+  intendedTargetId: string | null;
+  intendedTargetY: number | null;
+  /** true = player manual click, false = AI / auto-fire. */
+  manual: boolean;
+}
+
+/**
+ * The universal command that all controllers (player input, combat AI,
+ * retreat AI, air-drop AI) produce each tick. The executor applies it
+ * with unified enforcement of movement physics, weapon constraints,
+ * and boundary clamping.
+ */
+export interface UnitCommand {
+  /** Movement intent: normalized direction inputs (roughly -1..1). */
+  move: {
+    dirX: number;
+    dirY: number;
+    /** Air units only — when true, allows intentional descent. */
+    allowDescend?: boolean;
+  };
+  /** Facing override. null = keep current facing. */
+  facing: 1 | -1 | null;
+  /** Fire requests. Empty array = don't fire this tick. */
+  fire: FireRequest[];
+}
+
+/** Per-fire-request rejection detail returned by the executor. */
+export interface FireBlockDetail {
+  slot: number;
+  reason: "cooldown" | "no-charges" | "angle-blocked" | "dead-weapon" | "cannot-operate" | "invalid-slot";
+}
+
+/** Result of executing a UnitCommand, for debug/feedback. */
+export interface CommandResult {
+  /** Which weapon slots actually fired. */
+  firedSlots: number[];
+  /** Rejection details for fire requests that were blocked. */
+  fireBlocked: FireBlockDetail[];
 }

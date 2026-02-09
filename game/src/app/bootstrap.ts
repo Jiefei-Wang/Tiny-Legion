@@ -1377,7 +1377,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
 
   const applyPartMetadataDefaults = (part: PartDefinition): PartDefinition => {
     const defaults = getPartMetadataDefaults(part.baseComponent);
-    const hasCoreTuningOverrides = part.runtimeOverrides?.mass !== undefined || part.runtimeOverrides?.hpMul !== undefined;
+    const hasCoreTuningOverrides = part.stats?.mass !== undefined || part.stats?.hpMul !== undefined;
     return {
       ...part,
       properties: {
@@ -1578,7 +1578,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       const control = manualControl ? "CTRL" : "FREE";
       const label = attachment ? attachment.component : "destroyed";
       const timer = controlled.weaponFireTimers[index] ?? 0;
-      const cooldown = attachment ? (attachment.runtimeOverrides?.cooldown ?? COMPONENTS[attachment.component].cooldown ?? 0) : 0;
+      const cooldown = attachment ? (attachment.stats?.cooldown ?? COMPONENTS[attachment.component].cooldown ?? 0) : 0;
       const cooldownPct = cooldown > 0 ? Math.max(0, Math.min(100, ((cooldown - timer) / cooldown) * 100)) : 100;
       const cooldownText = timer > 0.01 ? `${timer.toFixed(2)}s` : "ready";
       const weaponClass = attachment ? COMPONENTS[attachment.component].weaponClass : undefined;
@@ -2258,10 +2258,10 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     for (const attachment of editorDraft.attachments) {
       const stats = COMPONENTS[attachment.component];
       const part = resolvePartDefinitionForAttachment({ partId: attachment.partId, component: attachment.component }, parts);
-      totalMass += part?.runtimeOverrides?.mass ?? stats.mass;
+      totalMass += part?.stats?.mass ?? stats.mass;
       if (stats.type === "engine") {
-        const enginePower = Math.max(0, part?.runtimeOverrides?.power ?? stats.power ?? 0);
-        const engineSpeedCap = Math.max(1, part?.runtimeOverrides?.maxSpeed ?? stats.maxSpeed ?? 90);
+        const enginePower = Math.max(0, part?.stats?.power ?? stats.power ?? 0);
+        const engineSpeedCap = Math.max(1, part?.stats?.maxSpeed ?? stats.maxSpeed ?? 90);
         totalPower += enginePower;
         weightedSpeedCap += engineSpeedCap * Math.max(1, enginePower);
         capWeight += Math.max(1, enginePower);
@@ -3005,8 +3005,8 @@ export function bootstrap(options: BootstrapOptions = {}): void {
               <option value="air" ${partProps.engineType === "air" ? "selected" : ""}>air</option>
             </select>
           </label>
-          <label class="small">Power <input id="partPower" type="number" step="1" value="${partDesignerDraft.runtimeOverrides?.power ?? ""}" placeholder="${runtimePlaceholders.power}" /></label>
-          <label class="small">Max Speed <input id="partMaxSpeed" type="number" step="1" value="${partDesignerDraft.runtimeOverrides?.maxSpeed ?? ""}" placeholder="${runtimePlaceholders.maxSpeed}" /></label>
+          <label class="small">Power <input id="partPower" type="number" step="1" value="${partDesignerDraft.stats?.power ?? ""}" placeholder="${runtimePlaceholders.power}" /></label>
+          <label class="small">Max Speed <input id="partMaxSpeed" type="number" step="1" value="${partDesignerDraft.stats?.maxSpeed ?? ""}" placeholder="${runtimePlaceholders.maxSpeed}" /></label>
         </div>` : ""}
         ${propIsWeapon ? `<div class="row">
           <label class="small">Weapon Type
@@ -3014,13 +3014,13 @@ export function bootstrap(options: BootstrapOptions = {}): void {
               ${weaponTypeOptions.map((option) => `<option value="${option.value}" ${partProps.weaponType === option.value ? "selected" : ""}>${option.label}</option>`).join("")}
             </select>
           </label>
-          <label class="small">Damage <input id="partDamage" type="number" step="1" value="${partDesignerDraft.runtimeOverrides?.damage ?? ""}" placeholder="${runtimePlaceholders.damage}" /></label>
-          <label class="small">Range <input id="partRange" type="number" step="1" value="${partDesignerDraft.runtimeOverrides?.range ?? ""}" placeholder="${runtimePlaceholders.range}" /></label>
+          <label class="small">Damage <input id="partDamage" type="number" step="1" value="${partDesignerDraft.stats?.damage ?? ""}" placeholder="${runtimePlaceholders.damage}" /></label>
+          <label class="small">Range <input id="partRange" type="number" step="1" value="${partDesignerDraft.stats?.range ?? ""}" placeholder="${runtimePlaceholders.range}" /></label>
         </div>
         <div class="row">
-          <label class="small">Cooldown <input id="partCooldown" type="number" step="0.05" value="${partDesignerDraft.runtimeOverrides?.cooldown ?? ""}" placeholder="${runtimePlaceholders.cooldown}" /></label>
-          <label class="small">Shoot Angle <input id="partShootAngle" type="number" step="1" value="${partDesignerDraft.runtimeOverrides?.shootAngleDeg ?? ""}" placeholder="${runtimePlaceholders.shootAngleDeg}" /></label>
-          <label class="small">Spread <input id="partSpread" type="number" step="0.1" value="${partDesignerDraft.runtimeOverrides?.spreadDeg ?? ""}" placeholder="${runtimePlaceholders.spreadDeg}" /></label>
+          <label class="small">Cooldown <input id="partCooldown" type="number" step="0.05" value="${partDesignerDraft.stats?.cooldown ?? ""}" placeholder="${runtimePlaceholders.cooldown}" /></label>
+          <label class="small">Shoot Angle <input id="partShootAngle" type="number" step="1" value="${partDesignerDraft.stats?.shootAngleDeg ?? ""}" placeholder="${runtimePlaceholders.shootAngleDeg}" /></label>
+          <label class="small">Spread <input id="partSpread" type="number" step="0.1" value="${partDesignerDraft.stats?.spreadDeg ?? ""}" placeholder="${runtimePlaceholders.spreadDeg}" /></label>
         </div>` : ""}
         ${propIsLoader ? `<div class="row">
           <label class="small" style="flex:1;">Loader serves tags (comma separated) <input id="partLoaderServesTags" value="${(partProps.loaderServesTags ?? []).join(", ")}" /></label>
@@ -3030,8 +3030,8 @@ export function bootstrap(options: BootstrapOptions = {}): void {
           <label class="small">HP <input id="partMetaHp" type="number" step="1" value="${partProps.hp ?? ""}" /></label>
         </div>` : ""}
         ${propHasCoreTuning ? `<div class="row">
-          <label class="small">Mass <input id="partMass" type="number" step="0.1" value="${partDesignerDraft.runtimeOverrides?.mass ?? ""}" placeholder="${runtimePlaceholders.mass}" /></label>
-          <label class="small">HP Mul <input id="partHpMul" type="number" step="0.05" value="${partDesignerDraft.runtimeOverrides?.hpMul ?? ""}" placeholder="${runtimePlaceholders.hpMul}" /></label>
+          <label class="small">Mass <input id="partMass" type="number" step="0.1" value="${partDesignerDraft.stats?.mass ?? ""}" placeholder="${runtimePlaceholders.mass}" /></label>
+          <label class="small">HP Mul <input id="partHpMul" type="number" step="0.05" value="${partDesignerDraft.stats?.hpMul ?? ""}" placeholder="${runtimePlaceholders.hpMul}" /></label>
         </div>
         ` : ""}
         <div class="row">
@@ -3517,8 +3517,8 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       partDesignerDraft.properties = { ...props, isEngine: checked };
       if (!checked) {
         partDesignerDraft.properties.engineType = undefined;
-        partDesignerDraft.runtimeOverrides = {
-          ...(partDesignerDraft.runtimeOverrides ?? {}),
+        partDesignerDraft.stats = {
+          ...(partDesignerDraft.stats ?? {}),
           power: undefined,
           maxSpeed: undefined,
         };
@@ -3533,8 +3533,8 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       partDesignerDraft.properties = { ...props, isWeapon: checked };
       if (!checked) {
         partDesignerDraft.properties.weaponType = undefined;
-        partDesignerDraft.runtimeOverrides = {
-          ...(partDesignerDraft.runtimeOverrides ?? {}),
+        partDesignerDraft.stats = {
+          ...(partDesignerDraft.stats ?? {}),
           damage: undefined,
           range: undefined,
           cooldown: undefined,
@@ -3575,8 +3575,8 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         hasCoreTuning: checked,
       };
       if (!checked) {
-        partDesignerDraft.runtimeOverrides = {
-          ...(partDesignerDraft.runtimeOverrides ?? {}),
+        partDesignerDraft.stats = {
+          ...(partDesignerDraft.stats ?? {}),
           mass: undefined,
           hpMul: undefined,
         };
@@ -3649,14 +3649,14 @@ export function bootstrap(options: BootstrapOptions = {}): void {
 
     const bindRuntimeInput = (
       selector: string,
-      key: keyof NonNullable<PartDefinition["runtimeOverrides"]>,
+      key: keyof NonNullable<PartDefinition["stats"]>,
     ): void => {
       getOptionalElement<HTMLInputElement>(selector)?.addEventListener("input", (event) => {
         const raw = (event.currentTarget as HTMLInputElement).value;
         const numeric = raw.trim().length > 0 ? Number(raw) : Number.NaN;
         const next = Number.isFinite(numeric) ? numeric : undefined;
-        partDesignerDraft.runtimeOverrides = {
-          ...(partDesignerDraft.runtimeOverrides ?? {}),
+        partDesignerDraft.stats = {
+          ...(partDesignerDraft.stats ?? {}),
           [key]: next,
         };
       });
@@ -3762,7 +3762,10 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     setScreen("testArena");
     renderPanels();
   });
-  tabs.templateEditor.addEventListener("click", () => setScreen("templateEditor"));
+  tabs.templateEditor.addEventListener("click", () => {
+    setScreen("templateEditor");
+    renderPanels();
+  });
   tabs.partEditor.addEventListener("click", () => {
     setScreen("partEditor");
     const selected = parts.find((part) => part.id === partDesignerSelectedId) ?? parts[0];

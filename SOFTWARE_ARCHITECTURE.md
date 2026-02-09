@@ -258,6 +258,14 @@ Encode your game rules as explicit modules (not scattered checks):
   - aircraft only gain propulsion from air components (`jetEngine`/`propeller`).
   - lift-vs-gravity deficit drives altitude loss.
   - non-descent commands reserve thrust for vertical hold and spend spare thrust on horizontal movement.
+  - air-drop state uses 50/50 thrust split: half for horizontal, half for fighting gravity.
+- `battle-session.ts` (unified command system)
+  - all unit control (player input, combat AI, retreat AI, air-drop AI) produces a `UnitCommand` each tick.
+  - `UnitCommand` contains `move` (direction), `facing`, and `fire` (list of `FireRequest`).
+  - `executeCommand()` applies the command with unified enforcement of movement physics, weapon constraints, and boundary clamping.
+  - command builders: `playerInputToCommand`, `aiDecisionToCommand`, `airDropReturnToCommand`, `retreatToCommand`.
+  - controller priority: player-controlled → air-drop → armed AI (decision tree) → weaponless air (triggers air-drop) → ground weaponless (retreat).
+  - `CommandResult` reports which slots fired and which were blocked (with reason).
 
 This keeps your physics behavior consistent across all systems.
 

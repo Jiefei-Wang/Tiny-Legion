@@ -234,17 +234,17 @@ export function clonePartDefinition(part: PartDefinition): PartDefinition {
           requireEmptyFunctionalOffsets: (part.placement.requireEmptyFunctionalOffsets ?? []).map((offset) => ({ x: offset.x, y: offset.y })),
         }
       : undefined,
-    runtimeOverrides: part.runtimeOverrides
+    stats: part.stats
       ? {
-          mass: part.runtimeOverrides.mass,
-          hpMul: part.runtimeOverrides.hpMul,
-          power: part.runtimeOverrides.power,
-          maxSpeed: part.runtimeOverrides.maxSpeed,
-          damage: part.runtimeOverrides.damage,
-          range: part.runtimeOverrides.range,
-          cooldown: part.runtimeOverrides.cooldown,
-          shootAngleDeg: part.runtimeOverrides.shootAngleDeg,
-          spreadDeg: part.runtimeOverrides.spreadDeg,
+          mass: part.stats.mass,
+          hpMul: part.stats.hpMul,
+          power: part.stats.power,
+          maxSpeed: part.stats.maxSpeed,
+          damage: part.stats.damage,
+          range: part.stats.range,
+          cooldown: part.stats.cooldown,
+          shootAngleDeg: part.stats.shootAngleDeg,
+          spreadDeg: part.stats.spreadDeg,
         }
       : undefined,
     properties: part.properties
@@ -326,11 +326,13 @@ export function parsePartDefinition(input: unknown): PartDefinition | null {
   const resolvedAnchor = anchorFromBox ?? { x: requestedAnchorX, y: requestedAnchorY };
   const placementRecord = data.placement && typeof data.placement === "object" ? (data.placement as Record<string, unknown>) : {};
 
-  const runtimeRecord = data.runtimeOverrides && typeof data.runtimeOverrides === "object"
-    ? (data.runtimeOverrides as Record<string, unknown>)
-    : data.parameters && typeof data.parameters === "object"
-      ? (data.parameters as Record<string, unknown>)
-      : {};
+  const runtimeRecord = data.stats && typeof data.stats === "object"
+    ? (data.stats as Record<string, unknown>)
+    : data.runtimeOverrides && typeof data.runtimeOverrides === "object"
+      ? (data.runtimeOverrides as Record<string, unknown>)
+      : data.parameters && typeof data.parameters === "object"
+        ? (data.parameters as Record<string, unknown>)
+        : {};
   const propertiesRecord = data.properties && typeof data.properties === "object"
     ? (data.properties as Record<string, unknown>)
     : {};
@@ -351,7 +353,7 @@ export function parsePartDefinition(input: unknown): PartDefinition | null {
       requireEmptyStructureOffsets: normalizeOffsets(placementRecord.requireEmptyStructureOffsets),
       requireEmptyFunctionalOffsets: normalizeOffsets(placementRecord.requireEmptyFunctionalOffsets),
     },
-    runtimeOverrides: {
+    stats: {
       mass: readOptionalNumber(runtimeRecord.mass),
       hpMul: readOptionalNumber(runtimeRecord.hpMul),
       power: readOptionalNumber(runtimeRecord.power),
@@ -408,10 +410,10 @@ export function parsePartDefinition(input: unknown): PartDefinition | null {
       : undefined;
   }
 
-  if (parsed.runtimeOverrides) {
-    const overrideValues = Object.values(parsed.runtimeOverrides).filter((value) => value !== undefined);
+  if (parsed.stats) {
+    const overrideValues = Object.values(parsed.stats).filter((value) => value !== undefined);
     if (overrideValues.length <= 0) {
-      parsed.runtimeOverrides = undefined;
+      parsed.stats = undefined;
     }
   }
   if (parsed.properties) {

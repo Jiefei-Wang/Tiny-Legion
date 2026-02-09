@@ -32,7 +32,7 @@ interface Blackboard {
   readonly state: BattleState;
   readonly dt: number;
   readonly desiredRange: number;
-  readonly canShootAtAngle: (componentId: ComponentId, dx: number, dy: number) => boolean;
+  readonly canShootAtAngle: (componentId: ComponentId, dx: number, dy: number, shootAngleDegOverride?: number) => boolean;
   readonly getEffectiveWeaponRange: (baseRange: number) => number;
   trace: string[];
   target: UnitInstance | null;
@@ -220,7 +220,7 @@ function createRootNode(): TreeNode {
       const aim = adjustAimForWeaponPolicy(attachment.component, baseAim);
       const aimDx = aim.x - ctx.unit.x;
       const aimDy = aim.y - ctx.unit.y;
-      const angleAligned = ctx.canShootAtAngle(attachment.component, aimDx, aimDy);
+      const angleAligned = ctx.canShootAtAngle(attachment.component, aimDx, aimDy, attachment.stats?.shootAngleDeg);
 
       const rangeAlignment = 1 - Math.min(1, Math.abs(distanceToTarget - effectiveRange * 0.72) / Math.max(1, effectiveRange));
       const leadBonus = solved ? 1.15 : 0.62;
@@ -284,7 +284,7 @@ export function evaluateCombatDecisionTree(
   dt: number,
   desiredRange: number,
   baseTarget: { x: number; y: number },
-  canShootAtAngle: (componentId: ComponentId, dx: number, dy: number) => boolean,
+  canShootAtAngle: (componentId: ComponentId, dx: number, dy: number, shootAngleDegOverride?: number) => boolean,
   getEffectiveWeaponRange: (baseRange: number) => number,
 ): CombatDecision {
   const ctx: Blackboard = {

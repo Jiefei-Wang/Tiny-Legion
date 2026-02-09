@@ -46,10 +46,10 @@ export function applyRecoilForAttachment(
     return null;
   }
   const weapon = COMPONENTS[weaponAttachment.component];
-  const damage = weaponAttachment.runtimeOverrides?.damage ?? weapon.damage;
-  const range = weaponAttachment.runtimeOverrides?.range ?? weapon.range;
-  const cooldown = weaponAttachment.runtimeOverrides?.cooldown ?? weapon.cooldown;
-  const spreadDeg = weaponAttachment.runtimeOverrides?.spreadDeg ?? weapon.spreadDeg;
+  const damage = weaponAttachment.stats?.damage ?? weapon.damage;
+  const range = weaponAttachment.stats?.range ?? weapon.range;
+  const cooldown = weaponAttachment.stats?.cooldown ?? weapon.cooldown;
+  const spreadDeg = weaponAttachment.stats?.spreadDeg ?? weapon.spreadDeg;
   if (
     weapon.type !== "weapon" ||
     weapon.recoil === undefined ||

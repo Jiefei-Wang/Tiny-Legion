@@ -74,7 +74,7 @@ function computeAirLiftAccel(template: UnitTemplate, partCatalog: ReadonlyArray<
     if (!(component in COMPONENTS)) {
       continue;
     }
-    const runtimeMass = part?.runtimeOverrides?.mass;
+    const runtimeMass = part?.stats?.mass;
     mass += runtimeMass !== undefined ? runtimeMass : COMPONENTS[component].mass;
   }
   mass = Math.max(16, mass);
@@ -90,7 +90,7 @@ function computeAirLiftAccel(template: UnitTemplate, partCatalog: ReadonlyArray<
     if (stats.type !== "engine" || stats.propulsion?.platform !== "air") {
       continue;
     }
-    const power = Math.max(0, part?.runtimeOverrides?.power ?? stats.power ?? 0);
+    const power = Math.max(0, part?.stats?.power ?? stats.power ?? 0);
     const baseAccel = (power / mass) * AIR_THRUST_ACCEL_SCALE;
     if (stats.propulsion.mode === "omni") {
       liftAccel += baseAccel;

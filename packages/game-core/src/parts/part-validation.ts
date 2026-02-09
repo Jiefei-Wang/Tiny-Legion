@@ -163,8 +163,8 @@ export function validatePartDefinitionDetailed(part: PartDefinition): PartValida
   }
   if (
     part.properties?.hasCoreTuning === true
-    && part.runtimeOverrides?.mass === undefined
-    && part.runtimeOverrides?.hpMul === undefined
+    && part.stats?.mass === undefined
+    && part.stats?.hpMul === undefined
   ) {
     warnings.push("core_tuning is enabled but neither mass nor hpMul override is set.");
   }

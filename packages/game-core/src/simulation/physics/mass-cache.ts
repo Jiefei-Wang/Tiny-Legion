@@ -11,7 +11,7 @@ export function recalcMass(unit: UnitInstance): void {
   }
   for (const attachment of unit.attachments) {
     if (attachment.alive) {
-      total += attachment.runtimeOverrides?.mass ?? COMPONENTS[attachment.component].mass;
+      total += attachment.stats?.mass ?? COMPONENTS[attachment.component].mass;
     }
   }
   unit.mass = Math.max(14, total);
