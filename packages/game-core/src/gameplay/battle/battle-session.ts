@@ -1953,13 +1953,6 @@ export class BattleSession {
       this.hooks.addLog(`${unit.name} has no weapon and is returning to base`, "warn");
     }
 
-    const base = unit.side === "player" ? this.state.playerBase : this.state.enemyBase;
-    const baseCenterX = base.x + base.w / 2;
-    const baseCenterY = base.y + base.h / 2;
-    const retreatY = unit.type === "air"
-      ? clamp(baseCenterY, AIR_MIN_Z, AIR_MAX_Z)
-      : clamp(baseCenterY, GROUND_MIN_Y, GROUND_MAX_Y);
-
     unit.facing = unit.side === "player" ? 1 : -1;
     unit.aiState = "evade";
     unit.aiDebugShouldEvade = true;
@@ -1968,6 +1961,20 @@ export class BattleSession {
     unit.aiDebugFireBlockReason = "no-weapons";
     unit.aiDebugPreferredWeaponSlot = -1;
     unit.aiDebugLeadTimeS = 0;
+
+    if (unit.type === "air") {
+      if (!unit.airDropActive) {
+        unit.airDropActive = true;
+        unit.airDropTargetY = GROUND_MIN_Y + Math.random() * (GROUND_MAX_Y - GROUND_MIN_Y);
+        unit.aiDebugDecisionPath = "weaponless-air-drop";
+      }
+      return;
+    }
+
+    const base = unit.side === "player" ? this.state.playerBase : this.state.enemyBase;
+    const baseCenterX = base.x + base.w / 2;
+    const baseCenterY = base.y + base.h / 2;
+    const retreatY = clamp(baseCenterY, GROUND_MIN_Y, GROUND_MAX_Y);
 
     const dx = baseCenterX - unit.x;
     const dy = retreatY - unit.y;
