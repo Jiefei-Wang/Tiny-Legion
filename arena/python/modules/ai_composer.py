@@ -270,6 +270,7 @@ class NeuralTargetModule(TargetModule):
             return TargetPlan(primary_target_id=None, assignments=[])
 
         policy_log_probs = ctx.setdefault("_policy_log_probs", [])
+        policy_entropies = ctx.setdefault("_policy_entropies", [])
         training_collect = bool(ctx.get("_collect_log_probs", False))
         weapon_count = max(1, int(unit.get("weapon_count", 1)))
         assignments: List[TargetAssignment] = []
@@ -288,6 +289,7 @@ class NeuralTargetModule(TargetModule):
                 idx_tensor = dist.sample()
                 if training_collect:
                     policy_log_probs.append(dist.log_prob(idx_tensor))
+                    policy_entropies.append(dist.entropy())
                 idx = int(idx_tensor.item())
             else:
                 idx = int(torch.argmax(probs).item())  # type: ignore[union-attr]
@@ -360,6 +362,7 @@ class NeuralMovementModule(MovementModule):
         descend_logit = out[2]
 
         policy_log_probs = ctx.setdefault("_policy_log_probs", [])
+        policy_entropies = ctx.setdefault("_policy_entropies", [])
         training_collect = bool(ctx.get("_collect_log_probs", False))
 
         if self.sample_actions and training_collect:
@@ -373,6 +376,9 @@ class NeuralMovementModule(MovementModule):
             policy_log_probs.append(dist_x.log_prob(sample_x))
             policy_log_probs.append(dist_y.log_prob(sample_y))
             policy_log_probs.append(descend_dist.log_prob(descend_sample))
+            policy_entropies.append(dist_x.entropy())
+            policy_entropies.append(dist_y.entropy())
+            policy_entropies.append(descend_dist.entropy())
             dir_x = float(_clampf(float(sample_x.item()), -1.0, 1.0))
             dir_y = float(_clampf(float(sample_y.item()), -1.0, 1.0))
             allow_descend = bool(descend_sample.item() >= 0.5)
@@ -416,12 +422,17 @@ class NeuralFireModule(FireModule):
     ) -> FirePlan:
         state = snapshot.get("state", snapshot)
         policy_log_probs = ctx.setdefault("_policy_log_probs", [])
+        policy_entropies = ctx.setdefault("_policy_entropies", [])
         training_collect = bool(ctx.get("_collect_log_probs", False))
+        fire_timers = unit.get("weapon_fire_timers", unit.get("weaponFireTimers", [])) or []
 
         requests: List[JsonDict] = []
         for assignment in target_plan.assignments:
             if assignment.slot >= self.max_slots:
                 continue
+            if assignment.slot < len(fire_timers):
+                if float(fire_timers[assignment.slot] or 0.0) > 0.0:
+                    continue
             target = None
             for enemy in state.get("units", []):
                 if str(enemy.get("id", "")) == assignment.target_id and enemy.get("alive", True):
@@ -446,6 +457,7 @@ class NeuralFireModule(FireModule):
             if self.sample_actions and training_collect:
                 fire_sample = fire_dist.sample()
                 policy_log_probs.append(fire_dist.log_prob(fire_sample))
+                policy_entropies.append(fire_dist.entropy())
                 should_fire = bool(fire_sample.item() >= 0.5)
             else:
                 should_fire = bool(fire_prob.item() >= 0.5)

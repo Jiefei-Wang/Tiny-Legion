@@ -377,16 +377,27 @@ function createNeuralShootAi(params: Params): ShootAiModule {
 }
 
 function createPythonOnnxShootAi(fileName: string): ShootAiModule {
-  const outputByKey = new Map<string, [number, number]>();
-  const pendingByKey = new Map<string, Promise<void>>();
+  const latestOutputBySlot = new Map<string, [number, number]>();
+  const pendingBySlot = new Map<string, Promise<void>>();
+  const errorBySlot = new Map<string, string>();
+  let hasLoggedOnnxError = false;
 
-  const makeFeatureKey = (slot: number, features: FeatureVector): string => {
-    const rounded = features.map((v) => Math.round(v * 1000) / 1000);
-    return `${slot}:${rounded.join(",")}`;
+  const computeProjectileThreat = (input: BattleAiInput): number => {
+    let threat = 0;
+    for (const projectile of input.state.projectiles) {
+      if (projectile.side === input.unit.side) {
+        continue;
+      }
+      const dx = projectile.x - input.unit.x;
+      const dy = projectile.y - input.unit.y;
+      const d2 = Math.max(1, dx * dx + dy * dy);
+      threat += 20000 / d2;
+    }
+    return clamp(threat, 0, 1);
   };
 
-  const inferAsync = (key: string, features: FeatureVector): void => {
-    if (outputByKey.has(key) || pendingByKey.has(key)) {
+  const inferAsync = (slotKey: string, features: FeatureVector): void => {
+    if (pendingBySlot.has(slotKey)) {
       return;
     }
     const job = (async () => {
@@ -399,17 +410,24 @@ function createPythonOnnxShootAi(fileName: string): ShootAiModule {
         const raw = first?.data;
         const v0 = Number(raw && raw[0] !== undefined ? raw[0] : 0);
         const v1 = Number(raw && raw[1] !== undefined ? raw[1] : 0);
-        outputByKey.set(key, [v0, v1]);
-        if (outputByKey.size > 2048) {
-          outputByKey.clear();
+        latestOutputBySlot.set(slotKey, [v0, v1]);
+        errorBySlot.delete(slotKey);
+        if (latestOutputBySlot.size > 4096) {
+          latestOutputBySlot.clear();
         }
-      } catch {
-        // Keep silent here; caller falls back to no-shot on missing output.
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "unknown onnx error";
+        errorBySlot.set(slotKey, msg);
+        if (!hasLoggedOnnxError) {
+          hasLoggedOnnxError = true;
+          // Surface once so test-arena debugging can spot runtime issues quickly.
+          console.warn(`[python-onnx-shoot] inference failed for ${fileName}: ${msg}`);
+        }
       } finally {
-        pendingByKey.delete(key);
+        pendingBySlot.delete(slotKey);
       }
     })();
-    pendingByKey.set(key, job);
+    pendingBySlot.set(slotKey, job);
   };
 
   return {
@@ -418,26 +436,37 @@ function createPythonOnnxShootAi(fileName: string): ShootAiModule {
       let bestPlan: ReturnType<ShootAiModule["decideShoot"]>["firePlan"] = null;
       const motionX = clamp(movement.ax, -1, 1);
       const motionY = clamp(movement.ay, -1, 1);
+      const threat = computeProjectileThreat(input);
+      const width = Math.max(1, Number((input.state as { battlefieldW?: number }).battlefieldW ?? BATTLEFIELD_WIDTH));
+      const height = Math.max(1, Number((input.state as { battlefieldH?: number }).battlefieldH ?? BATTLEFIELD_HEIGHT));
+      const diag = Math.hypot(width, height);
+      const maxSpeed = Math.max(1, Number((input.unit as { max_speed?: number; maxSpeed?: number }).max_speed ?? input.unit.maxSpeed ?? 1));
+      const maxSlots = 8;
       for (let slot = 0; slot < input.unit.weaponAttachmentIds.length; slot += 1) {
         const base = buildShootFeatures(input, target, slot);
         if (!base.plan) {
           continue;
         }
+        const fireTimers = input.unit.weaponFireTimers ?? [];
+        if ((fireTimers[slot] ?? 0) > 0) {
+          continue;
+        }
         const attack = target.rankedTargets[0];
-        const dx = base.plan.aim.x - input.unit.x;
-        const dy = base.plan.aim.y - input.unit.y;
+        const tx = attack?.x ?? target.attackPoint.x;
+        const ty = attack?.y ?? target.attackPoint.y;
+        const dx = tx - input.unit.x;
+        const dy = ty - input.unit.y;
         const distance = Math.hypot(dx, dy);
         const cooldownReady = (input.unit.weaponFireTimers[slot] ?? 0) <= 0 ? 1 : 0;
-        const readyChargeNorm = clamp((input.unit.weaponReadyCharges[slot] ?? 0) / 4, 0, 4);
-        const targetDx = clamp(dx / Math.max(1, BATTLEFIELD_WIDTH), -2, 2);
-        const targetDy = clamp(dy / Math.max(1, BATTLEFIELD_HEIGHT), -2, 2);
-        const targetDist = clamp(distance / Math.hypot(BATTLEFIELD_WIDTH, BATTLEFIELD_HEIGHT), 0, 2);
-        const targetVx = clamp((attack?.vx ?? 0) / 320, -3, 3);
-        const targetVy = clamp((attack?.vy ?? 0) / 320, -3, 3);
-        const threat = nearestThreat(input);
+        const readyChargeNorm = clamp((input.unit.weaponReadyCharges[slot] ?? 0) / 3, 0, 4);
+        const targetDx = clamp(dx / width, -2, 2);
+        const targetDy = clamp(dy / height, -2, 2);
+        const targetDist = clamp(distance / Math.max(1, diag), 0, 2);
+        const targetVx = clamp((attack?.vx ?? 0) / maxSpeed, -3, 3);
+        const targetVy = clamp((attack?.vy ?? 0) / maxSpeed, -3, 3);
         const features: FeatureVector = [
           1,
-          clamp(slot / Math.max(1, input.unit.weaponAttachmentIds.length), 0, 1),
+          clamp(slot / maxSlots, 0, 1),
           cooldownReady,
           readyChargeNorm,
           targetDx,
@@ -449,10 +478,13 @@ function createPythonOnnxShootAi(fileName: string): ShootAiModule {
           motionY,
           clamp(threat, 0, 1),
         ];
-        const key = makeFeatureKey(slot, features);
-        inferAsync(key, features);
-        const out = outputByKey.get(key);
+        const slotKey = `${input.unit.id}:${slot}`;
+        inferAsync(slotKey, features);
+        const out = latestOutputBySlot.get(slotKey);
         if (!out) {
+          if (errorBySlot.has(slotKey)) {
+            continue;
+          }
           continue;
         }
         const fireProb = sigmoid(out[0]);
@@ -477,9 +509,18 @@ function createPythonOnnxShootAi(fileName: string): ShootAiModule {
         }
       }
       if (!bestPlan) {
+        let blockedReason = "onnx-pending-or-no-shot";
+        for (let slot = 0; slot < input.unit.weaponAttachmentIds.length; slot += 1) {
+          const slotKey = `${input.unit.id}:${slot}`;
+          const err = errorBySlot.get(slotKey);
+          if (err) {
+            blockedReason = `onnx-error:${err}`;
+            break;
+          }
+        }
         return {
           firePlan: null,
-          fireBlockedReason: "onnx-pending-or-no-shot",
+          fireBlockedReason: blockedReason,
           debugTag: "shoot.python-onnx-no-plan",
         };
       }

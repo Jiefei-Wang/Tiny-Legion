@@ -381,6 +381,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     | "markEmptyStructure"
     | "markEmptyFunctional";
   type PartOpenFilter = "all" | "structure" | "control" | "engine" | "weapon" | "loader" | "ammo";
+  type EditorScreenMode = "templateEditor" | "partEditor";
   type PartDesignerSlot = {
     occupiesFunctionalSpace: boolean;
     occupiesStructureSpace: boolean;
@@ -397,6 +398,12 @@ export function bootstrap(options: BootstrapOptions = {}): void {
   let editorGridRows = 10;
   let editorWeaponRotateQuarter: 0 | 1 | 2 | 3 = 0;
   let editorFunctionalGroupSeq = 1;
+  let templateEditorGridPanX = 0;
+  let templateEditorGridPanY = 0;
+  let partEditorGridPanX = 0;
+  let partEditorGridPanY = 0;
+  let templateEditorViewVisited = false;
+  let partEditorViewVisited = false;
   let editorGridPanX = 0;
   let editorGridPanY = 0;
   let editorDragActive = false;
@@ -468,6 +475,42 @@ export function bootstrap(options: BootstrapOptions = {}): void {
   const isUnlimitedResources = (): boolean => debugUnlimitedResources;
   const isDebugVisual = (): boolean => debugVisual;
   const isDebugTargetLines = (): boolean => debugTargetLines;
+  const isEditorScreenMode = (mode: ScreenMode): mode is EditorScreenMode => mode === "templateEditor" || mode === "partEditor";
+  const saveEditorViewForScreen = (mode: ScreenMode): void => {
+    if (mode === "templateEditor") {
+      templateEditorGridPanX = editorGridPanX;
+      templateEditorGridPanY = editorGridPanY;
+      return;
+    }
+    if (mode === "partEditor") {
+      partEditorGridPanX = editorGridPanX;
+      partEditorGridPanY = editorGridPanY;
+    }
+  };
+  const loadEditorViewForScreen = (mode: ScreenMode): void => {
+    if (mode === "templateEditor") {
+      editorGridPanX = templateEditorGridPanX;
+      editorGridPanY = templateEditorGridPanY;
+      return;
+    }
+    if (mode === "partEditor") {
+      editorGridPanX = partEditorGridPanX;
+      editorGridPanY = partEditorGridPanY;
+    }
+  };
+  const recenterEditorViewForScreen = (mode: EditorScreenMode): void => {
+    if (mode === "templateEditor") {
+      templateEditorGridPanX = 0;
+      templateEditorGridPanY = 0;
+    } else {
+      partEditorGridPanX = 0;
+      partEditorGridPanY = 0;
+    }
+    if (screen === mode) {
+      editorGridPanX = 0;
+      editorGridPanY = 0;
+    }
+  };
   const getCanvasDisplayWidth = (): number => Math.max(1, canvas.clientWidth || BATTLEFIELD_WIDTH);
   const getCanvasDisplayHeight = (): number => Math.max(1, canvas.clientHeight || BATTLEFIELD_HEIGHT);
   const toDisplayX = (worldX: number): number => worldX * (getCanvasDisplayWidth() / Math.max(1, canvas.width));
@@ -508,9 +551,13 @@ export function bootstrap(options: BootstrapOptions = {}): void {
 
   const applyBattleViewTransform = (): void => {
     if (!isBattleScreen()) {
+      canvas.style.width = "100%";
+      canvas.style.height = "100%";
       canvas.style.transform = "translate(0px, 0px) scale(1)";
       return;
     }
+    canvas.style.width = `${canvas.width}px`;
+    canvas.style.height = `${canvas.height}px`;
     clampBattleViewOffsets();
     canvas.style.transform = `translate(${battleViewOffsetX}px, ${battleViewOffsetY}px) scale(${battleViewScale})`;
   };
@@ -1538,29 +1585,8 @@ export function bootstrap(options: BootstrapOptions = {}): void {
 
   const refreshPartsFromStore = async (): Promise<void> => {
     const defaultParts = await fetchDefaultPartsFromStore();
-    const normalizedDefaults = (() => {
-      const hasExplicitByBase = new Set<string>();
-      for (const part of defaultParts) {
-        const isImplicit = (part.tags ?? []).includes("implicit");
-        const isFunctionalImplicitFallback = isImplicit && part.layer === "functional" && part.id === part.baseComponent;
-        if (!isFunctionalImplicitFallback) {
-          hasExplicitByBase.add(part.baseComponent);
-        }
-      }
-      return defaultParts.filter((part) => {
-        const isImplicit = (part.tags ?? []).includes("implicit");
-        const isFunctionalImplicitFallback = isImplicit && part.layer === "functional" && part.id === part.baseComponent;
-        if (!isFunctionalImplicitFallback) {
-          return true;
-        }
-        return !hasExplicitByBase.has(part.baseComponent);
-      });
-    })();
-    if (normalizedDefaults.length > 0) {
-      parts.splice(0, parts.length, ...normalizedDefaults);
-    } else {
-      parts.splice(0, parts.length, ...createDefaultPartDefinitions());
-    }
+    const explicitDefaults = defaultParts.filter((part) => !((part.tags ?? []).includes("implicit")));
+    parts.splice(0, parts.length, ...explicitDefaults);
     const applyMaterialOverridesFromParts = (): void => {
       const materialIds: MaterialId[] = ["basic", "reinforced", "ceramic", "reactive", "combined"];
       for (const materialId of materialIds) {
@@ -1713,7 +1739,21 @@ export function bootstrap(options: BootstrapOptions = {}): void {
   };
 
   const setScreen = (next: ScreenMode): void => {
+    const prev = screen;
+    if (isEditorScreenMode(prev)) {
+      saveEditorViewForScreen(prev);
+    }
     screen = next;
+    if (isEditorScreenMode(next)) {
+      if (next === "templateEditor" && !templateEditorViewVisited) {
+        recenterEditorViewForScreen("templateEditor");
+        templateEditorViewVisited = true;
+      } else if (next === "partEditor" && !partEditorViewVisited) {
+        recenterEditorViewForScreen("partEditor");
+        partEditorViewVisited = true;
+      }
+      loadEditorViewForScreen(next);
+    }
     basePanel.classList.toggle("hidden", next !== "base");
     mapPanel.classList.toggle("hidden", next !== "map");
     battlePanel.classList.toggle("hidden", next !== "battle");
@@ -2199,18 +2239,19 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     `;
 
     if (debugVisual) {
+      const isTestArenaActive = battle.getState().active && battle.getState().nodeId === testArenaNode.id;
       const aiRows = battle.getState().units
-        .filter((unit) => unit.side === "enemy" && unit.alive)
-        .slice(0, 6)
+        .filter((unit) => unit.alive && (isTestArenaActive ? true : unit.side === "enemy"))
+        .slice(0, isTestArenaActive ? 12 : 6)
         .map((unit) => {
           const angleDeg = (unit.aiDebugLastAngleRad * 180 / Math.PI).toFixed(1);
           const target = unit.aiDebugTargetId ?? "base";
           const slot = unit.aiDebugPreferredWeaponSlot >= 0 ? `${unit.aiDebugPreferredWeaponSlot + 1}` : "-";
           const lead = unit.aiDebugLeadTimeS > 0 ? `${unit.aiDebugLeadTimeS.toFixed(2)}s` : "-";
           const blocked = unit.aiDebugFireBlockReason ?? "none";
-          return `<div class="small">${unit.name}: ${unit.aiState}${unit.aiDebugShouldEvade ? "(evade)" : ""}, target=${target}, slot=${slot}, angle=${angleDeg}deg, range=${unit.aiDebugLastRange.toFixed(0)}, lead=${lead}, block=${blocked}, v=(${unit.vx.toFixed(1)},${unit.vy.toFixed(1)}), tree=${unit.aiDebugDecisionPath}</div>`;
+          return `<div class="small">[${unit.side}] ${unit.name}: ${unit.aiState}${unit.aiDebugShouldEvade ? "(evade)" : ""}, target=${target}, slot=${slot}, angle=${angleDeg}deg, range=${unit.aiDebugLastRange.toFixed(0)}, lead=${lead}, block=${blocked}, v=(${unit.vx.toFixed(1)},${unit.vy.toFixed(1)}), tree=${unit.aiDebugDecisionPath}</div>`;
         }).join("");
-      weaponHud.innerHTML += `<div class="ai-debug"><strong>AI Live Debug</strong>${aiRows || `<div class="small">No active enemy units.</div>`}</div>`;
+      weaponHud.innerHTML += `<div class="ai-debug"><strong>AI Live Debug</strong>${aiRows || `<div class="small">No active units.</div>`}</div>`;
     }
   };
 
@@ -2235,7 +2276,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
   const getEditorGridRect = (): { x: number; y: number; cell: number } => {
     const cell = 32;
     const x = Math.floor(canvas.width * 0.5 - (editorGridCols * cell) / 2 + editorGridPanX);
-    const y = Math.floor(canvas.height * 0.54 - (editorGridRows * cell) / 2 + editorGridPanY);
+    const y = Math.floor(canvas.height * 0.5 - (editorGridRows * cell) / 2 + editorGridPanY);
     return { x, y, cell };
   };
 
@@ -2535,7 +2576,21 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       });
     }
     if (editorLayer === "functional") {
-      return parts.filter((part) => part.layer === "functional").map((part) => {
+      const functionalParts = parts.filter((part) => part.layer === "functional");
+      const hasExplicitByBase = new Set<ComponentId>();
+      for (const part of functionalParts) {
+        const isImplicitFallback = (part.tags ?? []).includes("implicit") && part.id === part.baseComponent;
+        if (!isImplicitFallback) {
+          hasExplicitByBase.add(part.baseComponent);
+        }
+      }
+      return functionalParts.filter((part) => {
+        const isImplicitFallback = (part.tags ?? []).includes("implicit") && part.id === part.baseComponent;
+        if (!isImplicitFallback) {
+          return true;
+        }
+        return !hasExplicitByBase.has(part.baseComponent);
+      }).map((part) => {
         const stats = COMPONENTS[part.baseComponent];
         const rotateHint = isDirectionalPart(part) ? " | Supports 90deg rotate" : "";
         const footprint = getPartFootprintOffsets(part, 0);
@@ -4270,6 +4325,9 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         if (!source) {
           return;
         }
+        if (templateId !== editorDraft.id) {
+          recenterEditorViewForScreen("templateEditor");
+        }
         editorDraft = cloneTemplate(source);
         loadTemplateIntoEditorSlots(editorDraft);
         editorDeleteMode = false;
@@ -4291,6 +4349,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         if (!source) {
           return;
         }
+        recenterEditorViewForScreen("templateEditor");
         editorDraft = makeCopyTemplate(source);
         loadTemplateIntoEditorSlots(editorDraft);
         editorDeleteMode = false;
@@ -4331,6 +4390,9 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         if (editorDraft.id === templateId) {
           const fallback = templates[0];
           if (fallback) {
+            if (fallback.id !== templateId) {
+              recenterEditorViewForScreen("templateEditor");
+            }
             editorDraft = cloneTemplate(fallback);
             loadTemplateIntoEditorSlots(editorDraft);
             editorTemplateDialogSelectedId = fallback.id;
@@ -4395,6 +4457,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       editorWeaponRotateQuarter = 0;
       editorTemplateDialogOpen = false;
       editorTemplateDialogSelectedId = editorDraft.id;
+      recenterEditorViewForScreen("templateEditor");
       loadTemplateIntoEditorSlots({
         ...editorDraft,
         structure: [{ material: "basic" }, { material: "basic" }, { material: "basic" }],
@@ -4468,6 +4531,9 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         if (!source) {
           return;
         }
+        if (partId !== partDesignerDraft.id) {
+          recenterEditorViewForScreen("partEditor");
+        }
         partDesignerSelectedId = partId;
         partDesignerDialogOpen = false;
         loadPartIntoDesignerSlots(source);
@@ -4485,6 +4551,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         if (!source) {
           return;
         }
+        recenterEditorViewForScreen("partEditor");
         const copy = makeCopyPart(source);
         partDesignerSelectedId = copy.id;
         partDesignerDialogOpen = false;
@@ -4523,6 +4590,9 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         if (partDesignerDraft.id === partId) {
           const fallback = parts[0];
           if (fallback) {
+            if (fallback.id !== partId) {
+              recenterEditorViewForScreen("partEditor");
+            }
             partDesignerSelectedId = fallback.id;
             loadPartIntoDesignerSlots(fallback);
           }
@@ -5024,6 +5094,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       partDesignerSelectedId = partDesignerDraft.id;
       partDesignerTool = "select";
       partDesignerDialogOpen = false;
+      recenterEditorViewForScreen("partEditor");
       loadPartIntoDesignerSlots(partDesignerDraft);
       renderPanels();
     });
@@ -5470,6 +5541,13 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       canvas.style.cursor = "grabbing";
       return;
     }
+    if (isBattleScreen() && battle.getState().active && battle.getState().nodeId === testArenaNode.id) {
+      // Test Arena is for AI-vs-AI validation; avoid accidental player manual-control lock.
+      battle.setAim(x, y);
+      battle.clearControlSelection();
+      renderPanels();
+      return;
+    }
     battle.handleLeftPointerDown(x, y);
     renderPanels();
   });
@@ -5725,6 +5803,34 @@ export function bootstrap(options: BootstrapOptions = {}): void {
 
   let panelBucket = -1;
   let loopUpdateBusy = false;
+  const testArenaLastBlockedByUnit = new Map<string, { reason: string; atMs: number }>();
+
+  const logTestArenaFireBlockedReasons = (): void => {
+    const state = battle.getState();
+    if (!(state.active && state.nodeId === testArenaNode.id)) {
+      if (testArenaLastBlockedByUnit.size > 0) {
+        testArenaLastBlockedByUnit.clear();
+      }
+      return;
+    }
+    const nowMs = Date.now();
+    for (const unit of state.units) {
+      if (!unit.alive || !canOperate(unit)) {
+        continue;
+      }
+      const reason = unit.aiDebugFireBlockReason;
+      if (!reason || reason === "none") {
+        continue;
+      }
+      const key = unit.id;
+      const prev = testArenaLastBlockedByUnit.get(key);
+      if (prev && prev.reason === reason && (nowMs - prev.atMs) < 1500) {
+        continue;
+      }
+      testArenaLastBlockedByUnit.set(key, { reason, atMs: nowMs });
+      addLog(`[AI block] ${unit.side}:${unit.name} reason=${reason} tree=${unit.aiDebugDecisionPath || "n/a"}`, "warn");
+    }
+  };
 
   let loopUpdate: (dt: number) => void | Promise<void> = async (dt: number): Promise<void> => {
     if (!running) {
@@ -5735,9 +5841,11 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     }
     const handledByExternalBridge = await runExternalPythonBridgeStep(dt);
     if (handledByExternalBridge) {
+      logTestArenaFireBlockedReasons();
       return;
     }
     battle.update(dt, keys);
+    logTestArenaFireBlockedReasons();
     followSelectedUnitWithCamera();
   };
 

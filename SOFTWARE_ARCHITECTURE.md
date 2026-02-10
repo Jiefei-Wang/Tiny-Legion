@@ -454,6 +454,8 @@ Editor UX implementation details:
 - Editor has `Save` (persist to user templates) and `Save to Default` (persist to default templates); both paths run the same template normalization before writing JSON.
 - Template ID is internal/auto-managed for new and copied templates (no manual ID field in editor UI).
 - Editor templates persist coordinates per placed part (`x`,`y`, origin `(0,0)`; negatives allowed).
+- Template Editor and Part Editor maintain separate grid pan/view state, so tab switching restores each editor's last viewport.
+- Editor grid viewport defaults to screen-centered origin and only recenters when loading a different template/part.
 - Editor functional attachments persist `partId` + `component` for runtime compatibility and part-catalog lookup.
 - Weapon functional entries may carry `rotateQuarter` metadata (0..3, each step = 90deg).
 - Heavy-shot weapons use grouped multi-cell occupancy in editor and rotate footprint with `rotateQuarter`.

@@ -167,8 +167,16 @@ Python training script:
 
 - `arena/python/train.py`
   - Builds baseline composer then replaces selected modules with neural modules.
-  - Uses delayed reward updates (10s chunks) from gas-value differential.
+  - Runs behavior-cloning warm start from baseline trajectories before policy-gradient updates.
+  - Uses delayed reward updates from gas-value differential with reward clipping, entropy bonus, and normalized advantage.
+  - Runs periodic deterministic evaluation and supports best-checkpoint saving.
   - Saves `.pt` and auto-converts each trained component to `.onnx` plus `*.component.json` metadata.
+
+Stable fire-module training example:
+
+```bash
+python arena/python/train.py --episodes 200 --max-steps-per-episode 3000 --chunk-seconds 1.0 --learning-rate 5e-4 --bc-episodes 6 --bc-epochs 3 --bc-steps-per-episode 500 --eval-every-episodes 20 --eval-episodes 8 --save-best-only true
+```
 
 Convert an existing checkpoint manually:
 

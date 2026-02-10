@@ -84,6 +84,8 @@ Current implementation includes dedicated in-app editor tabs where the player ca
 - Functional parts may declare `directional: true`; only directional parts show direction UI and use rotation controls. Parts without it are undirectional by default.
 - Functional placement supports `center place on click` mode in template editor (developer/user toggle).
 - Editor canvas uses a resizable grid up to `10x10` with left-drag panning.
+- Template Editor and Part Editor now keep independent pan/view memory; switching tabs restores each editor's last view.
+- Editor view defaults to centered origin (`0,0`) on first load and recenters only when loading a different template/part.
 - Battle rendering and hitboxes now honor stored structure/display/functional coordinates instead of compacting to a fixed index grid.
 - Part composition focuses on physical/functional stats; per-part gas contribution is not used in current editor stage.
 - Save templates from editor to user storage (`Save`) or to default storage (`Save to Default`) and deploy them in battle.
