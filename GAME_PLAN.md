@@ -278,7 +278,7 @@ Recommended starter values:
 - 2D battlefield with left-to-right front.
   - Left: player side/base
   - Right: enemy side/base/buildings
-- Battle simulation defaults to a logical battlefield size of `1280x720` (shared by browser runtime and headless/arena runs).
+- Battle simulation defaults to a logical battlefield size of `2000x1000` (shared by browser runtime and headless/arena runs).
 - Test Arena can override battlefield simulation size at runtime; this changes combat space dimensions, not just display scale.
 - Test Arena zoom only changes display scale (camera/view transform), not simulation dimensions.
 - Ground units move freely on X and Y axes inside the ground combat zone.
@@ -574,6 +574,7 @@ The current playable implementation already includes:
   - Loader `storeCapacity` allows charge overfill (burst behavior), with minimum burst interval floor of `0.5s`.
   - Fire commands sent to a cooling/reloading weapon slot are ignored (no projectile and no recoil/knockback side effects).
 - Projectile gravity, range-limited lifetime, and debris persistence.
+- Ground-vehicle-fired non-tracking projectiles now auto-terminate after falling `200` Y-units below their firing Y origin only when the shot was fired above horizontal (`initialVy < 0`); downward-fired shots are excluded. Termination triggers blast when explosive data exists.
 - AI split into targeting, movement, and shooting modules with a shared composite interface in `packages/game-core/src/ai/composite/`.
 - Baseline combat AI now runs through `createCompositeAiController(...)` (target -> movement -> shoot), and the legacy decision-tree entrypoint is kept as a compatibility wrapper.
 - Target module returns ranked targets (sorted by importance); movement consumes ranked targets + battlefield state; shooting consumes ranked targets + movement intent + weapon readiness.

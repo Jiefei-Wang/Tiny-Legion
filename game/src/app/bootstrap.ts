@@ -1,5 +1,5 @@
 import { armyCap } from "../config/balance/commander.ts";
-import { BATTLEFIELD_HEIGHT, BATTLEFIELD_WIDTH } from "../config/balance/battlefield.ts";
+import { BATTLEFIELD_HEIGHT, BATTLEFIELD_WIDTH, DEFAULT_GROUND_HEIGHT_RATIO } from "../config/balance/battlefield.ts";
 import { applyStrategicEconomyTick } from "../gameplay/map/garrison-upkeep.ts";
 import { createMapNodes } from "../gameplay/map/node-graph.ts";
 import { settleGarrison as settleNodeGarrison, setNodeOwner } from "../gameplay/map/occupation.ts";
@@ -271,7 +271,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
   let testArenaEnemyCount = 2;
   let testArenaBattlefieldWidth = BATTLEFIELD_WIDTH;
   let testArenaBattlefieldHeight = BATTLEFIELD_HEIGHT;
-  let testArenaGroundHeight = Math.floor(BATTLEFIELD_HEIGHT - (BATTLEFIELD_HEIGHT * (250 / 720)));
+  let testArenaGroundHeight = Math.floor(BATTLEFIELD_HEIGHT * DEFAULT_GROUND_HEIGHT_RATIO);
   let testArenaSpawnTemplateId: string | null = null;
   let testArenaInvinciblePlayer = false;
   type TestArenaAiPreset = "baseline" | "composite-baseline" | "composite-neural-default" | "composite-latest-trained";
@@ -3375,7 +3375,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
 
   const applyBattlefieldDefaults = (): void => {
     battle.setBattlefieldSize(BATTLEFIELD_WIDTH, BATTLEFIELD_HEIGHT);
-    battle.setGroundHeight(Math.floor(BATTLEFIELD_HEIGHT - (BATTLEFIELD_HEIGHT * (250 / 720))));
+    battle.setGroundHeight(Math.floor(BATTLEFIELD_HEIGHT * DEFAULT_GROUND_HEIGHT_RATIO));
     applyBattleViewTransform();
   };
 

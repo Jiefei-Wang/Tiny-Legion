@@ -318,6 +318,9 @@ export interface Projectile {
   ttl: number;
   sourceId: string;
   side: Side;
+  sourceUnitType: UnitType;
+  fireOriginY: number;
+  initialVy: number;
   sourceWeaponAttachmentId: number | null;
   damage: number;
   hitImpulse: number;

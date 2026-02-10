@@ -1,4 +1,5 @@
 import { armyCap } from "../../config/balance/commander.ts";
+import { DEFAULT_GROUND_HEIGHT_RATIO } from "../../config/balance/battlefield.ts";
 import { COMPONENTS } from "../../config/balance/weapons.ts";
 import { MATERIALS } from "../../config/balance/materials.ts";
 import {
@@ -24,10 +25,9 @@ import { createDefaultPartDefinitions, mergePartCatalogs } from "../../parts/par
 import type { BattleAiController, CombatDecision } from "../../ai/composite/composite-ai.ts";
 import type { BattleState, CommandResult, FireBlockDetail, FireRequest, KeyState, MapNode, PartDefinition, Side, UnitCommand, UnitInstance, UnitTemplate } from "../../types.ts";
 
-const AIR_MIN_Z_RATIO = 70 / 720;
-const AIR_GROUND_GAP_RATIO = 30 / 720;
-const DEFAULT_GROUND_HEIGHT_RATIO = (720 - 250) / 720;
-const AIR_TARGET_Z_TOLERANCE_RATIO = 22 / 720;
+const AIR_MIN_Z_RATIO = 70 / 1000;
+const AIR_GROUND_GAP_RATIO = 30 / 1000;
+const AIR_TARGET_Z_TOLERANCE_RATIO = 22 / 1000;
 
 export const BATTLE_SALVAGE_REFUND_FACTOR = 0.6;
 const AIR_MIN_LIFT_SPEED = 100;
@@ -35,6 +35,7 @@ const AIR_HOLD_GRAVITY = 110;
 const AIR_DROP_GRAVITY = 210;
 const AIR_DROP_SPEED_CAP = 260;
 const AIR_THRUST_ACCEL_SCALE = 70;
+const GROUND_PROJECTILE_MAX_DROP_BELOW_FIRE_Y = 200;
 
 export interface BattleHooks {
   addLog: (text: string, tone?: "good" | "warn" | "bad" | "") => void;
@@ -682,6 +683,17 @@ export class BattleSession {
       if (projectile.traveledDistance >= projectile.maxDistance) {
         projectile.ttl = -1;
       }
+      const exceededGroundDropLimit = projectile.sourceUnitType === "ground" &&
+        projectile.weaponClass !== "tracking" &&
+        projectile.initialVy < 0 &&
+        projectile.y >= projectile.fireOriginY + GROUND_PROJECTILE_MAX_DROP_BELOW_FIRE_Y;
+      if (exceededGroundDropLimit) {
+        if (projectile.explosiveBlastRadius > 0) {
+          this.applyExplosiveBlast(projectile, null);
+        }
+        projectile.ttl = -1;
+        continue;
+      }
       if (projectile.ttl <= 0 && projectile.explosiveFuse === "timed" && projectile.explosiveBlastRadius > 0) {
         this.applyExplosiveBlast(projectile, null);
       }
@@ -924,9 +936,9 @@ export class BattleSession {
   }
 
   private createDefaultBase(side: Side): { x: number; y: number; w: number; h: number } {
-    const w = clamp(Math.round(this.canvas.width * (38 / 1280)), 28, 70);
-    const h = clamp(Math.round(this.canvas.height * (160 / 720)), 90, Math.floor(this.canvas.height * 0.5));
-    const y = clamp(Math.round(this.canvas.height * (180 / 720)), 18, Math.max(18, this.canvas.height - h - 18));
+    const w = clamp(Math.round(this.canvas.width * (38 / 2000)), 28, 70);
+    const h = clamp(Math.round(this.canvas.height * (160 / 1000)), 90, Math.floor(this.canvas.height * 0.5));
+    const y = clamp(Math.round(this.canvas.height * (300 / 1000)), 18, Math.max(18, this.canvas.height - h - 18));
     const x = side === "player" ? 18 : this.canvas.width - w - 18;
     return { x, y, w, h };
   }
@@ -1296,6 +1308,9 @@ export class BattleSession {
       ttl,
       sourceId: unit.id,
       side: unit.side,
+      sourceUnitType: unit.type,
+      fireOriginY: weaponOriginY,
+      initialVy: uy * projectileSpeed,
       sourceWeaponAttachmentId: attachmentId,
       damage: shot.damage,
       hitImpulse: shot.impulse,

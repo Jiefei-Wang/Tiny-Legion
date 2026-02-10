@@ -20,7 +20,7 @@ If you are a new coding agent/session, read this file first, then read:
 ## Current Runtime/Feature Reality
 
 - Battle model: ground XY zone + air XZ abstraction
-- Canonical/default logical battlefield size is `1280x720` (shared across browser runtime and headless/arena)
+- Canonical/default logical battlefield size is `2000x1000` (shared across browser runtime and headless/arena)
 - Test Arena can override runtime battlefield simulation size (`W`/`H`) and ground height from UI; zoom remains display-only
 - Unit layers: structure + functional + optional display layer
 - AI modules split by concern:

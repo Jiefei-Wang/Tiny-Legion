@@ -33,7 +33,7 @@ Implemented gameplay architecture highlights:
 - `Test Arena` is a dedicated top-level tab for debug battles (not part of the map node list)
 - Display layer visibility is debug-controlled (top-bar `Debug Options`) and defaults to OFF in battle runtime
 - In-app debug options plus local runtime log pipeline (`/__debug/*` -> `game/.debug/runtime.log`)
-- Battle simulation defaults are centralized in shared balance config (`BATTLEFIELD_WIDTH=1280`, `BATTLEFIELD_HEIGHT=720`) and reused by browser + headless/arena paths
+- Battle simulation defaults are centralized in shared balance config (`BATTLEFIELD_WIDTH=2000`, `BATTLEFIELD_HEIGHT=1000`) and reused by browser + headless/arena paths
 - Test Arena supports runtime battlefield simulation-size overrides (`W`/`H`) and ground-height tuning in the browser app; display zoom remains a separate view-only transform
 - Strategic layer is turn-based: **Next Round** advances gas economy, construction, and resolves campaign battles (Test Arena skips round resolution)
 
@@ -421,6 +421,7 @@ Editor UX implementation details:
 - Weapon firing clamps out-of-angle aim to the nearest allowed boundary before projectile spawn/cooldown.
 - Runtime mobility derives from current engine power and current mass (power-to-mass), recalculated during battle updates.
 - Runtime mobility also applies per-engine max-speed caps; multiple-engine cap is computed as a power-weighted average, then used as a hard upper bound on computed speed.
+- Projectile runtime state now carries firing origin metadata (`sourceUnitType`, `fireOriginY`, `initialVy`) so ground-vehicle non-tracking shots fired above horizontal can be terminated when they fall too far below the firing origin, while downward-fired shots remain unaffected.
 - Air units compute lift from air propulsion thrust (`jetEngine` omni, `propeller` directional cone) and compare against gravity hold.
 - Air movement reserves thrust for vertical hold first, then spends remaining thrust for horizontal/intentional altitude movement.
 - If lift becomes critically low, units transition into an air-drop crash path, pushing horizontally toward base; propeller aircraft can use remaining lift to slow descent during the crash, otherwise they fall at full crash gravity.

@@ -1,2 +1,3 @@
-export const BATTLEFIELD_WIDTH = 1280;
-export const BATTLEFIELD_HEIGHT = 720;
+export const BATTLEFIELD_WIDTH = 2000;
+export const BATTLEFIELD_HEIGHT = 1000;
+export const DEFAULT_GROUND_HEIGHT_RATIO = 400 / 1000;
