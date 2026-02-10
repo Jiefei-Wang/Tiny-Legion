@@ -614,6 +614,7 @@ function partStorePlugin() {
 function arenaModelPlugin() {
   const runsDir = resolve(process.cwd(), "..", "arena", ".arena-data", "runs");
   const pythonModelsDir = resolve(process.cwd(), "..", "arena", ".arena-data", "python-models");
+  const ortDistDir = resolve(process.cwd(), "node_modules", "onnxruntime-web", "dist");
   type ModuleEntry = {
     id: string;
     label: string;
@@ -625,6 +626,42 @@ function arenaModelPlugin() {
   return {
     name: "arena-models",
     configureServer(server: import("vite").ViteDevServer) {
+      server.middlewares.use("/__arena/ort", (req, res) => {
+        if (req.method !== "GET") {
+          res.statusCode = 405;
+          res.end("method not allowed");
+          return;
+        }
+        const rawUrl = req.url ?? "";
+        const path = rawUrl.split("?")[0] ?? "";
+        const fileName = decodeURIComponent(path.split("/").filter(Boolean).at(-1) ?? "");
+        if (!/^ort-wasm[-a-zA-Z0-9._]*\.(wasm|mjs|js)$/.test(fileName)) {
+          res.statusCode = 400;
+          res.end("invalid file name");
+          return;
+        }
+        const filePath = resolve(ortDistDir, fileName);
+        if (!existsSync(filePath)) {
+          res.statusCode = 404;
+          res.end("not found");
+          return;
+        }
+        try {
+          const buffer = readFileSync(filePath);
+          if (fileName.endsWith(".wasm")) {
+            res.setHeader("content-type", "application/wasm");
+          } else if (fileName.endsWith(".mjs") || fileName.endsWith(".js")) {
+            res.setHeader("content-type", "text/javascript; charset=utf-8");
+          } else {
+            res.setHeader("content-type", "application/octet-stream");
+          }
+          res.end(buffer);
+        } catch {
+          res.statusCode = 500;
+          res.end("failed to read onnxruntime-web asset");
+        }
+      });
+
       server.middlewares.use("/__arena/python-models", (req, res) => {
         if (req.method !== "GET") {
           res.statusCode = 405;

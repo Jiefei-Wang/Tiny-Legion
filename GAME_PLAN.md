@@ -83,7 +83,9 @@ Current implementation includes dedicated in-app editor tabs where the player ca
 - Functional placement now uses part footprints from part catalog definitions (instead of hardcoded component-only footprints), and footprint rotation follows `rotateQuarter`.
 - Functional parts may declare `directional: true`; only directional parts show direction UI and use rotation controls. Parts without it are undirectional by default.
 - Functional placement supports `center place on click` mode in template editor (developer/user toggle).
-- Editor canvas uses a resizable grid up to `10x10` with left-drag panning.
+- Editor canvas uses a resizable grid up to `10x10` with right-drag panning.
+- Editor viewport input now uses right-drag panning (instead of left-drag), and mouse-wheel zoom is supported in both Template Editor and Part Editor.
+- Battle, Template Editor, and Part Editor each render to their own canvas while sharing the same viewport window.
 - Template Editor and Part Editor now keep independent pan/view memory; switching tabs restores each editor's last view.
 - Editor view defaults to centered origin (`0,0`) on first load and recenters only when loading a different template/part.
 - Battle rendering and hitboxes now honor stored structure/display/functional coordinates instead of compacting to a fixed index grid.

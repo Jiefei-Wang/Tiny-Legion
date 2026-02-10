@@ -163,6 +163,8 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         <section class="center-panel card">
           <div id="battleCanvasViewport" class="battle-canvas-viewport">
             <canvas id="battleCanvas" width="${BATTLEFIELD_WIDTH}" height="${BATTLEFIELD_HEIGHT}"></canvas>
+            <canvas id="templateEditorCanvas" class="hidden"></canvas>
+            <canvas id="partEditorCanvas" class="hidden"></canvas>
           </div>
           <div id="weaponHud" class="weapon-hud small"></div>
         </section>
@@ -183,8 +185,8 @@ export function bootstrap(options: BootstrapOptions = {}): void {
               - Move mouse to aim selected unit<br />
               - Hold left click: fire all manually controlled weapons<br />
               - Arrow keys: pan battlefield viewport<br />
-              - Right-click drag: pan battlefield viewport<br />
-              - Mouse wheel: zoom battlefield viewport (wheel up=in, down=out)<br />
+              - Right-click drag: pan viewport (battle/editor)<br />
+              - Mouse wheel: zoom viewport (battle/editor, wheel up=in, down=out)<br />
               - WASD: move selected unit<br />
               - Space: flip selected unit direction<br />
               - 1..9: toggle manual control for that weapon slot<br />
@@ -222,12 +224,28 @@ export function bootstrap(options: BootstrapOptions = {}): void {
   const timeScaleLabel = getElement<HTMLSpanElement>("#timeScaleLabel");
   const canvasViewport = getElement<HTMLDivElement>("#battleCanvasViewport");
   const canvas = getElement<HTMLCanvasElement>("#battleCanvas");
+  const templateEditorCanvas = getElement<HTMLCanvasElement>("#templateEditorCanvas");
+  const partEditorCanvas = getElement<HTMLCanvasElement>("#partEditorCanvas");
 
   // Keep battle simulation dimensions deterministic in all runtime modes.
   canvas.width = BATTLEFIELD_WIDTH;
   canvas.height = BATTLEFIELD_HEIGHT;
   canvas.style.width = `${canvas.width}px`;
   canvas.style.height = `${canvas.height}px`;
+
+  const syncEditorCanvasSizes = (): void => {
+    const width = Math.max(1, Math.floor(canvasViewport.clientWidth));
+    const height = Math.max(1, Math.floor(canvasViewport.clientHeight));
+    if (templateEditorCanvas.width !== width || templateEditorCanvas.height !== height) {
+      templateEditorCanvas.width = width;
+      templateEditorCanvas.height = height;
+    }
+    if (partEditorCanvas.width !== width || partEditorCanvas.height !== height) {
+      partEditorCanvas.width = width;
+      partEditorCanvas.height = height;
+    }
+  };
+  const activeEditorCanvas = (): HTMLCanvasElement => (isPartEditorScreen() ? partEditorCanvas : templateEditorCanvas);
 
   if (replayMode) {
     debugMenu.style.display = "none";
@@ -400,20 +418,21 @@ export function bootstrap(options: BootstrapOptions = {}): void {
   let editorFunctionalGroupSeq = 1;
   let templateEditorGridPanX = 0;
   let templateEditorGridPanY = 0;
+  let templateEditorViewScale = 1;
   let partEditorGridPanX = 0;
   let partEditorGridPanY = 0;
+  let partEditorViewScale = 1;
   let templateEditorViewVisited = false;
   let partEditorViewVisited = false;
   let editorGridPanX = 0;
   let editorGridPanY = 0;
+  let editorViewScale = 1;
   let editorDragActive = false;
   let editorDragMoved = false;
   let editorDragStartClientX = 0;
   let editorDragStartClientY = 0;
   let editorDragLastClientX = 0;
   let editorDragLastClientY = 0;
-  let editorPendingClickX = 0;
-  let editorPendingClickY = 0;
   let battleViewOffsetX = 0;
   let battleViewOffsetY = 0;
   let battleViewScale = 1;
@@ -480,35 +499,42 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     if (mode === "templateEditor") {
       templateEditorGridPanX = editorGridPanX;
       templateEditorGridPanY = editorGridPanY;
+      templateEditorViewScale = editorViewScale;
       return;
     }
     if (mode === "partEditor") {
       partEditorGridPanX = editorGridPanX;
       partEditorGridPanY = editorGridPanY;
+      partEditorViewScale = editorViewScale;
     }
   };
   const loadEditorViewForScreen = (mode: ScreenMode): void => {
     if (mode === "templateEditor") {
       editorGridPanX = templateEditorGridPanX;
       editorGridPanY = templateEditorGridPanY;
+      editorViewScale = templateEditorViewScale;
       return;
     }
     if (mode === "partEditor") {
       editorGridPanX = partEditorGridPanX;
       editorGridPanY = partEditorGridPanY;
+      editorViewScale = partEditorViewScale;
     }
   };
   const recenterEditorViewForScreen = (mode: EditorScreenMode): void => {
     if (mode === "templateEditor") {
       templateEditorGridPanX = 0;
       templateEditorGridPanY = 0;
+      templateEditorViewScale = 1;
     } else {
       partEditorGridPanX = 0;
       partEditorGridPanY = 0;
+      partEditorViewScale = 1;
     }
     if (screen === mode) {
       editorGridPanX = 0;
       editorGridPanY = 0;
+      editorViewScale = 1;
     }
   };
   const getCanvasDisplayWidth = (): number => Math.max(1, canvas.clientWidth || BATTLEFIELD_WIDTH);
@@ -549,10 +575,24 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     battleViewOffsetY = Math.max(minOffsetY, Math.min(maxOffsetY, battleViewOffsetY));
   };
 
+  const updateViewportCanvasVisibility = (): void => {
+    const showBattle = isBattleScreen();
+    const showTemplate = isTemplateEditorScreen();
+    const showPart = isPartEditorScreen();
+    const applyVisibility = (target: HTMLCanvasElement, visible: boolean): void => {
+      target.classList.toggle("hidden", !visible);
+      target.style.display = visible ? "block" : "none";
+      target.style.zIndex = visible ? "2" : "0";
+    };
+    applyVisibility(canvas, showBattle);
+    applyVisibility(templateEditorCanvas, showTemplate);
+    applyVisibility(partEditorCanvas, showPart);
+  };
+
   const applyBattleViewTransform = (): void => {
+    updateViewportCanvasVisibility();
     if (!isBattleScreen()) {
-      canvas.style.width = "100%";
-      canvas.style.height = "100%";
+      syncEditorCanvasSizes();
       canvas.style.transform = "translate(0px, 0px) scale(1)";
       return;
     }
@@ -589,6 +629,33 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     battleViewOffsetY = localY - worldY * battleViewScale;
     applyBattleViewTransform();
     syncTestArenaZoomInput();
+  };
+  const adjustEditorViewScaleAtClientPoint = (nextScale: number, clientX: number, clientY: number): void => {
+    if (!isEditorScreen()) {
+      return;
+    }
+    syncEditorCanvasSizes();
+    const drawCanvas = activeEditorCanvas();
+    const clampedScale = Math.max(0.35, Math.min(3.2, nextScale));
+    if (Math.abs(clampedScale - editorViewScale) < 0.0001) {
+      return;
+    }
+    const rect = drawCanvas.getBoundingClientRect();
+    const localX = clientX - rect.left;
+    const localY = clientY - rect.top;
+    const baseX = drawCanvas.width * 0.5;
+    const baseY = drawCanvas.height * 0.5;
+    const prevCell = Math.max(8, 32 * editorViewScale);
+    const nextCell = Math.max(8, 32 * clampedScale);
+    const prevGridOriginX = baseX - (editorGridCols * prevCell) * 0.5 + editorGridPanX;
+    const prevGridOriginY = baseY - (editorGridRows * prevCell) * 0.5 + editorGridPanY;
+    const cellCoordX = (localX - prevGridOriginX) / prevCell;
+    const cellCoordY = (localY - prevGridOriginY) / prevCell;
+    editorViewScale = clampedScale;
+    const nextGridOriginX = localX - cellCoordX * nextCell;
+    const nextGridOriginY = localY - cellCoordY * nextCell;
+    editorGridPanX = nextGridOriginX - (baseX - (editorGridCols * nextCell) * 0.5);
+    editorGridPanY = nextGridOriginY - (baseY - (editorGridRows * nextCell) * 0.5);
   };
   const normalizeTestArenaBattlefieldWidth = (value: number): number => Math.max(640, Math.min(4096, Math.floor(value)));
   const normalizeTestArenaBattlefieldHeight = (value: number): number => Math.max(360, Math.min(2160, Math.floor(value)));
@@ -1300,11 +1367,12 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       [document, "mouseup"],
       [document, "click"],
       [document, "contextmenu"],
-      [canvas, "mousedown"],
-      [canvas, "mouseup"],
-      [canvas, "mousemove"],
-      [canvas, "click"],
-      [canvas, "contextmenu"],
+      [canvasViewport, "mousedown"],
+      [canvasViewport, "mouseup"],
+      [canvasViewport, "mousemove"],
+      [canvasViewport, "click"],
+      [canvasViewport, "wheel"],
+      [canvasViewport, "contextmenu"],
     ];
     for (const [target, name] of targets) {
       target.addEventListener(name, stopAll, { capture: true });
@@ -1316,7 +1384,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       }
       (node as HTMLButtonElement).disabled = true;
     });
-    canvas.style.cursor = "default";
+    canvasViewport.style.cursor = "default";
   };
 
   const startArenaReplay = (): void => {
@@ -1769,7 +1837,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       hideEditorTooltip();
     }
     if (!battleViewDragActive) {
-      canvas.style.cursor = isBattleScreen() ? "grab" : "default";
+      canvasViewport.style.cursor = isBattleScreen() ? "grab" : "default";
     }
     applyBattleViewTransform();
   };
@@ -2196,9 +2264,9 @@ export function bootstrap(options: BootstrapOptions = {}): void {
   const updateWeaponHud = (): void => {
     if (isEditorScreen()) {
       if (isPartEditorScreen()) {
-        weaponHud.innerHTML = `<div><strong>Part Designer</strong></div><div class="small">Tool=${partDesignerTool}. Click canvas to select/create box, edit box flags on the right panel, right-click to erase box. Q/E rotates preview for directional parts.</div>`;
+        weaponHud.innerHTML = `<div><strong>Part Designer</strong></div><div class="small">Tool=${partDesignerTool}. Left-click applies the selected tool, right-drag pans, and wheel zooms. Q/E rotates preview for directional parts.</div>`;
       } else {
-        weaponHud.innerHTML = `<div><strong>Object Editor</strong></div><div class="small">Layer=${editorLayer} | Mode=${editorDeleteMode ? "delete" : "place"}. Right-click = delete. Q/E = weapon rotate 90deg (ccw/cw). Display items attach to structure cells only.</div>`;
+        weaponHud.innerHTML = `<div><strong>Object Editor</strong></div><div class="small">Layer=${editorLayer} | Mode=${editorDeleteMode ? "delete" : "place"}. Left-click places/deletes by mode, right-drag pans, wheel zooms. Q/E = weapon rotate 90deg (ccw/cw). Display items attach to structure cells only.</div>`;
       }
       return;
     }
@@ -2274,9 +2342,21 @@ export function bootstrap(options: BootstrapOptions = {}): void {
   };
 
   const getEditorGridRect = (): { x: number; y: number; cell: number } => {
-    const cell = 32;
-    const x = Math.floor(canvas.width * 0.5 - (editorGridCols * cell) / 2 + editorGridPanX);
-    const y = Math.floor(canvas.height * 0.5 - (editorGridRows * cell) / 2 + editorGridPanY);
+    const drawCanvas = activeEditorCanvas();
+    const cell = Math.max(8, 32 * editorViewScale);
+    const halfWidth = drawCanvas.width * 0.5;
+    const halfHeight = drawCanvas.height * 0.5;
+    const gridHalfWidth = (editorGridCols * cell) * 0.5;
+    const gridHalfHeight = (editorGridRows * cell) * 0.5;
+    const keepVisibleMargin = 40;
+    const minPanX = keepVisibleMargin - (halfWidth + gridHalfWidth);
+    const maxPanX = (drawCanvas.width - keepVisibleMargin) - (halfWidth - gridHalfWidth);
+    const minPanY = keepVisibleMargin - (halfHeight + gridHalfHeight);
+    const maxPanY = (drawCanvas.height - keepVisibleMargin) - (halfHeight - gridHalfHeight);
+    editorGridPanX = Math.max(minPanX, Math.min(maxPanX, editorGridPanX));
+    editorGridPanY = Math.max(minPanY, Math.min(maxPanY, editorGridPanY));
+    const x = Math.floor(drawCanvas.width * 0.5 - (editorGridCols * cell) / 2 + editorGridPanX);
+    const y = Math.floor(drawCanvas.height * 0.5 - (editorGridRows * cell) / 2 + editorGridPanY);
     return { x, y, cell };
   };
 
@@ -2956,20 +3036,22 @@ export function bootstrap(options: BootstrapOptions = {}): void {
   };
 
   const drawPartDesignerCanvas = (): void => {
-    const context = canvas.getContext("2d");
+    const drawCanvas = partEditorCanvas;
+    syncEditorCanvasSizes();
+    const context = drawCanvas.getContext("2d");
     if (!context) {
       return;
     }
-    context.clearRect(0, 0, canvas.width, canvas.height);
+    context.clearRect(0, 0, drawCanvas.width, drawCanvas.height);
     context.fillStyle = "rgba(13, 21, 31, 0.98)";
-    context.fillRect(0, 0, canvas.width, canvas.height);
+    context.fillRect(0, 0, drawCanvas.width, drawCanvas.height);
 
     const grid = getEditorGridRect();
     const validation = validatePartDefinitionDetailed(partDesignerDraft);
     context.fillStyle = "#dbe8f6";
     context.font = "14px Trebuchet MS";
     context.fillText(`Part Designer | Grid ${editorGridCols}x${editorGridRows} | Tool ${partDesignerTool}`, 18, 26);
-    context.fillText("Left-click: select/create box | Left-drag: pan grid | Right-click: erase selected box.", 18, 46);
+    context.fillText("Left-click: edit box | Right-drag: pan grid | Mouse wheel: zoom.", 18, 46);
     context.fillStyle = validation.errors.length > 0 ? "#ffd1c1" : "#bde6c6";
     context.fillText(`Errors ${validation.errors.length} | Warnings ${validation.warnings.length}`, 18, 66);
 
@@ -3069,37 +3151,39 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       drawPartDesignerCanvas();
       return;
     }
-    const context = canvas.getContext("2d");
+    const drawCanvas = templateEditorCanvas;
+    syncEditorCanvasSizes();
+    const context = drawCanvas.getContext("2d");
     if (!context) {
       return;
     }
-    context.clearRect(0, 0, canvas.width, canvas.height);
+    context.clearRect(0, 0, drawCanvas.width, drawCanvas.height);
     context.fillStyle = "rgba(13, 21, 31, 0.98)";
-    context.fillRect(0, 0, canvas.width, canvas.height);
+    context.fillRect(0, 0, drawCanvas.width, drawCanvas.height);
 
     const grid = getEditorGridRect();
     context.fillStyle = "#dbe8f6";
     context.font = "14px Trebuchet MS";
     context.fillText(`Grid ${editorGridCols}x${editorGridRows} | Layer ${editorLayer.toUpperCase()} ${editorDeleteMode ? "| DELETE" : "| PLACE"}`, 18, 26);
-    context.fillText("Left-click: place | Left-drag: pan grid | Right-click: delete | Origin: (0,0).", 18, 46);
+    context.fillText("Left-click: place/delete | Right-drag: pan grid | Mouse wheel: zoom | Origin: (0,0).", 18, 46);
 
     if (isCurrentEditorSelectionDirectional()) {
       context.fillStyle = "rgba(28, 43, 61, 0.92)";
-      context.fillRect(canvas.width - 170, 14, 154, 40);
+      context.fillRect(drawCanvas.width - 170, 14, 154, 40);
       context.strokeStyle = "rgba(139, 172, 206, 0.8)";
-      context.strokeRect(canvas.width - 170, 14, 154, 40);
+      context.strokeRect(drawCanvas.width - 170, 14, 154, 40);
       context.fillStyle = "#dbe8f6";
       context.font = "12px Trebuchet MS";
-      context.fillText(`Dir: ${getRotationSymbol()}`, canvas.width - 160, 31);
-      context.fillText(`Q ccw | E cw`, canvas.width - 160, 47);
+      context.fillText(`Dir: ${getRotationSymbol()}`, drawCanvas.width - 160, 31);
+      context.fillText(`Q ccw | E cw`, drawCanvas.width - 160, 47);
     }
 
     const validation = validateTemplateDetailed(editorDraft, { partCatalog: parts });
     const lineCount = validation.errors.length + validation.warnings.length + 2;
     const issuesHeight = Math.max(34, 16 + Math.min(10, lineCount) * 14);
     const issuesWidth = 360;
-    const issuesX = canvas.width - issuesWidth - 16;
-    const issuesY = canvas.height - issuesHeight - 14;
+    const issuesX = drawCanvas.width - issuesWidth - 16;
+    const issuesY = drawCanvas.height - issuesHeight - 14;
     context.fillStyle = "rgba(21, 31, 45, 0.94)";
     context.fillRect(issuesX, issuesY, issuesWidth, issuesHeight);
     context.strokeStyle = validation.errors.length > 0 ? "rgba(224, 145, 111, 0.96)" : "rgba(151, 214, 165, 0.92)";
@@ -3198,7 +3282,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     const legend = `Wpn by class R:${preview.weaponCounts["rapid-fire"]} H:${preview.weaponCounts["heavy-shot"]} E:${preview.weaponCounts.explosive} T:${preview.weaponCounts.tracking} B:${preview.weaponCounts["beam-precision"]} C:${preview.weaponCounts["control-utility"]}`;
     const speedText = `Achievable speed: ${preview.achievableSpeed.toFixed(1)}`;
     const panelX = 16;
-    const panelY = canvas.height - 54;
+    const panelY = drawCanvas.height - 54;
     context.fillStyle = "rgba(19, 30, 44, 0.94)";
     context.fillRect(panelX, panelY, 530, 38);
     context.strokeStyle = "rgba(128, 172, 206, 0.7)";
@@ -3576,7 +3660,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         .join("");
       editorPanel.innerHTML = `
         <h3>Template Editor</h3>
-        <div class="small">Choose a layer, pick a part card on the right panel, then click the ${editorGridCols}x${editorGridRows} grid on canvas. Drag with left mouse to move the grid. Origin is (0,0), negative coordinates supported.</div>
+        <div class="small">Choose a layer, pick a part card on the right panel, then click the ${editorGridCols}x${editorGridRows} grid on canvas. Right-drag to move view and wheel to zoom. Origin is (0,0), negative coordinates supported.</div>
         <div class="row">
           <button id="btnOpenTemplateWindow">Open</button>
           <span class="small">Current object: ${editorDraft.name}</span>
@@ -5505,29 +5589,35 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     if (event.key === "s" || event.key === "S") keys.s = false;
   });
 
-  canvas.addEventListener("mousedown", (event) => {
+  const getPointerOnCanvas = (
+    event: MouseEvent,
+    targetCanvas: HTMLCanvasElement,
+  ): { x: number; y: number; rect: DOMRect } => {
+    const rect = targetCanvas.getBoundingClientRect();
+    const x = (event.clientX - rect.left) * (targetCanvas.width / Math.max(1, rect.width));
+    const y = (event.clientY - rect.top) * (targetCanvas.height / Math.max(1, rect.height));
+    return { x, y, rect };
+  };
+
+  canvasViewport.addEventListener("mousedown", (event) => {
     if (event.button !== 0 && event.button !== 2) {
       return;
     }
-    const rect = canvas.getBoundingClientRect();
-    const x = (event.clientX - rect.left) * (canvas.width / rect.width);
-    const y = (event.clientY - rect.top) * (canvas.height / rect.height);
     if (isEditorScreen()) {
-      const rightClickDelete = event.button === 2;
-      if (rightClickDelete) {
-        event.preventDefault();
-        applyEditorCellAction(x, y, true);
+      const targetCanvas = activeEditorCanvas();
+      const { x, y } = getPointerOnCanvas(event, targetCanvas);
+      if (event.button === 0) {
+        applyEditorCellAction(x, y);
         renderPanels();
         return;
       }
+      event.preventDefault();
       editorDragActive = true;
       editorDragMoved = false;
       editorDragStartClientX = event.clientX;
       editorDragStartClientY = event.clientY;
       editorDragLastClientX = event.clientX;
       editorDragLastClientY = event.clientY;
-      editorPendingClickX = x;
-      editorPendingClickY = y;
       return;
     }
     if (isBattleScreen() && event.button === 2) {
@@ -5538,9 +5628,10 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       battleViewDragStartClientY = event.clientY;
       battleViewDragLastClientX = event.clientX;
       battleViewDragLastClientY = event.clientY;
-      canvas.style.cursor = "grabbing";
+      canvasViewport.style.cursor = "grabbing";
       return;
     }
+    const { x, y } = getPointerOnCanvas(event, canvas);
     if (isBattleScreen() && battle.getState().active && battle.getState().nodeId === testArenaNode.id) {
       // Test Arena is for AI-vs-AI validation; avoid accidental player manual-control lock.
       battle.setAim(x, y);
@@ -5552,7 +5643,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     renderPanels();
   });
 
-  canvas.addEventListener("contextmenu", (event) => {
+  canvasViewport.addEventListener("contextmenu", (event) => {
     if (isEditorScreen() || isBattleScreen()) {
       event.preventDefault();
     }
@@ -5560,10 +5651,6 @@ export function bootstrap(options: BootstrapOptions = {}): void {
 
   window.addEventListener("mouseup", () => {
     if (isEditorScreen() && editorDragActive) {
-      if (!editorDragMoved) {
-        applyEditorCellAction(editorPendingClickX, editorPendingClickY);
-        renderPanels();
-      }
       editorDragActive = false;
       editorDragMoved = false;
     }
@@ -5574,12 +5661,12 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       }
       battleViewDragActive = false;
       battleViewDragMoved = false;
-      canvas.style.cursor = isBattleScreen() ? "grab" : "default";
+      canvasViewport.style.cursor = isBattleScreen() ? "grab" : "default";
     }
     battle.handlePointerUp();
   });
 
-  canvas.addEventListener("mouseleave", () => {
+  canvasViewport.addEventListener("mouseleave", () => {
     if (isEditorScreen()) {
       editorDragActive = false;
       editorDragMoved = false;
@@ -5587,7 +5674,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     battle.handlePointerUp();
   });
 
-  canvas.addEventListener("mousemove", (event) => {
+  canvasViewport.addEventListener("mousemove", (event) => {
     if (isEditorScreen()) {
       if (editorDragActive) {
         const dx = event.clientX - editorDragLastClientX;
@@ -5599,8 +5686,10 @@ export function bootstrap(options: BootstrapOptions = {}): void {
           editorDragMoved = true;
         }
         if (editorDragMoved) {
-          editorGridPanX += dx * (canvas.width / canvas.getBoundingClientRect().width);
-          editorGridPanY += dy * (canvas.height / canvas.getBoundingClientRect().height);
+          const drawCanvas = activeEditorCanvas();
+          const rect = drawCanvas.getBoundingClientRect();
+          editorGridPanX += dx * (drawCanvas.width / Math.max(1, rect.width));
+          editorGridPanY += dy * (drawCanvas.height / Math.max(1, rect.height));
         }
       }
       return;
@@ -5608,9 +5697,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     if (battleViewDragActive) {
       return;
     }
-    const rect = canvas.getBoundingClientRect();
-    const x = (event.clientX - rect.left) * (canvas.width / rect.width);
-    const y = (event.clientY - rect.top) * (canvas.height / rect.height);
+    const { x, y } = getPointerOnCanvas(event, canvas);
     battle.setAim(x, y);
   });
 
@@ -5633,12 +5720,15 @@ export function bootstrap(options: BootstrapOptions = {}): void {
   });
 
   canvasViewport.addEventListener("wheel", (event) => {
-    if (!isBattleScreen()) {
-      return;
-    }
     event.preventDefault();
     const scaleFactor = event.deltaY < 0 ? 1.12 : 1 / 1.12;
-    adjustBattleViewScaleAtClientPoint(battleViewScale * scaleFactor, event.clientX, event.clientY);
+    if (isBattleScreen()) {
+      adjustBattleViewScaleAtClientPoint(battleViewScale * scaleFactor, event.clientX, event.clientY);
+      return;
+    }
+    if (isEditorScreen()) {
+      adjustEditorViewScaleAtClientPoint(editorViewScale * scaleFactor, event.clientX, event.clientY);
+    }
   }, { passive: false });
 
   loadTemplateIntoEditorSlots(editorDraft);

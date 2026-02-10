@@ -456,6 +456,8 @@ Editor UX implementation details:
 - Editor templates persist coordinates per placed part (`x`,`y`, origin `(0,0)`; negatives allowed).
 - Template Editor and Part Editor maintain separate grid pan/view state, so tab switching restores each editor's last viewport.
 - Editor grid viewport defaults to screen-centered origin and only recenters when loading a different template/part.
+- Battle, Template Editor, and Part Editor now each render to dedicated canvases (`#battleCanvas`, `#templateEditorCanvas`, `#partEditorCanvas`) layered in the shared viewport container.
+- Editor viewport controls use right-click drag for panning and mouse wheel for zoom; battle keeps right-drag pan and wheel zoom.
 - Editor functional attachments persist `partId` + `component` for runtime compatibility and part-catalog lookup.
 - Weapon functional entries may carry `rotateQuarter` metadata (0..3, each step = 90deg).
 - Heavy-shot weapons use grouped multi-cell occupancy in editor and rotate footprint with `rotateQuarter`.

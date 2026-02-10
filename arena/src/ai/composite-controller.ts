@@ -72,7 +72,21 @@ function parsePythonOnnxShootFileName(familyId: string): string | null {
 
 async function loadOrtModule(): Promise<any> {
   if (!ortModulePromise) {
-    ortModulePromise = import("onnxruntime-web");
+    ortModulePromise = (async () => {
+      const ort = await import("onnxruntime-web");
+      try {
+        if (ort?.env?.wasm) {
+          // Serve ORT wasm binaries from Vite middleware to avoid "no available backend found".
+          ort.env.wasm.wasmPaths = "/__arena/ort/";
+          // Keep runtime requirements low for browser test arena compatibility.
+          ort.env.wasm.numThreads = 1;
+          ort.env.wasm.proxy = false;
+        }
+      } catch {
+        // Keep defaults if env injection fails.
+      }
+      return ort;
+    })();
   }
   return ortModulePromise;
 }
