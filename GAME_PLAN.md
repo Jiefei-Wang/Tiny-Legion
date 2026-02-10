@@ -99,6 +99,11 @@ Current implementation includes dedicated in-app editor tabs where the player ca
 - Top-bar `Debug Options` -> `Part Designer` is a shortcut that switches directly to the `Part Editor` tab.
 - Part `Open` window supports direct open, one-click `Copy`, and `Delete` for file-backed entries.
 - Part Designer edits a **single reusable part definition** (not a full unit template).
+- Part Designer integrates layer mode into the `Base Component` selector via a `structure-layer` option (no separate layer control).
+- `Open Part` now shows each row with explicit `[layer]` and includes a canonical default `Structure Box` entry.
+- In `structure-layer` mode, functional-only metadata/constraints are hidden (for example engine/weapon/loader toggles, category/subcategory, and require-structure placement flags).
+- When base component changes in functional mode, category/subcategory auto-follow defaults unless the user has manually edited those fields.
+- Part catalog now includes editable default structure-material parts for `basic`, `reinforced`, `ceramic`, `reactive`, and `combined` (as structure-layer entries), and their edited material stats drive runtime material balance.
 - UI split:
   - left panel edits part-level properties grouped as:
     - `Editor Meta`: category (dropdown) + subcategory (free text),

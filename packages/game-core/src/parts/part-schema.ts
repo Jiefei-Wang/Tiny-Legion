@@ -1,7 +1,8 @@
 import { COMPONENTS } from "../config/balance/weapons.ts";
+import { MATERIALS } from "../config/balance/materials.ts";
 import { normalizeRotateQuarter, getPartFootprintCells } from "./part-geometry.ts";
 import { validatePartDefinitionDetailed } from "./part-validation.ts";
-import type { ComponentId, PartDefinition } from "../types.ts";
+import type { ComponentId, MaterialId, PartDefinition } from "../types.ts";
 
 export { normalizeRotateQuarter, rotateOffsetByQuarter, getPartFootprintCells } from "./part-geometry.ts";
 export { validatePartDefinitionDetailed, validatePartDefinition } from "./part-validation.ts";
@@ -99,6 +100,107 @@ function getLegacyFootprintOffsets(component: ComponentId): Array<{ x: number; y
   return [{ x: 0, y: 0 }];
 }
 
+function createImplicitStructurePartDefinition(component: ComponentId): PartDefinition {
+  const stats = COMPONENTS[component];
+  return {
+    id: `${component}-structure`,
+    name: `${component}-structure`,
+    layer: "structure",
+    baseComponent: component,
+    directional: stats.directional === true,
+    anchor: { x: 0, y: 0 },
+    boxes: [{
+      x: 0,
+      y: 0,
+      occupiesStructureSpace: true,
+      occupiesFunctionalSpace: false,
+      needsStructureBehind: false,
+      isAttachPoint: false,
+      isAnchorPoint: true,
+      isShootingPoint: false,
+      takesDamage: true,
+      takesFunctionalDamage: true,
+    }],
+    placement: {
+      requireStructureOffsets: [],
+      requireStructureBelowAnchor: false,
+      requireStructureOnFunctionalOccupiedBoxes: false,
+      requireStructureOnStructureOccupiedBoxes: false,
+      requireEmptyStructureOffsets: [],
+      requireEmptyFunctionalOffsets: [],
+    },
+    properties: {
+      category: "structure",
+      subcategory: "armor",
+      hp: undefined,
+      isEngine: false,
+      isWeapon: false,
+      isLoader: false,
+      isArmor: true,
+      engineType: undefined,
+      weaponType: undefined,
+      loaderServesTags: undefined,
+      loaderCooldownMultiplier: undefined,
+      hasCoreTuning: false,
+    },
+    tags: ["implicit", "structure"],
+  };
+}
+
+function createImplicitStructureMaterialPartDefinition(materialId: MaterialId): PartDefinition {
+  const material = MATERIALS[materialId];
+  return {
+    id: `material-${materialId}`,
+    name: material.label,
+    layer: "structure",
+    baseComponent: "control",
+    directional: false,
+    anchor: { x: 0, y: 0 },
+    boxes: [{
+      x: 0,
+      y: 0,
+      occupiesStructureSpace: true,
+      occupiesFunctionalSpace: false,
+      needsStructureBehind: false,
+      isAttachPoint: false,
+      isAnchorPoint: true,
+      isShootingPoint: false,
+      takesDamage: true,
+      takesFunctionalDamage: true,
+    }],
+    placement: {
+      requireStructureOffsets: [],
+      requireStructureBelowAnchor: false,
+      requireStructureOnFunctionalOccupiedBoxes: false,
+      requireStructureOnStructureOccupiedBoxes: false,
+      requireEmptyStructureOffsets: [],
+      requireEmptyFunctionalOffsets: [],
+    },
+    stats: {
+      mass: material.mass,
+    },
+    properties: {
+      category: "structure",
+      subcategory: "material",
+      materialId,
+      materialArmor: material.armor,
+      materialRecoverPerSecond: material.recoverPerSecond,
+      materialColor: material.color,
+      hp: material.hp,
+      isEngine: false,
+      isWeapon: false,
+      isLoader: false,
+      isArmor: true,
+      engineType: undefined,
+      weaponType: undefined,
+      loaderServesTags: undefined,
+      loaderCooldownMultiplier: undefined,
+      hasCoreTuning: false,
+    },
+    tags: ["implicit", "structure", "material"],
+  };
+}
+
 export function createImplicitPartDefinition(component: ComponentId): PartDefinition {
   const stats = COMPONENTS[component];
   const requireStructureOnFunctional = stats.placement?.requireStructureOnFootprint ?? true;
@@ -158,9 +260,13 @@ export function createDefaultPartDefinitions(): PartDefinition[] {
   if (defaultCatalogCache) {
     return defaultCatalogCache.map((part) => clonePartDefinition(part));
   }
-  const parts = Object.keys(COMPONENTS)
+  const componentParts = Object.keys(COMPONENTS)
     .map((id) => createImplicitPartDefinition(id as ComponentId))
     .sort((a, b) => a.id.localeCompare(b.id));
+  const materialParts = (Object.keys(MATERIALS) as MaterialId[])
+    .map((id) => createImplicitStructureMaterialPartDefinition(id))
+    .sort((a, b) => a.id.localeCompare(b.id));
+  const parts = [...componentParts, ...materialParts].sort((a, b) => a.id.localeCompare(b.id));
   defaultCatalogCache = parts;
   return parts.map((part) => clonePartDefinition(part));
 }
@@ -270,6 +376,10 @@ export function clonePartDefinition(part: PartDefinition): PartDefinition {
       ? {
           category: part.properties.category,
           subcategory: part.properties.subcategory,
+          materialId: part.properties.materialId,
+          materialArmor: part.properties.materialArmor,
+          materialRecoverPerSecond: part.properties.materialRecoverPerSecond,
+          materialColor: part.properties.materialColor,
           hp: part.properties.hp,
           isEngine: part.properties.isEngine,
           isWeapon: part.properties.isWeapon,
@@ -303,12 +413,15 @@ export function parsePartDefinition(input: unknown): PartDefinition | null {
   const idRaw = typeof data.id === "string" ? data.id : String(data.id ?? "");
   const id = normalizePartId(idRaw || baseComponent);
   const name = typeof data.name === "string" && data.name.trim().length > 0 ? data.name.trim() : id;
+  const layer = data.layer === "structure" ? "structure" : "functional";
 
   const anchorRecord = data.anchor && typeof data.anchor === "object" ? (data.anchor as Record<string, unknown>) : {};
   const requestedAnchorX = readOptionalInt(anchorRecord.x) ?? 0;
   const requestedAnchorY = readOptionalInt(anchorRecord.y) ?? 0;
 
   const boxesRaw = Array.isArray(data.boxes) ? data.boxes : [];
+  const defaultOccupiesStructureSpace = layer === "structure";
+  const defaultOccupiesFunctionalSpace = layer !== "structure";
   let anchorFromBox: { x: number; y: number } | null = null;
   const boxes = boxesRaw
     .map((raw) => {
@@ -325,11 +438,17 @@ export function parsePartDefinition(input: unknown): PartDefinition | null {
       if (isAnchorPoint && anchorFromBox === null) {
         anchorFromBox = { x, y };
       }
+      const occupiesStructureSpace = typeof record.occupiesStructureSpace === "boolean"
+        ? record.occupiesStructureSpace
+        : defaultOccupiesStructureSpace;
+      const occupiesFunctionalSpace = typeof record.occupiesFunctionalSpace === "boolean"
+        ? record.occupiesFunctionalSpace
+        : defaultOccupiesFunctionalSpace;
       return {
         x,
         y,
-        occupiesStructureSpace: record.occupiesStructureSpace === true,
-        occupiesFunctionalSpace: record.occupiesFunctionalSpace === false ? false : true,
+        occupiesStructureSpace,
+        occupiesFunctionalSpace,
         needsStructureBehind: record.needsStructureBehind === true || record.needStructureBehind === true || record.requireStructureBehind === true,
         isAttachPoint: record.isAttachPoint === true || record.attachPoint === true,
         isAnchorPoint,
@@ -340,7 +459,9 @@ export function parsePartDefinition(input: unknown): PartDefinition | null {
     })
     .filter((entry): entry is NonNullable<typeof entry> => entry !== null);
 
-  const fallback = createImplicitPartDefinition(baseComponent);
+  const fallback = layer === "structure"
+    ? createImplicitStructurePartDefinition(baseComponent)
+    : createImplicitPartDefinition(baseComponent);
   const resolvedBoxes = boxes.length > 0 ? boxes : fallback.boxes;
   const resolvedAnchor = anchorFromBox ?? { x: requestedAnchorX, y: requestedAnchorY };
   const placementRecord = data.placement && typeof data.placement === "object" ? (data.placement as Record<string, unknown>) : {};
@@ -371,7 +492,7 @@ export function parsePartDefinition(input: unknown): PartDefinition | null {
   const parsed: PartDefinition = {
     id,
     name,
-    layer: "functional",
+    layer,
     baseComponent,
     directional: typeof data.directional === "boolean" ? data.directional : COMPONENTS[baseComponent].directional === true,
     anchor: { x: resolvedAnchor.x, y: resolvedAnchor.y },
@@ -433,6 +554,25 @@ export function parsePartDefinition(input: unknown): PartDefinition | null {
     properties: {
       category: readOptionalString(propertiesRecord.category ?? data.category),
       subcategory: readOptionalString(propertiesRecord.subcategory ?? data.subcategory),
+      materialId: propertiesRecord.materialId === "basic"
+        || propertiesRecord.materialId === "reinforced"
+        || propertiesRecord.materialId === "ceramic"
+        || propertiesRecord.materialId === "reactive"
+        || propertiesRecord.materialId === "combined"
+        ? propertiesRecord.materialId
+        : data.materialId === "basic"
+          || data.materialId === "reinforced"
+          || data.materialId === "ceramic"
+          || data.materialId === "reactive"
+          || data.materialId === "combined"
+          ? data.materialId
+        : undefined,
+      materialArmor: readOptionalNumber(propertiesRecord.materialArmor ?? propertiesRecord.material_armor),
+      materialRecoverPerSecond: readOptionalNumber(
+        propertiesRecord.materialRecoverPerSecond
+          ?? propertiesRecord.material_recover_per_second,
+      ),
+      materialColor: readOptionalString(propertiesRecord.materialColor ?? propertiesRecord.material_color),
       hp: readOptionalNumber(propertiesRecord.hp ?? data.hp),
       isEngine: readOptionalBoolean(propertiesRecord.isEngine ?? propertiesRecord.is_engine ?? data.isEngine ?? data.is_engine),
       isWeapon: readOptionalBoolean(propertiesRecord.isWeapon ?? propertiesRecord.is_weapon ?? data.isWeapon ?? data.is_weapon),

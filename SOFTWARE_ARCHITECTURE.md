@@ -218,18 +218,27 @@ Python training helper surface (new):
 arena/
   AI_INTERFACE_PYTHON.md
   AI_INTERFACE_JS.md
+  proto/arena_service.proto
   python/
-    arena_client.py
-    example_baseline_ai.py
+    train.py
+    modules/
+      arena_client.py
+      test_arena_bridge.py
+      ai_composer.py
+      features.py
+      example_baseline_ai.py
 ```
 
 Notes:
 
-- `arena/python/arena_client.py` defines Python helper APIs:
+- `arena/python/modules/arena_client.py` defines Python helper APIs:
   - `start_battle(client, config)`
   - `AI_callback(fun)`
   - `ArenaClient.run_until_terminal(...)`
-- `arena/python/example_baseline_ai.py` provides a baseline-style callback example that maps full snapshot input to per-unit commands.
+- `arena/python/modules/ai_composer.py` defines composable target/movement/fire modules and includes neural-module variants.
+- `arena/python/modules/features.py` defines feature schemas and concrete extraction functions for target/movement/fire stages.
+- `arena/python/train.py` trains selected neural composer modules using delayed rewards (10s chunks) and backpropagation.
+- `arena/python/modules/example_baseline_ai.py` provides a baseline-style callback example that maps full snapshot input to per-unit commands.
 - These files define and document the Python/JS AI boundary before gRPC server rollout, so training callback shape and JS model adapter shape remain stable.
 - `BattleSessionOptions` now supports external AI control flags (`externalAiSides`) and external-command helpers used by arena gRPC sessions.
 
@@ -474,6 +483,11 @@ Developer Part Designer UX:
 - Primary access is the top-level `Part Editor` mode tab.
 - Top-bar `Debug Options` -> `Part Designer` is a shortcut into the same `Part Editor` screen.
 - Dedicated editor workspace for authoring a single reusable part definition.
+- Part Designer layer mode is integrated into `Base Component` selection using a `structure-layer` pseudo-option instead of a separate layer selector.
+- `Open Part` rows include explicit layer labels and default catalog includes `structure-box` so structure authoring is immediately discoverable.
+- In `structure-layer` mode, functional-only part-property and placement controls are hidden.
+- Category/subcategory auto-sync to base defaults only while those fields remain unmodified by the user.
+- `createDefaultPartDefinitions()` now ships implicit structure-material part entries (`material-basic`, `material-reinforced`, `material-ceramic`, `material-reactive`, `material-combined`) and `bootstrap.ts` applies their overrides into runtime `MATERIALS`.
 - Part `Open` window mirrors template open-row actions with right-aligned `Copy` / `Delete` controls.
 - UI split:
   - left panel edits part-level fields (`name`, `id`, `baseComponent`, `directional`) plus grouped controls:

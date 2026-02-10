@@ -100,6 +100,9 @@ export function sanitizeTemplatePlacement(
     if (!part) {
       continue;
     }
+    if (part.layer !== "functional") {
+      continue;
+    }
 
     const rotateQuarterRaw = attachment.rotateQuarter ?? (attachment.rotate90 ? 1 : 0);
     const normalizedRotate = normalizePartAttachmentRotate(part, rotateQuarterRaw);
@@ -268,7 +271,7 @@ function ensureLoaderCoverage(
   const occupiedKeys = new Set<string>();
   for (const attachment of next) {
     const part = resolvePartDefinitionForAttachment({ partId: attachment.partId, component: attachment.component }, catalog);
-    if (!part) {
+    if (!part || part.layer !== "functional") {
       continue;
     }
     const rotateQuarterRaw = attachment.rotateQuarter ?? (attachment.rotate90 ? 1 : 0);
@@ -474,8 +477,9 @@ export function parseTemplate(input: unknown, options: ParseTemplateOptions = {}
     const partFromId = partId
       ? resolvePartDefinitionForAttachment({ partId }, partCatalog)
       : null;
+    const functionalPartFromId = partFromId?.layer === "functional" ? partFromId : null;
 
-    const component = normalizeComponentId(record.component) ?? partFromId?.baseComponent ?? null;
+    const component = normalizeComponentId(record.component) ?? functionalPartFromId?.baseComponent ?? null;
     if (!component) {
       continue;
     }

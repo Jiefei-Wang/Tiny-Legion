@@ -1,6 +1,17 @@
 from .arena_client import AI_callback, ArenaClient, start_battle
 from .test_arena_bridge import TestArenaBridgeClient
 from .ai_composer import AIComposer, build_baseline_composer
+from .ai_composer import (
+    BaselineFireModule,
+    BaselineMovementModule,
+    BaselineTargetModule,
+    NeuralFireModule,
+    NeuralMovementModule,
+    NeuralTargetModule,
+    create_fire_model,
+    create_movement_model,
+    create_target_model,
+)
 from .features import (
     COMPOSER_FEATURE_GROUPS,
     DELAYED_REWARD_SIGNALS,
@@ -20,6 +31,15 @@ __all__ = [
     "TestArenaBridgeClient",
     "AIComposer",
     "build_baseline_composer",
+    "BaselineTargetModule",
+    "BaselineMovementModule",
+    "BaselineFireModule",
+    "NeuralTargetModule",
+    "NeuralMovementModule",
+    "NeuralFireModule",
+    "create_target_model",
+    "create_movement_model",
+    "create_fire_model",
     "TARGET_FEATURES",
     "MOVEMENT_FEATURES",
     "FIRE_FEATURES",

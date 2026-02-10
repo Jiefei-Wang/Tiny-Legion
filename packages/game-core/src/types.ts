@@ -151,6 +151,10 @@ export interface PartStats {
 export interface PartDesignerProperties {
   category?: string;
   subcategory?: string;
+  materialId?: MaterialId;
+  materialArmor?: number;
+  materialRecoverPerSecond?: number;
+  materialColor?: string;
   hp?: number;
   isEngine?: boolean;
   isWeapon?: boolean;
@@ -166,7 +170,7 @@ export interface PartDesignerProperties {
 export interface PartDefinition {
   id: string;
   name: string;
-  layer: "functional";
+  layer: "functional" | "structure";
   baseComponent: ComponentId;
   directional?: boolean;
   anchor: { x: number; y: number };

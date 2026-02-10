@@ -33,8 +33,8 @@ export function validatePartDefinitionDetailed(part: PartDefinition): PartValida
   if (!part.name || part.name.trim().length < 2) {
     errors.push("part name is too short.");
   }
-  if (part.layer !== "functional") {
-    errors.push("part layer must be functional.");
+  if (part.layer !== "functional" && part.layer !== "structure") {
+    errors.push("part layer must be functional or structure.");
   }
   if (!(part.baseComponent in COMPONENTS)) {
     errors.push("part baseComponent is invalid.");
@@ -149,6 +149,18 @@ export function validatePartDefinitionDetailed(part: PartDefinition): PartValida
   if (part.properties?.hp !== undefined && (!Number.isFinite(part.properties.hp) || part.properties.hp < 0)) {
     errors.push("part properties.hp must be a non-negative number.");
   }
+  if (part.properties?.materialArmor !== undefined && (!Number.isFinite(part.properties.materialArmor) || part.properties.materialArmor < 0)) {
+    errors.push("part properties.materialArmor must be a non-negative number.");
+  }
+  if (
+    part.properties?.materialRecoverPerSecond !== undefined
+    && (!Number.isFinite(part.properties.materialRecoverPerSecond) || part.properties.materialRecoverPerSecond < 0)
+  ) {
+    errors.push("part properties.materialRecoverPerSecond must be a non-negative number.");
+  }
+  if (part.properties?.materialColor !== undefined && !/^#[0-9a-fA-F]{6}$/.test(part.properties.materialColor)) {
+    errors.push("part properties.materialColor must be a #RRGGBB value.");
+  }
   if (part.properties?.loaderCooldownMultiplier !== undefined && (!Number.isFinite(part.properties.loaderCooldownMultiplier) || part.properties.loaderCooldownMultiplier <= 0)) {
     errors.push("part properties.loaderCooldownMultiplier must be > 0.");
   }
@@ -216,6 +228,9 @@ export function validatePartDefinitionDetailed(part: PartDefinition): PartValida
   }
   if (part.properties?.isArmor === true && part.properties.hp === undefined) {
     warnings.push("is_armor is enabled but hp is not set.");
+  }
+  if (part.layer === "structure" && !part.properties?.materialId) {
+    warnings.push("structure part should define properties.materialId.");
   }
   if (
     part.properties?.hasCoreTuning === true

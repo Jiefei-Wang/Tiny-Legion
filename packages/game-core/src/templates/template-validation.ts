@@ -175,6 +175,10 @@ export function validateTemplateDetailed(
       errors.push("invalid functional component");
       continue;
     }
+    if (part.layer !== "functional") {
+      errors.push("attachment part must use functional layer");
+      continue;
+    }
 
     if (attachment.cell < 0 || attachment.cell >= template.structure.length) {
       errors.push("functional cell index out of range");

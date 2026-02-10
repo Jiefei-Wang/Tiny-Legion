@@ -45,6 +45,7 @@ import type {
   KeyState,
   MapNode,
   MaterialId,
+  MaterialStats,
   PartDefinition,
   ScreenMode,
   TechState,
@@ -364,6 +365,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
   let partDesignerDialogOpen = false;
   let partDesignerSelectedId: string | null = null;
   let partDesignerTool: PartDesignerTool = "select";
+  const STRUCTURE_LAYER_BASE_OPTION = "__structure_layer__";
   let partDesignerDraft: PartDefinition = clonePartDefinition(parts[0] ?? {
     id: "control",
     name: "control",
@@ -380,6 +382,16 @@ export function bootstrap(options: BootstrapOptions = {}): void {
   let partDesignerEmptyStructureOffsets = new Set<number>();
   let partDesignerEmptyFunctionalOffsets = new Set<number>();
   let partDesignerRequireStructureBelowAnchor = false;
+  let partDesignerCategoryEdited = false;
+  let partDesignerSubcategoryEdited = false;
+  let partDesignerLastFunctionalBaseComponent: ComponentId = partDesignerDraft.baseComponent;
+  const defaultMaterialStats: Record<MaterialId, MaterialStats> = {
+    basic: { ...MATERIALS.basic },
+    reinforced: { ...MATERIALS.reinforced },
+    ceramic: { ...MATERIALS.ceramic },
+    reactive: { ...MATERIALS.reactive },
+    combined: { ...MATERIALS.combined },
+  };
   let editorDraft: UnitTemplate = {
     id: "custom-1",
     name: "Custom Unit",
@@ -1350,13 +1362,15 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       const hasExplicitByBase = new Set<string>();
       for (const part of defaultParts) {
         const isImplicit = (part.tags ?? []).includes("implicit");
-        if (!isImplicit) {
+        const isFunctionalImplicitFallback = isImplicit && part.layer === "functional" && part.id === part.baseComponent;
+        if (!isFunctionalImplicitFallback) {
           hasExplicitByBase.add(part.baseComponent);
         }
       }
       return defaultParts.filter((part) => {
         const isImplicit = (part.tags ?? []).includes("implicit");
-        if (!isImplicit) {
+        const isFunctionalImplicitFallback = isImplicit && part.layer === "functional" && part.id === part.baseComponent;
+        if (!isFunctionalImplicitFallback) {
           return true;
         }
         return !hasExplicitByBase.has(part.baseComponent);
@@ -1367,6 +1381,46 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     } else {
       parts.splice(0, parts.length, ...createDefaultPartDefinitions());
     }
+    const applyMaterialOverridesFromParts = (): void => {
+      const materialIds: MaterialId[] = ["basic", "reinforced", "ceramic", "reactive", "combined"];
+      for (const materialId of materialIds) {
+        const baseline = defaultMaterialStats[materialId];
+        MATERIALS[materialId] = { ...baseline };
+      }
+      for (const materialId of materialIds) {
+        const materialPart = parts.find((part) => {
+          if (part.layer !== "structure") {
+            return false;
+          }
+          if (part.properties?.materialId === materialId) {
+            return true;
+          }
+          return part.id === materialId || part.id === `material-${materialId}`;
+        });
+        if (!materialPart) {
+          continue;
+        }
+        const current = MATERIALS[materialId];
+        const nextMass = materialPart.stats?.mass;
+        const nextHp = materialPart.properties?.hp;
+        const nextArmor = materialPart.properties?.materialArmor;
+        const nextRecoverPerSecond = materialPart.properties?.materialRecoverPerSecond;
+        const nextColor = materialPart.properties?.materialColor;
+        MATERIALS[materialId] = {
+          label: materialPart.name || current.label,
+          mass: Number.isFinite(nextMass) ? Math.max(0, Number(nextMass)) : current.mass,
+          armor: Number.isFinite(nextArmor) ? Math.max(0, Number(nextArmor)) : current.armor,
+          hp: Number.isFinite(nextHp) ? Math.max(0, Number(nextHp)) : current.hp,
+          recoverPerSecond: Number.isFinite(nextRecoverPerSecond)
+            ? Math.max(0, Number(nextRecoverPerSecond))
+            : current.recoverPerSecond,
+          color: (typeof nextColor === "string" && /^#[0-9a-fA-F]{6}$/.test(nextColor))
+            ? nextColor
+            : current.color,
+        };
+      }
+    };
+    applyMaterialOverridesFromParts();
     battle.setPartCatalog(parts);
   };
 
@@ -1651,19 +1705,92 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     };
   };
 
+  const getMaterialDefaultsForPart = (part: PartDefinition): {
+    materialId: MaterialId;
+    materialArmor: number;
+    materialRecoverPerSecond: number;
+    materialColor: string;
+    hp: number;
+    mass: number;
+  } => {
+    const explicit = part.properties?.materialId;
+    const inferred = part.id === "material-basic" || part.id === "basic"
+      ? "basic"
+      : part.id === "material-reinforced" || part.id === "reinforced"
+        ? "reinforced"
+        : part.id === "material-ceramic" || part.id === "ceramic"
+          ? "ceramic"
+          : part.id === "material-reactive" || part.id === "reactive"
+            ? "reactive"
+            : part.id === "material-combined" || part.id === "combined"
+              ? "combined"
+              : "basic";
+    const materialId: MaterialId = explicit ?? inferred;
+    const material = MATERIALS[materialId];
+    return {
+      materialId,
+      materialArmor: material.armor,
+      materialRecoverPerSecond: material.recoverPerSecond,
+      materialColor: material.color,
+      hp: material.hp,
+      mass: material.mass,
+    };
+  };
+
+  const getPartMetadataDefaultsForLayer = (
+    layer: PartDefinition["layer"],
+    baseComponent: ComponentId,
+  ): Pick<NonNullable<PartDefinition["properties"]>, "category" | "subcategory"> => {
+    if (layer === "structure") {
+      return {
+        category: "structure",
+        subcategory: "armor",
+      };
+    }
+    const defaults = getPartMetadataDefaults(baseComponent);
+    return {
+      category: defaults.category,
+      subcategory: defaults.subcategory,
+    };
+  };
+
+  const syncPartMetaDefaultsIfNotEdited = (): void => {
+    const suggested = getPartMetadataDefaultsForLayer(partDesignerDraft.layer, partDesignerDraft.baseComponent);
+    const current = partDesignerDraft.properties ?? {};
+    partDesignerDraft.properties = {
+      ...current,
+      category: partDesignerCategoryEdited ? current.category : suggested.category,
+      subcategory: partDesignerSubcategoryEdited ? current.subcategory : suggested.subcategory,
+    };
+  };
+
   const applyPartMetadataDefaults = (part: PartDefinition): PartDefinition => {
     const defaults = getPartMetadataDefaults(part.baseComponent);
+    const metaDefaults = getPartMetadataDefaultsForLayer(part.layer, part.baseComponent);
+    const materialDefaults = part.layer === "structure" ? getMaterialDefaultsForPart(part) : null;
     const hasCoreTuningOverrides = part.stats?.mass !== undefined || part.stats?.hpMul !== undefined;
     return {
       ...part,
+      stats: {
+        ...(part.stats ?? {}),
+        ...(materialDefaults
+          ? {
+              mass: part.stats?.mass ?? materialDefaults.mass,
+            }
+          : {}),
+      },
       properties: {
-        category: part.properties?.category ?? defaults.category,
-        subcategory: part.properties?.subcategory ?? defaults.subcategory,
-        hp: part.properties?.hp,
+        category: part.properties?.category ?? metaDefaults.category,
+        subcategory: part.properties?.subcategory ?? metaDefaults.subcategory,
+        materialId: part.properties?.materialId ?? materialDefaults?.materialId,
+        materialArmor: part.properties?.materialArmor ?? materialDefaults?.materialArmor,
+        materialRecoverPerSecond: part.properties?.materialRecoverPerSecond ?? materialDefaults?.materialRecoverPerSecond,
+        materialColor: part.properties?.materialColor ?? materialDefaults?.materialColor,
+        hp: part.properties?.hp ?? materialDefaults?.hp,
         isEngine: part.properties?.isEngine ?? defaults.isEngine,
         isWeapon: part.properties?.isWeapon ?? defaults.isWeapon,
         isLoader: part.properties?.isLoader ?? defaults.isLoader,
-        isArmor: part.properties?.isArmor ?? defaults.isArmor,
+        isArmor: part.layer === "structure" ? true : (part.properties?.isArmor ?? defaults.isArmor),
         engineType: part.properties?.engineType ?? defaults.engineType,
         weaponType: part.properties?.weaponType ?? defaults.weaponType,
         loaderServesTags: part.properties?.loaderServesTags ?? defaults.loaderServesTags,
@@ -1683,9 +1810,9 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         const selectedCoord = selectedSlot !== null ? slotToCoord(selectedSlot) : null;
         const selectedEntry = selectedSlot !== null ? partDesignerSlots[selectedSlot] : null;
         const resolvedEntry = selectedEntry ?? {
-          occupiesStructureSpace: false,
-          occupiesFunctionalSpace: true,
-          needsStructureBehind: true,
+          occupiesStructureSpace: partDesignerDraft.layer === "structure",
+          occupiesFunctionalSpace: partDesignerDraft.layer !== "structure",
+          needsStructureBehind: partDesignerDraft.layer !== "structure",
           takesDamage: true,
           isAttachPoint: false,
           isShootingPoint: false,
@@ -1694,7 +1821,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         selectedInfo.innerHTML = `
           <div><strong>Part Designer</strong></div>
           <div class="small">Part: ${partDesignerDraft.name} (${partDesignerDraft.id})</div>
-          <div class="small">Base component: ${partDesignerDraft.baseComponent} | Directional: ${partDesignerDraft.directional ? "yes" : "no"}</div>
+          <div class="small">Layer: ${partDesignerDraft.layer} | Base component: ${partDesignerDraft.baseComponent} | Directional: ${partDesignerDraft.directional ? "yes" : "no"}</div>
           <div class="small">Boxes: ${partDesignerDraft.boxes.length} | Anchor: (${partDesignerDraft.anchor.x},${partDesignerDraft.anchor.y})</div>
           <div class="row">
             <label class="small">Tool
@@ -2208,7 +2335,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       });
     }
     if (editorLayer === "functional") {
-      return parts.map((part) => {
+      return parts.filter((part) => part.layer === "functional").map((part) => {
         const stats = COMPONENTS[part.baseComponent];
         const rotateHint = isDirectionalPart(part) ? " | Supports 90deg rotate" : "";
         const footprint = getPartFootprintOffsets(part, 0);
@@ -2280,10 +2407,10 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     // Gas is currently not derived from parts in editor mode.
   };
 
-  const createDefaultPartDesignerSlot = (): NonNullable<PartDesignerSlot> => ({
-    occupiesFunctionalSpace: true,
-    occupiesStructureSpace: false,
-    needsStructureBehind: true,
+  const createDefaultPartDesignerSlot = (layer: PartDefinition["layer"]): NonNullable<PartDesignerSlot> => ({
+    occupiesFunctionalSpace: layer !== "structure",
+    occupiesStructureSpace: layer === "structure",
+    needsStructureBehind: layer !== "structure",
     takesDamage: true,
     isAttachPoint: false,
     isShootingPoint: false,
@@ -2294,7 +2421,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     if (current) {
       return current;
     }
-    const next = createDefaultPartDesignerSlot();
+    const next = createDefaultPartDesignerSlot(partDesignerDraft.layer);
     partDesignerSlots[slot] = next;
     return next;
   };
@@ -2335,9 +2462,9 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       boxes.push({
         x: anchorCoord.x,
         y: anchorCoord.y,
-        occupiesFunctionalSpace: true,
-        occupiesStructureSpace: false,
-        needsStructureBehind: true,
+        occupiesFunctionalSpace: partDesignerDraft.layer !== "structure",
+        occupiesStructureSpace: partDesignerDraft.layer === "structure",
+        needsStructureBehind: partDesignerDraft.layer !== "structure",
         isAttachPoint: false,
         isAnchorPoint: true,
         isShootingPoint: false,
@@ -2347,9 +2474,9 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       const anchorSlot = coordToSlot(anchorCoord.x, anchorCoord.y);
       if (anchorSlot !== null) {
         partDesignerSlots[anchorSlot] = {
-          occupiesFunctionalSpace: true,
-          occupiesStructureSpace: false,
-          needsStructureBehind: true,
+          occupiesFunctionalSpace: partDesignerDraft.layer !== "structure",
+          occupiesStructureSpace: partDesignerDraft.layer === "structure",
+          needsStructureBehind: partDesignerDraft.layer !== "structure",
           takesDamage: true,
           isAttachPoint: false,
           isShootingPoint: false,
@@ -2374,8 +2501,12 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       placement: {
         requireStructureOffsets: toRelativeOffsets(partDesignerSupportOffsets),
         requireStructureBelowAnchor: partDesignerRequireStructureBelowAnchor,
-        requireStructureOnFunctionalOccupiedBoxes: partDesignerDraft.placement?.requireStructureOnFunctionalOccupiedBoxes ?? true,
-        requireStructureOnStructureOccupiedBoxes: partDesignerDraft.placement?.requireStructureOnStructureOccupiedBoxes ?? true,
+        requireStructureOnFunctionalOccupiedBoxes: partDesignerDraft.layer === "structure"
+          ? false
+          : (partDesignerDraft.placement?.requireStructureOnFunctionalOccupiedBoxes ?? true),
+        requireStructureOnStructureOccupiedBoxes: partDesignerDraft.layer === "structure"
+          ? false
+          : (partDesignerDraft.placement?.requireStructureOnStructureOccupiedBoxes ?? true),
         requireEmptyStructureOffsets: toRelativeOffsets(partDesignerEmptyStructureOffsets),
         requireEmptyFunctionalOffsets: toRelativeOffsets(partDesignerEmptyFunctionalOffsets),
       },
@@ -2384,6 +2515,12 @@ export function bootstrap(options: BootstrapOptions = {}): void {
 
   const loadPartIntoDesignerSlots = (part: PartDefinition): void => {
     partDesignerDraft = applyPartMetadataDefaults(clonePartDefinition(part));
+    if (partDesignerDraft.layer === "functional") {
+      partDesignerLastFunctionalBaseComponent = partDesignerDraft.baseComponent;
+    }
+    const suggestedMeta = getPartMetadataDefaultsForLayer(partDesignerDraft.layer, partDesignerDraft.baseComponent);
+    partDesignerCategoryEdited = (partDesignerDraft.properties?.category ?? "") !== (suggestedMeta.category ?? "");
+    partDesignerSubcategoryEdited = (partDesignerDraft.properties?.subcategory ?? "") !== (suggestedMeta.subcategory ?? "");
     partDesignerSlots = new Array<PartDesignerSlot>(EDITOR_GRID_MAX_SIZE).fill(null);
     partDesignerSupportOffsets = new Set<number>();
     partDesignerEmptyStructureOffsets = new Set<number>();
@@ -3229,7 +3366,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         .map((part) => {
           const selectedClass = part.id === partDesignerSelectedId ? "active" : "";
           return `<div class="row" style="gap:8px; flex-wrap:nowrap; align-items:center;">
-            <button data-part-open-select="${part.id}" class="${selectedClass}" style="flex:1; text-align:left;">${part.name} (${part.baseComponent})</button>
+            <button data-part-open-select="${part.id}" class="${selectedClass}" style="flex:1; text-align:left;">${part.name} [${part.layer}] (${part.baseComponent})</button>
             <div style="display:flex; gap:6px; margin-left:auto;">
               <button data-part-open-copy="${part.id}">Copy</button>
               <button data-part-open-delete="${part.id}">Delete</button>
@@ -3237,9 +3374,13 @@ export function bootstrap(options: BootstrapOptions = {}): void {
           </div>`;
         })
         .join("");
-      const baseComponentOptions = Object.keys(COMPONENTS)
-        .map((component) => `<option value="${component}" ${partDesignerDraft.baseComponent === component ? "selected" : ""}>${component}</option>`)
-        .join("");
+      const isStructureLayerMode = partDesignerDraft.layer === "structure";
+      const selectedBaseOption = isStructureLayerMode ? STRUCTURE_LAYER_BASE_OPTION : partDesignerDraft.baseComponent;
+      const baseComponentOptions = [
+        `<option value="${STRUCTURE_LAYER_BASE_OPTION}" ${selectedBaseOption === STRUCTURE_LAYER_BASE_OPTION ? "selected" : ""}>structure-layer</option>`,
+        ...Object.keys(COMPONENTS)
+        .map((component) => `<option value="${component}" ${selectedBaseOption === component ? "selected" : ""}>${component}</option>`)
+      ].join("");
       const baseStats = COMPONENTS[partDesignerDraft.baseComponent];
       const runtimePlaceholders = {
         mass: String(baseStats.mass),
@@ -3267,7 +3408,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         loaderStoreCapacity: baseStats.loader?.storeCapacity !== undefined ? String(baseStats.loader.storeCapacity) : "none",
         loaderMinBurstInterval: baseStats.loader?.minBurstInterval !== undefined ? String(baseStats.loader.minBurstInterval) : "none",
       };
-      const categoryOptionsBase: string[] = ["functional", "weapon", "mobility", "support", "defense", "utility", "other"];
+      const categoryOptionsBase: string[] = ["functional", "structure", "weapon", "mobility", "support", "defense", "utility", "other"];
       const weaponTypeOptions: Array<{ value: NonNullable<PartDefinition["properties"]>["weaponType"]; label: string }> = [
         { value: "rapid-fire", label: "rapid-fire" },
         { value: "heavy-shot", label: "heavy-shot" },
@@ -3280,11 +3421,11 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       const categoryOptions = partProps.category && !categoryOptionsBase.includes(partProps.category)
         ? [partProps.category, ...categoryOptionsBase]
         : categoryOptionsBase;
-      const propIsEngine = partProps.isEngine === true;
-      const propIsWeapon = partProps.isWeapon === true;
-      const propIsLoader = partProps.isLoader === true;
-      const propIsArmor = partProps.isArmor === true;
-      const propHasCoreTuning = partProps.hasCoreTuning === true;
+      const propIsEngine = !isStructureLayerMode && partProps.isEngine === true;
+      const propIsWeapon = !isStructureLayerMode && partProps.isWeapon === true;
+      const propIsLoader = !isStructureLayerMode && partProps.isLoader === true;
+      const propIsArmor = isStructureLayerMode ? true : partProps.isArmor === true;
+      const propHasCoreTuning = !isStructureLayerMode && partProps.hasCoreTuning === true;
       const resolvedWeaponType = partProps.weaponType ?? baseStats.weaponClass;
       const weaponSupportsExplosive = resolvedWeaponType === "explosive";
       const weaponSupportsTracking = resolvedWeaponType === "tracking";
@@ -3321,7 +3462,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
           </label>
           <label class="small"><input id="partDirectional" type="checkbox" ${partDesignerDraft.directional ? "checked" : ""} /> Directional</label>
         </div>
-        <div><strong>Editor Meta</strong></div>
+        ${!isStructureLayerMode ? `<div><strong>Editor Meta</strong></div>
         <div class="row">
           <label class="small">Category
             <select id="partCategorySelect">
@@ -3329,18 +3470,36 @@ export function bootstrap(options: BootstrapOptions = {}): void {
             </select>
           </label>
           <label class="small">Subcategory <input id="partSubcategory" value="${partProps.subcategory ?? ""}" /></label>
-        </div>
+        </div>` : ""}
         <div><strong>Part Properties</strong></div>
         <div class="row">
           <label class="small" style="flex:1;">Tags (comma separated) <input id="partTags" value="${(partDesignerDraft.tags ?? []).join(", ")}" /></label>
         </div>
+        ${isStructureLayerMode ? `<div class="row">
+          <label class="small">Material
+            <select id="partMaterialId">
+              <option value="basic" ${partProps.materialId === "basic" ? "selected" : ""}>basic steel</option>
+              <option value="reinforced" ${partProps.materialId === "reinforced" ? "selected" : ""}>reinforced</option>
+              <option value="ceramic" ${partProps.materialId === "ceramic" ? "selected" : ""}>ceramic</option>
+              <option value="reactive" ${partProps.materialId === "reactive" ? "selected" : ""}>reactive</option>
+              <option value="combined" ${partProps.materialId === "combined" ? "selected" : ""}>combined mk1</option>
+            </select>
+          </label>
+          <label class="small">Armor <input id="partMaterialArmor" type="number" step="0.01" value="${partProps.materialArmor ?? ""}" /></label>
+          <label class="small">Recover/s <input id="partMaterialRecoverPerSecond" type="number" step="0.05" value="${partProps.materialRecoverPerSecond ?? ""}" /></label>
+          <label class="small">Color <input id="partMaterialColor" value="${partProps.materialColor ?? ""}" placeholder="#95a4b8" /></label>
+        </div>
         <div class="row">
+          <label class="small">Mass <input id="partStructureMass" type="number" step="0.1" value="${partDesignerDraft.stats?.mass ?? ""}" /></label>
+          <label class="small">HP <input id="partMetaHp" type="number" step="1" value="${partProps.hp ?? ""}" /></label>
+        </div>` : ""}
+        ${!isStructureLayerMode ? `<div class="row">
           <label class="small"><input id="partPropIsEngine" type="checkbox" ${propIsEngine ? "checked" : ""} /> is_engine</label>
           <label class="small"><input id="partPropIsWeapon" type="checkbox" ${propIsWeapon ? "checked" : ""} /> is_weapon</label>
           <label class="small"><input id="partPropIsLoader" type="checkbox" ${propIsLoader ? "checked" : ""} /> is_loader</label>
           <label class="small"><input id="partPropIsArmor" type="checkbox" ${propIsArmor ? "checked" : ""} /> is_armor</label>
           <label class="small"><input id="partPropCoreTuning" type="checkbox" ${propHasCoreTuning ? "checked" : ""} /> core_tuning</label>
-        </div>
+        </div>` : `<div class="small">Structure layer mode: functional-specific metadata and placement constraints are hidden.</div>`}
         ${propIsEngine ? `<div class="row">
           <label class="small">Engine Type
             <select id="partEngineType">
@@ -3408,7 +3567,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
           <label class="small">Store Capacity <input id="partLoaderStoreCapacity" type="number" step="1" value="${partDesignerDraft.stats?.loaderStoreCapacity ?? ""}" placeholder="${runtimePlaceholders.loaderStoreCapacity}" /></label>
           <label class="small">Min Burst Interval <input id="partLoaderMinBurstInterval" type="number" step="0.05" value="${partDesignerDraft.stats?.loaderMinBurstInterval ?? ""}" placeholder="${runtimePlaceholders.loaderMinBurstInterval}" /></label>
         </div>` : ""}
-        ${propIsArmor ? `<div class="row">
+        ${!isStructureLayerMode && propIsArmor ? `<div class="row">
           <label class="small">HP <input id="partMetaHp" type="number" step="1" value="${partProps.hp ?? ""}" /></label>
         </div>` : ""}
         ${propHasCoreTuning ? `<div class="row">
@@ -3416,11 +3575,11 @@ export function bootstrap(options: BootstrapOptions = {}): void {
           <label class="small">HP Mul <input id="partHpMul" type="number" step="0.05" value="${partDesignerDraft.stats?.hpMul ?? ""}" placeholder="${runtimePlaceholders.hpMul}" /></label>
         </div>
         ` : ""}
-        <div class="row">
+        ${!isStructureLayerMode ? `<div class="row">
           <label class="small"><input id="partRequireStructureBelowAnchor" type="checkbox" ${partDesignerRequireStructureBelowAnchor ? "checked" : ""} /> Require structure below anchor</label>
           <label class="small"><input id="partRequireStructureOnFunctional" type="checkbox" ${(partDesignerDraft.placement?.requireStructureOnFunctionalOccupiedBoxes ?? true) ? "checked" : ""} /> Functional boxes require structure</label>
           <label class="small"><input id="partRequireStructureOnStructure" type="checkbox" ${(partDesignerDraft.placement?.requireStructureOnStructureOccupiedBoxes ?? true) ? "checked" : ""} /> Structure boxes require structure support</label>
-        </div>
+        </div>` : ""}
         <div class="row">
           <button id="btnNewPartDraft">New Part</button>
           <button id="btnClearPartGrid">Clear Grid</button>
@@ -4145,24 +4304,97 @@ export function bootstrap(options: BootstrapOptions = {}): void {
 
     getOptionalElement<HTMLSelectElement>("#partBaseComponent")?.addEventListener("change", (event) => {
       const value = (event.currentTarget as HTMLSelectElement).value;
-      if (!(value in COMPONENTS)) {
-        return;
+      if (value === STRUCTURE_LAYER_BASE_OPTION) {
+        if (partDesignerDraft.layer === "functional") {
+          partDesignerLastFunctionalBaseComponent = partDesignerDraft.baseComponent;
+        }
+        partDesignerDraft.layer = "structure";
+        partDesignerDraft.baseComponent = partDesignerLastFunctionalBaseComponent;
+        partDesignerDraft.directional = false;
+        partDesignerSlots = partDesignerSlots.map((entry) => {
+          if (!entry) {
+            return null;
+          }
+          return {
+            ...entry,
+            occupiesStructureSpace: true,
+            occupiesFunctionalSpace: false,
+            needsStructureBehind: false,
+            isAttachPoint: false,
+            isShootingPoint: false,
+          };
+        });
+        partDesignerRequireStructureBelowAnchor = false;
+        partDesignerSupportOffsets = new Set<number>();
+        partDesignerEmptyStructureOffsets = new Set<number>();
+        partDesignerEmptyFunctionalOffsets = new Set<number>();
+        partDesignerDraft.stats = {
+          ...(partDesignerDraft.stats ?? {}),
+          power: undefined,
+          maxSpeed: undefined,
+          recoil: undefined,
+          hitImpulse: undefined,
+          damage: undefined,
+          range: undefined,
+          cooldown: undefined,
+          shootAngleDeg: undefined,
+          projectileSpeed: undefined,
+          projectileGravity: undefined,
+          spreadDeg: undefined,
+          explosiveDeliveryMode: undefined,
+          explosiveBlastRadius: undefined,
+          explosiveBlastDamage: undefined,
+          explosiveFalloffPower: undefined,
+          explosiveFuse: undefined,
+          explosiveFuseTime: undefined,
+          trackingTurnRateDegPerSec: undefined,
+          controlImpairFactor: undefined,
+          controlDuration: undefined,
+          loaderSupports: undefined,
+          loaderLoadMultiplier: undefined,
+          loaderFastOperation: undefined,
+          loaderMinLoadTime: undefined,
+          loaderStoreCapacity: undefined,
+          loaderMinBurstInterval: undefined,
+        };
+        const materialId = (partDesignerDraft.properties?.materialId ?? "basic") as MaterialId;
+        const material = MATERIALS[materialId] ?? MATERIALS.basic;
+        partDesignerDraft.properties = {
+          ...(partDesignerDraft.properties ?? {}),
+          materialId,
+          materialArmor: partDesignerDraft.properties?.materialArmor ?? material.armor,
+          materialRecoverPerSecond: partDesignerDraft.properties?.materialRecoverPerSecond ?? material.recoverPerSecond,
+          materialColor: partDesignerDraft.properties?.materialColor ?? material.color,
+          hp: partDesignerDraft.properties?.hp ?? material.hp,
+        };
+        partDesignerDraft.stats = {
+          ...(partDesignerDraft.stats ?? {}),
+          mass: partDesignerDraft.stats?.mass ?? material.mass,
+        };
+      } else {
+        if (!(value in COMPONENTS)) {
+          return;
+        }
+        partDesignerDraft.layer = "functional";
+        partDesignerDraft.baseComponent = value as ComponentId;
+        partDesignerLastFunctionalBaseComponent = partDesignerDraft.baseComponent;
       }
-      partDesignerDraft.baseComponent = value as ComponentId;
       if (partDesignerDraft.directional === undefined) {
         partDesignerDraft.directional = COMPONENTS[partDesignerDraft.baseComponent].directional === true;
       }
       const defaults = getPartMetadataDefaults(partDesignerDraft.baseComponent);
       partDesignerDraft.properties = {
         ...(partDesignerDraft.properties ?? {}),
-        isEngine: defaults.isEngine,
-        isWeapon: defaults.isWeapon,
-        isLoader: defaults.isLoader,
-        engineType: defaults.engineType,
-        weaponType: defaults.weaponType,
-        loaderServesTags: defaults.loaderServesTags,
-        loaderCooldownMultiplier: defaults.loaderCooldownMultiplier,
+        isEngine: partDesignerDraft.layer === "structure" ? false : defaults.isEngine,
+        isWeapon: partDesignerDraft.layer === "structure" ? false : defaults.isWeapon,
+        isLoader: partDesignerDraft.layer === "structure" ? false : defaults.isLoader,
+        isArmor: partDesignerDraft.layer === "structure" ? true : defaults.isArmor,
+        engineType: partDesignerDraft.layer === "structure" ? undefined : defaults.engineType,
+        weaponType: partDesignerDraft.layer === "structure" ? undefined : defaults.weaponType,
+        loaderServesTags: partDesignerDraft.layer === "structure" ? undefined : defaults.loaderServesTags,
+        loaderCooldownMultiplier: partDesignerDraft.layer === "structure" ? undefined : defaults.loaderCooldownMultiplier,
       };
+      syncPartMetaDefaultsIfNotEdited();
       recalcPartDraftFromSlots();
       renderPanels();
     });
@@ -4178,6 +4410,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         ...(partDesignerDraft.properties ?? {}),
         category: value || undefined,
       };
+      partDesignerCategoryEdited = true;
       updateSelectedInfo();
     });
     getOptionalElement<HTMLInputElement>("#partSubcategory")?.addEventListener("input", (event) => {
@@ -4186,6 +4419,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         ...(partDesignerDraft.properties ?? {}),
         subcategory: value || undefined,
       };
+      partDesignerSubcategoryEdited = true;
       updateSelectedInfo();
     });
     getOptionalElement<HTMLInputElement>("#partTags")?.addEventListener("input", (event) => {
@@ -4203,6 +4437,61 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       partDesignerDraft.properties = {
         ...(partDesignerDraft.properties ?? {}),
         hp: Number.isFinite(numeric) ? numeric : undefined,
+      };
+      updateSelectedInfo();
+    });
+    getOptionalElement<HTMLSelectElement>("#partMaterialId")?.addEventListener("change", (event) => {
+      const value = (event.currentTarget as HTMLSelectElement).value as MaterialId;
+      if (!(value in MATERIALS)) {
+        return;
+      }
+      const base = MATERIALS[value];
+      partDesignerDraft.properties = {
+        ...(partDesignerDraft.properties ?? {}),
+        materialId: value,
+        materialArmor: base.armor,
+        materialRecoverPerSecond: base.recoverPerSecond,
+        materialColor: base.color,
+        hp: base.hp,
+      };
+      partDesignerDraft.stats = {
+        ...(partDesignerDraft.stats ?? {}),
+        mass: base.mass,
+      };
+      renderPanels();
+    });
+    getOptionalElement<HTMLInputElement>("#partMaterialArmor")?.addEventListener("input", (event) => {
+      const raw = (event.currentTarget as HTMLInputElement).value.trim();
+      const numeric = raw.length > 0 ? Number(raw) : Number.NaN;
+      partDesignerDraft.properties = {
+        ...(partDesignerDraft.properties ?? {}),
+        materialArmor: Number.isFinite(numeric) ? numeric : undefined,
+      };
+      updateSelectedInfo();
+    });
+    getOptionalElement<HTMLInputElement>("#partMaterialRecoverPerSecond")?.addEventListener("input", (event) => {
+      const raw = (event.currentTarget as HTMLInputElement).value.trim();
+      const numeric = raw.length > 0 ? Number(raw) : Number.NaN;
+      partDesignerDraft.properties = {
+        ...(partDesignerDraft.properties ?? {}),
+        materialRecoverPerSecond: Number.isFinite(numeric) ? numeric : undefined,
+      };
+      updateSelectedInfo();
+    });
+    getOptionalElement<HTMLInputElement>("#partMaterialColor")?.addEventListener("input", (event) => {
+      const value = (event.currentTarget as HTMLInputElement).value.trim();
+      partDesignerDraft.properties = {
+        ...(partDesignerDraft.properties ?? {}),
+        materialColor: value.length > 0 ? value : undefined,
+      };
+      updateSelectedInfo();
+    });
+    getOptionalElement<HTMLInputElement>("#partStructureMass")?.addEventListener("input", (event) => {
+      const raw = (event.currentTarget as HTMLInputElement).value.trim();
+      const numeric = raw.length > 0 ? Number(raw) : Number.NaN;
+      partDesignerDraft.stats = {
+        ...(partDesignerDraft.stats ?? {}),
+        mass: Number.isFinite(numeric) ? numeric : undefined,
       };
       updateSelectedInfo();
     });
@@ -4475,6 +4764,9 @@ export function bootstrap(options: BootstrapOptions = {}): void {
           hasCoreTuning: false,
         },
       };
+      partDesignerLastFunctionalBaseComponent = partDesignerDraft.baseComponent;
+      partDesignerCategoryEdited = false;
+      partDesignerSubcategoryEdited = false;
       partDesignerSelectedId = partDesignerDraft.id;
       partDesignerTool = "select";
       partDesignerDialogOpen = false;
@@ -4645,8 +4937,9 @@ export function bootstrap(options: BootstrapOptions = {}): void {
           slot.occupiesFunctionalSpace = false;
           slot.needsStructureBehind = false;
         } else if (!slot.occupiesStructureSpace && !slot.occupiesFunctionalSpace) {
-          slot.occupiesFunctionalSpace = true;
-          slot.needsStructureBehind = true;
+          slot.occupiesStructureSpace = partDesignerDraft.layer === "structure";
+          slot.occupiesFunctionalSpace = partDesignerDraft.layer !== "structure";
+          slot.needsStructureBehind = partDesignerDraft.layer !== "structure";
         }
       } else if (target.id === "partBoxAnchor") {
         if (checked) {

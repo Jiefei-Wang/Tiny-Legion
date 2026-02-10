@@ -162,3 +162,9 @@ Python helper files:
 - `arena/python/arena_client.py`
 - `arena/python/example_baseline_ai.py`
 - `arena/python/test_arena_bridge.py` (Test Arena browser bridge client)
+
+Python training script:
+
+- `arena/python/train.py`
+  - Builds baseline composer then replaces selected modules with neural modules.
+  - Uses delayed reward updates (10s chunks) from gas-value differential.
