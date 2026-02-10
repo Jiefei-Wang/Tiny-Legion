@@ -566,6 +566,7 @@ The current playable implementation already includes:
 
 - Ground XY movement and air XZ movement abstraction.
 - Battle bases auto-place vertically from runtime lane bounds (midpoint of the air/ground boundary band between `airMaxZ` and `groundMinY`), and reflow when battlefield size or ground height changes.
+- On battle start, viewport Y is auto-centered to the player-base vertical midpoint using current base world Y and viewport height (X offset remains unchanged).
 - Structure/functional/display layer split with debug-menu display toggle (default display OFF) and optional per-cell part HP overlay.
 - Multi-weapon units and independent weapon cooldown timers.
 - Weapon slot manual-control toggles (default `ON`) and per-slot auto-fire toggles.

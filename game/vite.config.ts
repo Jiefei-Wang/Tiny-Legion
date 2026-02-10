@@ -625,6 +625,36 @@ function arenaModelPlugin() {
   return {
     name: "arena-models",
     configureServer(server: import("vite").ViteDevServer) {
+      server.middlewares.use("/__arena/python-models", (req, res) => {
+        if (req.method !== "GET") {
+          res.statusCode = 405;
+          res.end("method not allowed");
+          return;
+        }
+        const rawUrl = req.url ?? "";
+        const path = rawUrl.split("?")[0] ?? "";
+        const fileName = decodeURIComponent(path.split("/").filter(Boolean).at(-1) ?? "");
+        if (!/^[a-zA-Z0-9._-]+\.onnx$/.test(fileName)) {
+          res.statusCode = 400;
+          res.end("invalid file name");
+          return;
+        }
+        const filePath = resolve(pythonModelsDir, fileName);
+        if (!existsSync(filePath)) {
+          res.statusCode = 404;
+          res.end("not found");
+          return;
+        }
+        try {
+          const buffer = readFileSync(filePath);
+          res.setHeader("content-type", "application/octet-stream");
+          res.end(buffer);
+        } catch {
+          res.statusCode = 500;
+          res.end("failed to read model file");
+        }
+      });
+
       server.middlewares.use("/__arena/composite/modules", (req, res) => {
         if (req.method !== "GET") {
           res.statusCode = 405;
@@ -694,11 +724,26 @@ function arenaModelPlugin() {
               if (moduleKind !== "target" && moduleKind !== "movement" && moduleKind !== "shoot") {
                 continue;
               }
+              const onnxFileName = fileName.replace(/\.component\.json$/, ".onnx");
+              const onnxPath = resolve(pythonModelsDir, onnxFileName);
+              const hasOnnx = existsSync(onnxPath);
               modules[moduleKind].push({
                 id: `python:${fileName}`,
-                label: `python:${fileName} (onnx)`,
-                compatible: false,
-                reason: "ONNX model requires JS ONNX runtime adapter; not yet wired into composite-controller.",
+                label: `python:${fileName}`,
+                ...(moduleKind === "shoot" && hasOnnx
+                  ? {
+                    compatible: true,
+                    spec: {
+                      familyId: `python-onnx-shoot:${onnxFileName}`,
+                      params: {},
+                    },
+                  }
+                  : {
+                    compatible: false,
+                    reason: hasOnnx
+                      ? "Only shoot ONNX modules are currently executable in browser."
+                      : "Missing ONNX file for this component metadata.",
+                  }),
               });
             } catch {
               continue;

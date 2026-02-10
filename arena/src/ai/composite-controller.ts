@@ -38,6 +38,62 @@ type NeuralHyper = {
   featureMask: boolean[];
 };
 
+type OrtTensorLike = {
+  data: Float32Array | number[] | ArrayLike<number>;
+};
+
+type OrtSessionLike = {
+  run: (feeds: Record<string, unknown>) => Promise<Record<string, OrtTensorLike>>;
+};
+
+let ortModulePromise: Promise<any> | null = null;
+const onnxShootSessionCache = new Map<string, Promise<OrtSessionLike>>();
+
+function sigmoid(x: number): number {
+  if (x >= 0) {
+    const z = Math.exp(-x);
+    return 1 / (1 + z);
+  }
+  const z = Math.exp(x);
+  return z / (1 + z);
+}
+
+function parsePythonOnnxShootFileName(familyId: string): string | null {
+  const prefix = "python-onnx-shoot:";
+  if (!familyId.startsWith(prefix)) {
+    return null;
+  }
+  const fileName = familyId.slice(prefix.length).trim();
+  if (!/^[a-zA-Z0-9._-]+\.onnx$/.test(fileName)) {
+    return null;
+  }
+  return fileName;
+}
+
+async function loadOrtModule(): Promise<any> {
+  if (!ortModulePromise) {
+    ortModulePromise = import("onnxruntime-web");
+  }
+  return ortModulePromise;
+}
+
+function getOnnxShootSession(fileName: string): Promise<OrtSessionLike> {
+  const cached = onnxShootSessionCache.get(fileName);
+  if (cached) {
+    return cached;
+  }
+  const modelUrl = `/__arena/python-models/${encodeURIComponent(fileName)}`;
+  const promise = (async () => {
+    const ort = await loadOrtModule();
+    const session = await ort.InferenceSession.create(modelUrl, {
+      executionProviders: ["wasm"],
+    });
+    return session as OrtSessionLike;
+  })();
+  onnxShootSessionCache.set(fileName, promise);
+  return promise;
+}
+
 export type CompositeModuleSpec = {
   familyId: string;
   params: Params;
@@ -320,6 +376,122 @@ function createNeuralShootAi(params: Params): ShootAiModule {
   };
 }
 
+function createPythonOnnxShootAi(fileName: string): ShootAiModule {
+  const outputByKey = new Map<string, [number, number]>();
+  const pendingByKey = new Map<string, Promise<void>>();
+
+  const makeFeatureKey = (slot: number, features: FeatureVector): string => {
+    const rounded = features.map((v) => Math.round(v * 1000) / 1000);
+    return `${slot}:${rounded.join(",")}`;
+  };
+
+  const inferAsync = (key: string, features: FeatureVector): void => {
+    if (outputByKey.has(key) || pendingByKey.has(key)) {
+      return;
+    }
+    const job = (async () => {
+      try {
+        const ort = await loadOrtModule();
+        const session = await getOnnxShootSession(fileName);
+        const input = new ort.Tensor("float32", Float32Array.from(features), [1, features.length]);
+        const outputs = await session.run({ x: input });
+        const first = Object.values(outputs)[0] as OrtTensorLike | undefined;
+        const raw = first?.data;
+        const v0 = Number(raw && raw[0] !== undefined ? raw[0] : 0);
+        const v1 = Number(raw && raw[1] !== undefined ? raw[1] : 0);
+        outputByKey.set(key, [v0, v1]);
+        if (outputByKey.size > 2048) {
+          outputByKey.clear();
+        }
+      } catch {
+        // Keep silent here; caller falls back to no-shot on missing output.
+      } finally {
+        pendingByKey.delete(key);
+      }
+    })();
+    pendingByKey.set(key, job);
+  };
+
+  return {
+    decideShoot: (input, target, movement) => {
+      let bestProb = -1;
+      let bestPlan: ReturnType<ShootAiModule["decideShoot"]>["firePlan"] = null;
+      const motionX = clamp(movement.ax, -1, 1);
+      const motionY = clamp(movement.ay, -1, 1);
+      for (let slot = 0; slot < input.unit.weaponAttachmentIds.length; slot += 1) {
+        const base = buildShootFeatures(input, target, slot);
+        if (!base.plan) {
+          continue;
+        }
+        const attack = target.rankedTargets[0];
+        const dx = base.plan.aim.x - input.unit.x;
+        const dy = base.plan.aim.y - input.unit.y;
+        const distance = Math.hypot(dx, dy);
+        const cooldownReady = (input.unit.weaponFireTimers[slot] ?? 0) <= 0 ? 1 : 0;
+        const readyChargeNorm = clamp((input.unit.weaponReadyCharges[slot] ?? 0) / 4, 0, 4);
+        const targetDx = clamp(dx / Math.max(1, BATTLEFIELD_WIDTH), -2, 2);
+        const targetDy = clamp(dy / Math.max(1, BATTLEFIELD_HEIGHT), -2, 2);
+        const targetDist = clamp(distance / Math.hypot(BATTLEFIELD_WIDTH, BATTLEFIELD_HEIGHT), 0, 2);
+        const targetVx = clamp((attack?.vx ?? 0) / 320, -3, 3);
+        const targetVy = clamp((attack?.vy ?? 0) / 320, -3, 3);
+        const threat = nearestThreat(input);
+        const features: FeatureVector = [
+          1,
+          clamp(slot / Math.max(1, input.unit.weaponAttachmentIds.length), 0, 1),
+          cooldownReady,
+          readyChargeNorm,
+          targetDx,
+          targetDy,
+          targetDist,
+          targetVx,
+          targetVy,
+          motionX,
+          motionY,
+          clamp(threat, 0, 1),
+        ];
+        const key = makeFeatureKey(slot, features);
+        inferAsync(key, features);
+        const out = outputByKey.get(key);
+        if (!out) {
+          continue;
+        }
+        const fireProb = sigmoid(out[0]);
+        const shootSample = Math.random() < fireProb;
+        if (!shootSample) {
+          continue;
+        }
+        const angleDelta = tanh(out[1]) * 0.45;
+        const angle = Math.atan2(dy, dx) + angleDelta;
+        const aimDistance = Math.max(1, distance);
+        const adjustedAim = {
+          x: input.unit.x + Math.cos(angle) * aimDistance,
+          y: input.unit.y + Math.sin(angle) * aimDistance,
+        };
+        const plan = {
+          ...base.plan,
+          aim: adjustedAim,
+        };
+        if (fireProb > bestProb) {
+          bestProb = fireProb;
+          bestPlan = plan;
+        }
+      }
+      if (!bestPlan) {
+        return {
+          firePlan: null,
+          fireBlockedReason: "onnx-pending-or-no-shot",
+          debugTag: "shoot.python-onnx-no-plan",
+        };
+      }
+      return {
+        firePlan: bestPlan,
+        fireBlockedReason: null,
+        debugTag: "shoot.python-onnx",
+      };
+    },
+  };
+}
+
 function makeNeuralSchema(prefix: string, featureCount: number, outputCount: number): ParamSchema {
   const schema: ParamSchema = {
     [`${prefix}layers`]: { kind: "int", min: 1, max: 2, def: 1, step: 1, mutateRate: 0.2 },
@@ -385,6 +557,10 @@ function createShootModule(spec: CompositeModuleSpec): ShootAiModule {
   }
   if (spec.familyId === "neural-shoot") {
     return createNeuralShootAi(spec.params);
+  }
+  const onnxFile = parsePythonOnnxShootFileName(spec.familyId);
+  if (onnxFile) {
+    return createPythonOnnxShootAi(onnxFile);
   }
   throw new Error(`Unsupported shoot AI family: ${spec.familyId}`);
 }

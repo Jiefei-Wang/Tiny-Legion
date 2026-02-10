@@ -1325,6 +1325,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     }
 
     setScreen("battle");
+    centerBattleViewYOnPlayerBase();
     renderPanels();
     addLog(`Arena replay started (seed=${spec.seed})`, "good");
 
@@ -1781,6 +1782,26 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     if (Math.abs(dx) > 0.01 || Math.abs(dy) > 0.01) {
       panBattleViewBy(dx, dy);
     }
+  };
+
+  const centerBattleViewYOnPlayerBase = (): void => {
+    if (!isBattleScreen()) {
+      return;
+    }
+    const viewportHeight = canvasViewport.clientHeight;
+    if (viewportHeight <= 0) {
+      return;
+    }
+    const state = battle.getState();
+    if (!state.active) {
+      return;
+    }
+    const baseCenterY = state.playerBase.y + state.playerBase.h * 0.5;
+    if (!Number.isFinite(baseCenterY)) {
+      return;
+    }
+    battleViewOffsetY = viewportHeight * 0.5 - toDisplayY(baseCenterY) * battleViewScale;
+    applyBattleViewTransform();
   };
 
   const slugifyTemplateId = (rawName: string): string => {
@@ -3912,6 +3933,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     pythonAiBridgeRequestInFlight = null;
     pythonAiBridgeRequestPostedAtMs = 0;
     pythonAiBridgeResultPollAtMs = 0;
+    await refreshTestArenaAiOptions();
     await refreshTestArenaComponentGrid();
     applyTestArenaAiControllers();
     battle.start(testArenaNode);
@@ -3925,6 +3947,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       addLog("Python AI bridge waiting for connection...", "warn");
     }
     setScreen("testArena");
+    centerBattleViewYOnPlayerBase();
     renderPanels();
   };
 
@@ -4013,6 +4036,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         battle.start(node);
         addLog(`Battle started at ${node.name}`);
         setScreen("battle");
+        centerBattleViewYOnPlayerBase();
         renderPanels();
       });
     });

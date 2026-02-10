@@ -66,7 +66,7 @@ class TrainConfig:
     endpoint: str = "localhost:50051"
     episodes: int = 2000
     max_steps_per_episode: int = 3000
-    chunk_seconds: float = 10.0
+    chunk_seconds: float = 2.0
     learning_rate: float = 1e-3
     hidden_dim: int = 64
     hidden_layers: int = 2
