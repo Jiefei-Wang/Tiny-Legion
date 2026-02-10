@@ -330,7 +330,7 @@ function templateStorePlugin() {
           res.end(JSON.stringify({ templates }));
           return;
         }
-        if (req.method !== "PUT") {
+        if (req.method !== "PUT" && req.method !== "DELETE") {
           res.statusCode = 405;
           res.end("method not allowed");
           return;
@@ -344,6 +344,17 @@ function templateStorePlugin() {
           return;
         }
         ensureDir(defaultDir);
+
+        if (req.method === "DELETE") {
+          const filePath = resolve(defaultDir, `${id}.json`);
+          if (existsSync(filePath)) {
+            unlinkSync(filePath);
+          }
+          res.setHeader("content-type", "application/json");
+          res.end(JSON.stringify({ ok: true }));
+          return;
+        }
+
         let body = "";
         req.on("data", (chunk) => {
           body += chunk;
@@ -492,7 +503,7 @@ function partStorePlugin() {
           res.end(JSON.stringify({ parts }));
           return;
         }
-        if (req.method !== "PUT") {
+        if (req.method !== "PUT" && req.method !== "DELETE") {
           res.statusCode = 405;
           res.end("method not allowed");
           return;
@@ -506,6 +517,17 @@ function partStorePlugin() {
           return;
         }
         ensureDir(defaultDir);
+
+        if (req.method === "DELETE") {
+          const filePath = resolve(defaultDir, `${id}.json`);
+          if (existsSync(filePath)) {
+            unlinkSync(filePath);
+          }
+          res.setHeader("content-type", "application/json");
+          res.end(JSON.stringify({ ok: true }));
+          return;
+        }
+
         let body = "";
         req.on("data", (chunk) => {
           body += chunk;

@@ -24,11 +24,10 @@ import { createDefaultPartDefinitions, mergePartCatalogs } from "../../parts/par
 import type { BattleAiController, CombatDecision } from "../../ai/composite/composite-ai.ts";
 import type { BattleState, CommandResult, FireBlockDetail, FireRequest, KeyState, MapNode, PartDefinition, Side, UnitCommand, UnitInstance, UnitTemplate } from "../../types.ts";
 
-const GROUND_MIN_Y = 250;
-const GROUND_MAX_Y = 485;
-const AIR_MIN_Z = 70;
-const AIR_MAX_Z = 220;
-const AIR_TARGET_Z_TOLERANCE = 22;
+const AIR_MIN_Z_RATIO = 70 / 720;
+const AIR_GROUND_GAP_RATIO = 30 / 720;
+const DEFAULT_GROUND_HEIGHT_RATIO = (720 - 250) / 720;
+const AIR_TARGET_Z_TOLERANCE_RATIO = 22 / 720;
 
 export const BATTLE_SALVAGE_REFUND_FACTOR = 0.6;
 const AIR_MIN_LIFT_SPEED = 100;
@@ -79,6 +78,7 @@ export class BattleSession {
   private debugTargetLineEnabled: boolean;
   private debugPartHpEnabled: boolean;
   private controlledUnitInvincible: boolean;
+  private groundHeightPx: number;
   private readonly baselineController: BattleAiController;
 
   constructor(canvas: HTMLCanvasElement, hooks: BattleHooks, templates: UnitTemplate[], options: BattleSessionOptions = {}) {
@@ -109,6 +109,7 @@ export class BattleSession {
     this.debugTargetLineEnabled = false;
     this.debugPartHpEnabled = false;
     this.controlledUnitInvincible = false;
+    this.groundHeightPx = Math.max(80, canvas.height * DEFAULT_GROUND_HEIGHT_RATIO);
     this.baselineController = createBaselineCompositeAiController();
   }
 
@@ -212,6 +213,45 @@ export class BattleSession {
 
   public spawnEnemyTemplate(templateId: string): boolean {
     return this.arenaDeploy("enemy", templateId, { chargeGas: false, ignoreCap: true, ignoreLowGasThreshold: true });
+  }
+
+  public setBattlefieldSize(width: number, height: number): { width: number; height: number } {
+    const normalizedWidth = clamp(Math.floor(width), 640, 4096);
+    const normalizedHeight = clamp(Math.floor(height), 360, 2160);
+    this.canvas.width = normalizedWidth;
+    this.canvas.height = normalizedHeight;
+    this.groundHeightPx = clamp(this.groundHeightPx, 80, Math.max(120, this.canvas.height - 40));
+
+    const nextPlayerBase = this.createDefaultBase("player");
+    const nextEnemyBase = this.createDefaultBase("enemy");
+    const playerRatio = this.state.playerBase.maxHp > 0 ? clamp(this.state.playerBase.hp / this.state.playerBase.maxHp, 0, 1) : 1;
+    const enemyRatio = this.state.enemyBase.maxHp > 0 ? clamp(this.state.enemyBase.hp / this.state.enemyBase.maxHp, 0, 1) : 1;
+    this.state.playerBase.x = nextPlayerBase.x;
+    this.state.playerBase.y = nextPlayerBase.y;
+    this.state.playerBase.w = nextPlayerBase.w;
+    this.state.playerBase.h = nextPlayerBase.h;
+    this.state.playerBase.hp = this.state.playerBase.maxHp * playerRatio;
+    this.state.enemyBase.x = nextEnemyBase.x;
+    this.state.enemyBase.y = nextEnemyBase.y;
+    this.state.enemyBase.w = nextEnemyBase.w;
+    this.state.enemyBase.h = nextEnemyBase.h;
+    this.state.enemyBase.hp = this.state.enemyBase.maxHp * enemyRatio;
+
+    this.aimX = clamp(this.aimX, 0, this.canvas.width);
+    this.aimY = clamp(this.aimY, 0, this.canvas.height);
+    this.clampEntitiesToBattlefield();
+    return { width: this.canvas.width, height: this.canvas.height };
+  }
+
+  public setGroundHeight(height: number): number {
+    const normalized = clamp(Math.floor(height), 80, Math.max(120, this.canvas.height - 40));
+    this.groundHeightPx = normalized;
+    this.clampEntitiesToBattlefield();
+    return this.groundHeightPx;
+  }
+
+  public getGroundHeight(): number {
+    return Math.floor(this.groundHeightPx);
   }
 
   public setAim(mouseX: number, mouseY: number): void {
@@ -428,9 +468,10 @@ export class BattleSession {
       return;
     }
 
+    const laneBounds = this.getLaneBounds();
     const y = template.type === "air"
-      ? AIR_MIN_Z + Math.random() * (AIR_MAX_Z - AIR_MIN_Z)
-      : GROUND_MIN_Y + Math.random() * (GROUND_MAX_Y - GROUND_MIN_Y);
+      ? laneBounds.airMinZ + Math.random() * (laneBounds.airMaxZ - laneBounds.airMinZ)
+      : laneBounds.groundMinY + Math.random() * (laneBounds.groundMaxY - laneBounds.groundMinY);
     const unit = instantiateUnit(this.templates, templateId, "player", 120, y, {
       partCatalog: this.partCatalog,
     });
@@ -462,6 +503,7 @@ export class BattleSession {
       this.ensureEnemyMinimumPresence();
     }
 
+    const laneBounds = this.getLaneBounds();
     for (const unit of this.state.units) {
       if (!unit.alive || !canOperate(unit)) {
         continue;
@@ -470,7 +512,7 @@ export class BattleSession {
 
       if (unit.type === "air" && !unit.airDropActive && unit.maxSpeed < AIR_MIN_LIFT_SPEED) {
         unit.airDropActive = true;
-        unit.airDropTargetY = GROUND_MIN_Y + Math.random() * (GROUND_MAX_Y - GROUND_MIN_Y);
+        unit.airDropTargetY = laneBounds.groundMinY + Math.random() * (laneBounds.groundMaxY - laneBounds.groundMinY);
         unit.aiDebugDecisionPath = "air-no-lift-drop";
       }
 
@@ -523,7 +565,7 @@ export class BattleSession {
       } else if (unit.type === "air") {
         if (!unit.airDropActive) {
           unit.airDropActive = true;
-          unit.airDropTargetY = GROUND_MIN_Y + Math.random() * (GROUND_MAX_Y - GROUND_MIN_Y);
+          unit.airDropTargetY = laneBounds.groundMinY + Math.random() * (laneBounds.groundMaxY - laneBounds.groundMinY);
           unit.aiDebugDecisionPath = "weaponless-air-drop";
         }
         if (unit.id === this.playerControlledId || unit.id === this.selectedUnitId) {
@@ -579,12 +621,12 @@ export class BattleSession {
       applyStructureRecovery(unit, dt);
 
       if (unit.type === "ground") {
-        unit.y = clamp(unit.y, GROUND_MIN_Y, GROUND_MAX_Y);
+        unit.y = clamp(unit.y, laneBounds.groundMinY, laneBounds.groundMaxY);
       } else {
         if (unit.airDropActive) {
-          unit.y = clamp(unit.y, AIR_MIN_Z, unit.airDropTargetY);
+          unit.y = clamp(unit.y, laneBounds.airMinZ, unit.airDropTargetY);
         } else {
-          unit.y = clamp(unit.y, AIR_MIN_Z, GROUND_MIN_Y);
+          unit.y = clamp(unit.y, laneBounds.airMinZ, laneBounds.groundMinY);
         }
       }
       unit.x = clamp(unit.x, 44, this.canvas.width - 44);
@@ -747,8 +789,8 @@ export class BattleSession {
         chunk.vy += 260 * dt;
         chunk.x += chunk.vx * dt;
         chunk.y += chunk.vy * dt;
-        if (chunk.y >= GROUND_MAX_Y + 4) {
-          chunk.y = GROUND_MIN_Y + Math.random() * (GROUND_MAX_Y - GROUND_MIN_Y);
+        if (chunk.y >= laneBounds.groundMaxY + 4) {
+          chunk.y = laneBounds.groundMinY + Math.random() * (laneBounds.groundMaxY - laneBounds.groundMinY);
           chunk.vx *= 0.38;
           chunk.vy = 0;
           chunk.grounded = true;
@@ -861,6 +903,8 @@ export class BattleSession {
   }
 
   private createEmptyBattle(): BattleState {
+    const playerBase = this.createDefaultBase("player");
+    const enemyBase = this.createDefaultBase("enemy");
     return {
       active: false,
       nodeId: null,
@@ -868,8 +912,8 @@ export class BattleSession {
       projectiles: [],
       particles: [],
       debris: [],
-      playerBase: { hp: 1300, maxHp: 1300, x: 18, y: 180, w: 38, h: 160 },
-      enemyBase: { hp: 1300, maxHp: 1300, x: this.canvas.width - 56, y: 180, w: 38, h: 160 },
+      playerBase: { hp: 1300, maxHp: 1300, x: playerBase.x, y: playerBase.y, w: playerBase.w, h: playerBase.h },
+      enemyBase: { hp: 1300, maxHp: 1300, x: enemyBase.x, y: enemyBase.y, w: enemyBase.w, h: enemyBase.h },
       enemyGas: 220,
       enemyCap: 3,
       enemyMinActive: 0,
@@ -877,6 +921,50 @@ export class BattleSession {
       enemySpawnTimer: 0,
       outcome: null,
     };
+  }
+
+  private createDefaultBase(side: Side): { x: number; y: number; w: number; h: number } {
+    const w = clamp(Math.round(this.canvas.width * (38 / 1280)), 28, 70);
+    const h = clamp(Math.round(this.canvas.height * (160 / 720)), 90, Math.floor(this.canvas.height * 0.5));
+    const y = clamp(Math.round(this.canvas.height * (180 / 720)), 18, Math.max(18, this.canvas.height - h - 18));
+    const x = side === "player" ? 18 : this.canvas.width - w - 18;
+    return { x, y, w, h };
+  }
+
+  private getLaneBounds(): {
+    airMinZ: number;
+    airMaxZ: number;
+    groundMinY: number;
+    groundMaxY: number;
+    airTargetTolerance: number;
+  } {
+    const h = Math.max(360, this.canvas.height);
+    const groundMaxY = h - 8;
+    const clampedGroundHeight = clamp(this.groundHeightPx, 80, Math.max(120, h - 40));
+    const groundMinY = clamp(groundMaxY - clampedGroundHeight, 0, groundMaxY - 12);
+    const airMinZ = clamp(h * AIR_MIN_Z_RATIO, 0, groundMinY - 12);
+    const airGap = Math.max(10, h * AIR_GROUND_GAP_RATIO);
+    const airMaxZ = clamp(groundMinY - airGap, airMinZ + 12, groundMinY - 4);
+    const airTargetTolerance = Math.max(6, h * AIR_TARGET_Z_TOLERANCE_RATIO);
+    return { airMinZ, airMaxZ, groundMinY, groundMaxY, airTargetTolerance };
+  }
+
+  private clampEntitiesToBattlefield(): void {
+    const bounds = this.getLaneBounds();
+    for (const unit of this.state.units) {
+      if (!unit.alive) {
+        continue;
+      }
+      if (unit.type === "ground") {
+        unit.y = clamp(unit.y, bounds.groundMinY, bounds.groundMaxY);
+      } else if (unit.airDropActive) {
+        unit.airDropTargetY = clamp(unit.airDropTargetY, bounds.groundMinY, bounds.groundMaxY);
+        unit.y = clamp(unit.y, bounds.airMinZ, unit.airDropTargetY);
+      } else {
+        unit.y = clamp(unit.y, bounds.airMinZ, bounds.groundMinY);
+      }
+      unit.x = clamp(unit.x, 44, this.canvas.width - 44);
+    }
   }
 
   private maybeSpawnEnemy(): boolean {
@@ -905,9 +993,10 @@ export class BattleSession {
       return false;
     }
 
+    const bounds = this.getLaneBounds();
     const y = template.type === "air"
-      ? AIR_MIN_Z + Math.random() * (AIR_MAX_Z - AIR_MIN_Z)
-      : GROUND_MIN_Y + Math.random() * (GROUND_MAX_Y - GROUND_MIN_Y);
+      ? bounds.airMinZ + Math.random() * (bounds.airMaxZ - bounds.airMinZ)
+      : bounds.groundMinY + Math.random() * (bounds.groundMaxY - bounds.groundMinY);
     const enemy = instantiateUnit(this.templates, template.id, "enemy", this.canvas.width - 120, y, {
       partCatalog: this.partCatalog,
     });
@@ -945,11 +1034,12 @@ export class BattleSession {
       if (!ignoreCap && friendlyActive >= armyCap(this.hooks.getCommanderSkill())) {
         return false;
       }
+      const bounds = this.getLaneBounds();
       const y = typeof opts.y === "number" && Number.isFinite(opts.y)
         ? opts.y
         : template.type === "air"
-            ? AIR_MIN_Z + Math.random() * (AIR_MAX_Z - AIR_MIN_Z)
-            : GROUND_MIN_Y + Math.random() * (GROUND_MAX_Y - GROUND_MIN_Y);
+            ? bounds.airMinZ + Math.random() * (bounds.airMaxZ - bounds.airMinZ)
+            : bounds.groundMinY + Math.random() * (bounds.groundMaxY - bounds.groundMinY);
       const unit = instantiateUnit(this.templates, templateId, "player", 120, y, {
         deploymentGasCost: typeof opts.deploymentGasCost === "number" && Number.isFinite(opts.deploymentGasCost) ? opts.deploymentGasCost : undefined,
         partCatalog: this.partCatalog,
@@ -973,11 +1063,12 @@ export class BattleSession {
     if (chargeGas && !this.state.enemyInfiniteGas && (!hasGas || (!ignoreLowGasThreshold && this.state.enemyGas < 20))) {
       return false;
     }
+    const bounds = this.getLaneBounds();
     const y = typeof opts.y === "number" && Number.isFinite(opts.y)
       ? opts.y
       : template.type === "air"
-          ? AIR_MIN_Z + Math.random() * (AIR_MAX_Z - AIR_MIN_Z)
-          : GROUND_MIN_Y + Math.random() * (GROUND_MAX_Y - GROUND_MIN_Y);
+          ? bounds.airMinZ + Math.random() * (bounds.airMaxZ - bounds.airMinZ)
+          : bounds.groundMinY + Math.random() * (bounds.groundMaxY - bounds.groundMinY);
     const enemy = instantiateUnit(this.templates, templateId, "enemy", this.canvas.width - 120, y, {
       deploymentGasCost: typeof opts.deploymentGasCost === "number" && Number.isFinite(opts.deploymentGasCost) ? opts.deploymentGasCost : undefined,
       partCatalog: this.partCatalog,
@@ -1566,13 +1657,14 @@ export class BattleSession {
       unit.vy = 0;
     }
 
-    if (liftAccel <= 1) {
-      if (!unit.airDropActive) {
-        unit.airDropActive = true;
-        unit.airDropTargetY = GROUND_MIN_Y + Math.random() * (GROUND_MAX_Y - GROUND_MIN_Y);
-        unit.aiDebugDecisionPath = "air-no-lift-drop";
+      if (liftAccel <= 1) {
+        if (!unit.airDropActive) {
+          unit.airDropActive = true;
+          const laneBounds = this.getLaneBounds();
+          unit.airDropTargetY = laneBounds.groundMinY + Math.random() * (laneBounds.groundMaxY - laneBounds.groundMinY);
+          unit.aiDebugDecisionPath = "air-no-lift-drop";
+        }
       }
-    }
   }
 
   private executeCommand(unit: UnitInstance, command: UnitCommand, dt: number): CommandResult {
@@ -1844,7 +1936,8 @@ export class BattleSession {
     const base = unit.side === "player" ? this.state.playerBase : this.state.enemyBase;
     const baseCenterX = base.x + base.w / 2;
     const baseCenterY = base.y + base.h / 2;
-    const retreatY = clamp(baseCenterY, GROUND_MIN_Y, GROUND_MAX_Y);
+    const laneBounds = this.getLaneBounds();
+    const retreatY = clamp(baseCenterY, laneBounds.groundMinY, laneBounds.groundMaxY);
 
     const dx = baseCenterX - unit.x;
     const dy = retreatY - unit.y;
@@ -2014,7 +2107,8 @@ export class BattleSession {
     if (unit.type !== "air") {
       return globalBuff;
     }
-    const airBonus = getAircraftAltitudeBonus(unit, AIR_MIN_Z, GROUND_MIN_Y);
+    const laneBounds = this.getLaneBounds();
+    const airBonus = getAircraftAltitudeBonus(unit, laneBounds.airMinZ, laneBounds.groundMinY);
     return globalBuff * (1 + airBonus);
   }
 
@@ -2094,21 +2188,22 @@ export class BattleSession {
   }
 
   private drawLanes(): void {
+    const laneBounds = this.getLaneBounds();
     this.ctx.fillStyle = "rgba(138, 176, 216, 0.08)";
-    this.ctx.fillRect(0, AIR_MIN_Z - 20, this.canvas.width, AIR_MAX_Z - AIR_MIN_Z + 40);
+    this.ctx.fillRect(0, laneBounds.airMinZ - 20, this.canvas.width, laneBounds.airMaxZ - laneBounds.airMinZ + 40);
 
     this.ctx.fillStyle = "rgba(78, 122, 91, 0.17)";
-    this.ctx.fillRect(0, GROUND_MIN_Y, this.canvas.width, GROUND_MAX_Y - GROUND_MIN_Y);
+    this.ctx.fillRect(0, laneBounds.groundMinY, this.canvas.width, laneBounds.groundMaxY - laneBounds.groundMinY);
 
     this.ctx.strokeStyle = "rgba(117, 158, 118, 0.18)";
     this.ctx.lineWidth = 1;
     for (let x = 0; x <= this.canvas.width; x += 34) {
       this.ctx.beginPath();
-      this.ctx.moveTo(x, GROUND_MIN_Y);
-      this.ctx.lineTo(x, GROUND_MAX_Y);
+      this.ctx.moveTo(x, laneBounds.groundMinY);
+      this.ctx.lineTo(x, laneBounds.groundMaxY);
       this.ctx.stroke();
     }
-    for (let y = GROUND_MIN_Y; y <= GROUND_MAX_Y; y += 28) {
+    for (let y = laneBounds.groundMinY; y <= laneBounds.groundMaxY; y += 28) {
       this.ctx.beginPath();
       this.ctx.moveTo(0, y);
       this.ctx.lineTo(this.canvas.width, y);
@@ -2117,8 +2212,8 @@ export class BattleSession {
 
     this.ctx.strokeStyle = "rgba(188, 219, 255, 0.32)";
     this.ctx.beginPath();
-    this.ctx.moveTo(0, AIR_MAX_Z + 16);
-    this.ctx.lineTo(this.canvas.width, AIR_MAX_Z + 16);
+    this.ctx.moveTo(0, laneBounds.airMaxZ + 16);
+    this.ctx.lineTo(this.canvas.width, laneBounds.airMaxZ + 16);
     this.ctx.stroke();
   }
 
@@ -2421,6 +2516,7 @@ export class BattleSession {
   }
 
   private projectileHitsLiveCell(projectile: BattleState["projectiles"][number], unit: UnitInstance, isAir: boolean): number | null {
+    const laneBounds = this.getLaneBounds();
     const rects = this.getLiveCellRects(unit);
     let bestCellId: number | null = null;
     let bestEntryTime = Number.POSITIVE_INFINITY;
@@ -2442,7 +2538,7 @@ export class BattleSession {
       if (entryTime === null) {
         continue;
       }
-      if (isAir && Math.abs(unit.y - projectile.y) > AIR_TARGET_Z_TOLERANCE + projectile.r) {
+      if (isAir && Math.abs(unit.y - projectile.y) > laneBounds.airTargetTolerance + projectile.r) {
         continue;
       }
       if (entryTime < bestEntryTime) {

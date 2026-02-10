@@ -109,6 +109,7 @@ body {
 }
 
 .panel {
+  position: relative;
   min-height: 0;
   flex: 1;
   overflow-y: auto;
@@ -299,6 +300,28 @@ button.active {
   padding: 8px;
   border: 1px solid #3b536e;
   border-radius: 8px;
+}
+
+.editor-open-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 12px;
+  overflow: auto;
+  background: rgba(6, 10, 16, 0.55);
+}
+
+.editor-open-modal {
+  width: min(760px, 100%);
+  height: 80vh;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  background: linear-gradient(180deg, #1b2939, #223449);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.35);
 }
 
 .editor-comp-grid {

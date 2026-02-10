@@ -45,7 +45,9 @@ Lose condition chain:
   - Contested
 - Includes a dedicated `Test Arena` top-level tab (parallel to `Battle`) for debug scenarios.
 - Test Arena overrides both battle bases to extremely high HP so base destruction does not end the test run.
-- Test Arena controls allow setting enemy count, spawning a specific enemy template, and toggling controlled-unit invincibility (no HP loss, still collides and can be hit).
+- Test Arena controls allow setting enemy count, battlefield simulation size (`W`/`H`), ground-zone height, display zoom percentage, spawning a specific enemy template, and toggling controlled-unit invincibility (no HP loss, still collides and can be hit).
+- Test Arena parameter inputs apply on `Enter` or input blur (no separate apply button).
+- Test Arena zoom percentage is live-synced when mouse-wheel zoom changes the battlefield view.
 
 ## 3.2 Base Layer (Top-Down)
 
@@ -72,7 +74,7 @@ Current implementation includes dedicated in-app editor tabs where the player ca
 - Use a resizable editor grid (up to `10x10`) for placement/removal by cell.
 - Choose parts/components from a layer-specific side palette (placeholder image cards + hover info).
 - Toggle delete mode to remove items on the active layer.
-- Open any existing template from an `Open` window, or create a template copy using one-click `Copy` (`-copy` postfix).
+- Open any existing template from an `Open` window, create a template copy using one-click `Copy` (`-copy` postfix), or `Delete` file-backed entries from the same list.
 - Template IDs are auto-generated and hidden from editor UI (not user-editable).
 - Stored template parts include coordinate metadata (`x`,`y`) with origin `(0,0)` and negative coordinates supported.
 - Functional template entries now persist both `component` and `partId` so user templates can reference developer-authored parts.
@@ -94,6 +96,7 @@ Current implementation includes dedicated in-app editor tabs where the player ca
 
 - Developer-only Part Designer is available in the top-level `Part Editor` tab.
 - Top-bar `Debug Options` -> `Part Designer` is a shortcut that switches directly to the `Part Editor` tab.
+- Part `Open` window supports direct open, one-click `Copy`, and `Delete` for file-backed entries.
 - Part Designer edits a **single reusable part definition** (not a full unit template).
 - UI split:
   - left panel edits part-level properties grouped as:
@@ -275,7 +278,9 @@ Recommended starter values:
 - 2D battlefield with left-to-right front.
   - Left: player side/base
   - Right: enemy side/base/buildings
-- Battle simulation uses a fixed logical battlefield size (`1280x720`) shared by browser runtime and headless/arena runs; browser resizing only changes display scale.
+- Battle simulation defaults to a logical battlefield size of `1280x720` (shared by browser runtime and headless/arena runs).
+- Test Arena can override battlefield simulation size at runtime; this changes combat space dimensions, not just display scale.
+- Test Arena zoom only changes display scale (camera/view transform), not simulation dimensions.
 - Ground units move freely on X and Y axes inside the ground combat zone.
 - Ground maneuver is continuous positioning (flank, intercept, disengage), not discrete lane switching.
 

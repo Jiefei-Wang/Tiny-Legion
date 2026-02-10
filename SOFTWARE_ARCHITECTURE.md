@@ -33,7 +33,8 @@ Implemented gameplay architecture highlights:
 - `Test Arena` is a dedicated top-level tab for debug battles (not part of the map node list)
 - Display layer visibility is debug-controlled (top-bar `Debug Options`) and defaults to OFF in battle runtime
 - In-app debug options plus local runtime log pipeline (`/__debug/*` -> `game/.debug/runtime.log`)
-- Battle simulation dimensions are centralized in shared balance config (`BATTLEFIELD_WIDTH=1280`, `BATTLEFIELD_HEIGHT=720`) and reused by browser + headless/arena paths
+- Battle simulation defaults are centralized in shared balance config (`BATTLEFIELD_WIDTH=1280`, `BATTLEFIELD_HEIGHT=720`) and reused by browser + headless/arena paths
+- Test Arena supports runtime battlefield simulation-size overrides (`W`/`H`) and ground-height tuning in the browser app; display zoom remains a separate view-only transform
 - Strategic layer is turn-based: **Next Round** advances gas economy, construction, and resolves campaign battles (Test Arena skips round resolution)
 
 ## 1. Target Stack
@@ -233,6 +234,7 @@ Map node metadata supports test-only battle tuning via optional fields on `MapNo
 - `testEnemyInfiniteGas` bypasses enemy gas drain so test scenarios can sustain pressure.
 - `testBaseHpOverride` sets both player/enemy battle base HP and max HP for long-running test battles.
 - The `Test Arena` tab uses these overrides while skipping campaign rewards/ownership changes.
+- Test Arena UI controls for enemy count / battlefield size / zoom apply on input commit (`Enter` or blur) without extra apply buttons.
 
 Template/editor architecture notes:
 
@@ -403,7 +405,7 @@ Editor UX implementation details:
 - Active layer (`structure`, `functional`, `display`) is switched from right-panel controls above the part palette.
 - Template editor functional palette uses part catalog entries (not only hardcoded component IDs).
 - Per-part gas contribution is not used in current editor stage; part cards and placement logic focus on gameplay stats/constraints.
-- Editor `Open` window lists all templates; clicking a template row opens it directly, and one-click `Copy` creates an editable clone (`-copy` suffix).
+- Editor `Open` window lists all templates; clicking a template row opens it directly, and right-aligned `Copy` / `Delete` actions clone (`-copy` suffix) or remove file-backed entries.
 - Editor has `Save` (persist to user templates) and `Save to Default` (persist to default templates); both paths run the same template normalization before writing JSON.
 - Template ID is internal/auto-managed for new and copied templates (no manual ID field in editor UI).
 - Editor templates persist coordinates per placed part (`x`,`y`, origin `(0,0)`; negatives allowed).
@@ -437,6 +439,7 @@ Developer Part Designer UX:
 - Primary access is the top-level `Part Editor` mode tab.
 - Top-bar `Debug Options` -> `Part Designer` is a shortcut into the same `Part Editor` screen.
 - Dedicated editor workspace for authoring a single reusable part definition.
+- Part `Open` window mirrors template open-row actions with right-aligned `Copy` / `Delete` controls.
 - UI split:
   - left panel edits part-level fields (`name`, `id`, `baseComponent`, `directional`) plus grouped controls:
     - `Editor Meta` (`category` dropdown + `subcategory` text),

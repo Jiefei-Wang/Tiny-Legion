@@ -13,10 +13,22 @@ import type { BattleSessionOptions } from "../gameplay/battle/battle-session.ts"
 import type { BattleAiController } from "../gameplay/battle/battle-session.ts";
 import { BATTLE_SALVAGE_REFUND_FACTOR } from "../gameplay/battle/battle-session.ts";
 import { createBaselineCompositeAiController } from "../ai/composite/baseline-modules.ts";
-import { cloneTemplate, fetchDefaultTemplatesFromStore, fetchUserTemplatesFromStore, mergeTemplates, saveDefaultTemplateToStore, saveUserTemplateToStore, validateTemplateDetailed } from "./template-store.ts";
+import {
+  cloneTemplate,
+  deleteDefaultTemplateFromStore,
+  deleteUserTemplateFromStore,
+  fetchDefaultTemplatesFromStore,
+  fetchUserTemplatesFromStore,
+  mergeTemplates,
+  saveDefaultTemplateToStore,
+  saveUserTemplateToStore,
+  validateTemplateDetailed,
+} from "./template-store.ts";
 import {
   clonePartDefinition,
   createDefaultPartDefinitions,
+  deleteDefaultPartFromStore,
+  deleteUserPartFromStore,
   fetchDefaultPartsFromStore,
   getPartFootprintOffsets,
   mergePartCatalogs,
@@ -257,6 +269,9 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     testBaseHpOverride: 1000000000,
   };
   let testArenaEnemyCount = 2;
+  let testArenaBattlefieldWidth = BATTLEFIELD_WIDTH;
+  let testArenaBattlefieldHeight = BATTLEFIELD_HEIGHT;
+  let testArenaGroundHeight = Math.floor(BATTLEFIELD_HEIGHT - (BATTLEFIELD_HEIGHT * (250 / 720)));
   let testArenaSpawnTemplateId: string | null = null;
   let testArenaInvinciblePlayer = false;
   type TestArenaAiPreset = "baseline" | "composite-baseline" | "composite-neural-default" | "composite-latest-trained";
@@ -374,12 +389,16 @@ export function bootstrap(options: BootstrapOptions = {}): void {
   const isUnlimitedResources = (): boolean => debugUnlimitedResources;
   const isDebugVisual = (): boolean => debugVisual;
   const isDebugTargetLines = (): boolean => debugTargetLines;
+  const getCanvasDisplayWidth = (): number => Math.max(1, canvas.clientWidth || BATTLEFIELD_WIDTH);
+  const getCanvasDisplayHeight = (): number => Math.max(1, canvas.clientHeight || BATTLEFIELD_HEIGHT);
+  const toDisplayX = (worldX: number): number => worldX * (getCanvasDisplayWidth() / Math.max(1, canvas.width));
+  const toDisplayY = (worldY: number): number => worldY * (getCanvasDisplayHeight() / Math.max(1, canvas.height));
 
   const clampBattleViewOffsets = (): void => {
     const viewportWidth = Math.max(0, canvasViewport.clientWidth);
     const viewportHeight = Math.max(0, canvasViewport.clientHeight);
-    const scaledCanvasWidth = canvas.width * battleViewScale;
-    const scaledCanvasHeight = canvas.height * battleViewScale;
+    const scaledCanvasWidth = getCanvasDisplayWidth() * battleViewScale;
+    const scaledCanvasHeight = getCanvasDisplayHeight() * battleViewScale;
     const VIEW_MARGIN = 80;
 
     let minOffsetX = 0;
@@ -443,6 +462,20 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     battleViewOffsetX = localX - worldX * battleViewScale;
     battleViewOffsetY = localY - worldY * battleViewScale;
     applyBattleViewTransform();
+    syncTestArenaZoomInput();
+  };
+  const normalizeTestArenaBattlefieldWidth = (value: number): number => Math.max(640, Math.min(4096, Math.floor(value)));
+  const normalizeTestArenaBattlefieldHeight = (value: number): number => Math.max(360, Math.min(2160, Math.floor(value)));
+  const normalizeTestArenaZoomPercent = (value: number): number => Math.max(45, Math.min(240, Math.round(value)));
+  const normalizeTestArenaGroundHeight = (value: number): number => Math.max(80, Math.min(Math.max(120, testArenaBattlefieldHeight - 40), Math.floor(value)));
+  const syncTestArenaZoomInput = (): void => {
+    const zoomInput = getOptionalElement<HTMLInputElement>("#testArenaZoomPercent");
+    if (zoomInput) {
+      const value = String(Math.round(battleViewScale * 100));
+      if (zoomInput.value !== value) {
+        zoomInput.value = value;
+      }
+    }
   };
   const getCommanderSkillForCap = (): number => (isUnlimitedResources() ? 999 : commanderSkill);
   const editorTooltip = document.createElement("div");
@@ -1079,6 +1112,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       defense: spec.nodeDefense,
       ...(typeof spec.baseHp === "number" && Number.isFinite(spec.baseHp) && spec.baseHp > 0 ? { testBaseHpOverride: spec.baseHp } : {}),
     };
+    applyBattlefieldDefaults();
     battle.start(node);
     battle.clearControlSelection();
     battle.getState().enemyGas = spec.enemyGas;
@@ -1476,8 +1510,8 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     }
     const viewportHeight = canvasViewport.clientHeight;
     const BORDER_MARGIN = 72;
-    const screenX = battleViewOffsetX + tracked.x * battleViewScale;
-    const screenY = battleViewOffsetY + tracked.y * battleViewScale;
+    const screenX = battleViewOffsetX + toDisplayX(tracked.x) * battleViewScale;
+    const screenY = battleViewOffsetY + toDisplayY(tracked.y) * battleViewScale;
 
     let dx = 0;
     let dy = 0;
@@ -3034,6 +3068,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     const enemyCountActive = isTestArenaActive
       ? battle.getAliveEnemyCount()
       : enemyCountLabel;
+    const zoomPercentLabel = Math.round(battleViewScale * 100);
     testArenaPanel.innerHTML = `
       <h3>Test Arena</h3>
       <div class="small">Debug arena for spawn pressure and survivability. Starts a battle without campaign rewards.</div>
@@ -3046,8 +3081,17 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         <label class="small">Enemy count
           <input id="testArenaEnemyCount" type="number" min="0" max="40" step="1" value="${enemyCountLabel}" />
         </label>
-        <button id="btnApplyEnemyCount">Apply</button>
         <span class="small">Active: ${enemyCountActive}</span>
+      </div>
+      <div style="display:grid; grid-template-columns:repeat(4, minmax(0, 1fr)); gap:6px; align-items:center;">
+        <span class="small">Width</span>
+        <span class="small">Height</span>
+        <span class="small">Zoom %</span>
+        <span class="small">Ground H</span>
+        <input id="testArenaBattlefieldWidth" type="number" min="640" max="4096" step="10" value="${testArenaBattlefieldWidth}" />
+        <input id="testArenaBattlefieldHeight" type="number" min="360" max="2160" step="10" value="${testArenaBattlefieldHeight}" />
+        <input id="testArenaZoomPercent" type="number" min="45" max="240" step="1" value="${zoomPercentLabel}" />
+        <input id="testArenaGroundHeight" type="number" min="80" max="${Math.max(120, testArenaBattlefieldHeight - 40)}" step="10" value="${testArenaGroundHeight}" />
       </div>
       <div class="row">
         <label class="small">Spawn enemy
@@ -3082,9 +3126,12 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       const templateOpenRows = templates
         .map((template) => {
           const selectedClass = template.id === editorTemplateDialogSelectedId ? "active" : "";
-          return `<div class="row" style="justify-content:space-between; gap:8px;">
+          return `<div class="row" style="gap:8px; flex-wrap:nowrap; align-items:center;">
             <button data-editor-open-select="${template.id}" class="${selectedClass}" style="flex:1; text-align:left;">${template.name} (${template.type})</button>
-            <button data-editor-open-copy="${template.id}">Copy</button>
+            <div style="display:flex; gap:6px; margin-left:auto;">
+              <button data-editor-open-copy="${template.id}">Copy</button>
+              <button data-editor-open-delete="${template.id}">Delete</button>
+            </div>
           </div>`;
         })
         .join("");
@@ -3095,14 +3142,16 @@ export function bootstrap(options: BootstrapOptions = {}): void {
           <button id="btnOpenTemplateWindow">Open</button>
           <span class="small">Current object: ${editorDraft.name}</span>
         </div>
-        ${editorTemplateDialogOpen ? `<div class="node-card">
-          <div><strong>Open Template</strong></div>
-          <div class="small">Click a template row to open it directly, or use Copy to create an editable copy with "-copy" suffix.</div>
-          <div style="display:flex; flex-direction:column; gap:6px; margin-top:8px; max-height:220px; overflow:auto;">
-            ${templateOpenRows || `<div class="small">No template available.</div>`}
-          </div>
-          <div class="row" style="margin-top:8px;">
-            <button id="btnOpenTemplateClose">Close</button>
+        ${editorTemplateDialogOpen ? `<div id="editorOpenTemplateOverlay" class="editor-open-overlay">
+          <div class="node-card editor-open-modal">
+            <div><strong>Open Template</strong></div>
+            <div class="small">Click a template row to open it directly. Use Copy to clone it, or Delete to remove file-backed entries.</div>
+            <div style="display:flex; flex:1; min-height:0; flex-direction:column; gap:6px; margin-top:8px; overflow:auto;">
+              ${templateOpenRows || `<div class="small">No template available.</div>`}
+            </div>
+            <div class="row" style="margin-top:8px;">
+              <button id="btnOpenTemplateClose">Close</button>
+            </div>
           </div>
         </div>` : ""}
         <div class="row">
@@ -3144,9 +3193,12 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       const partOpenRows = parts
         .map((part) => {
           const selectedClass = part.id === partDesignerSelectedId ? "active" : "";
-          return `<div class="row" style="justify-content:space-between; gap:8px;">
+          return `<div class="row" style="gap:8px; flex-wrap:nowrap; align-items:center;">
             <button data-part-open-select="${part.id}" class="${selectedClass}" style="flex:1; text-align:left;">${part.name} (${part.baseComponent})</button>
-            <button data-part-open-copy="${part.id}">Copy</button>
+            <div style="display:flex; gap:6px; margin-left:auto;">
+              <button data-part-open-copy="${part.id}">Copy</button>
+              <button data-part-open-delete="${part.id}">Delete</button>
+            </div>
           </div>`;
         })
         .join("");
@@ -3190,14 +3242,16 @@ export function bootstrap(options: BootstrapOptions = {}): void {
           <button id="btnOpenPartWindow">Open</button>
           <span class="small">Current part: ${partDesignerDraft.name}</span>
         </div>
-        ${partDesignerDialogOpen ? `<div class="node-card">
-          <div><strong>Open Part</strong></div>
-          <div class="small">Click a part row to open it, or Copy to create an editable clone.</div>
-          <div style="display:flex; flex-direction:column; gap:6px; margin-top:8px; max-height:220px; overflow:auto;">
-            ${partOpenRows || `<div class="small">No part available.</div>`}
-          </div>
-          <div class="row" style="margin-top:8px;">
-            <button id="btnOpenPartClose">Close</button>
+        ${partDesignerDialogOpen ? `<div id="editorOpenPartOverlay" class="editor-open-overlay">
+          <div class="node-card editor-open-modal">
+            <div><strong>Open Part</strong></div>
+            <div class="small">Click a part row to open it. Use Copy to clone it, or Delete to remove file-backed entries.</div>
+            <div style="display:flex; flex:1; min-height:0; flex-direction:column; gap:6px; margin-top:8px; overflow:auto;">
+              ${partOpenRows || `<div class="small">No part available.</div>`}
+            </div>
+            <div class="row" style="margin-top:8px;">
+              <button id="btnOpenPartClose">Close</button>
+            </div>
           </div>
         </div>` : ""}
         <div class="row">
@@ -3309,7 +3363,39 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     }
   };
 
+  const applyTestArenaBattlefieldSize = (): void => {
+    const width = normalizeTestArenaBattlefieldWidth(testArenaBattlefieldWidth);
+    const height = normalizeTestArenaBattlefieldHeight(testArenaBattlefieldHeight);
+    testArenaBattlefieldWidth = width;
+    testArenaBattlefieldHeight = height;
+    battle.setBattlefieldSize(width, height);
+    testArenaGroundHeight = battle.setGroundHeight(normalizeTestArenaGroundHeight(testArenaGroundHeight));
+    applyBattleViewTransform();
+  };
+
+  const applyBattlefieldDefaults = (): void => {
+    battle.setBattlefieldSize(BATTLEFIELD_WIDTH, BATTLEFIELD_HEIGHT);
+    battle.setGroundHeight(Math.floor(BATTLEFIELD_HEIGHT - (BATTLEFIELD_HEIGHT * (250 / 720))));
+    applyBattleViewTransform();
+  };
+
+  const setBattleZoomPercent = (zoomPercent: number): void => {
+    const normalized = normalizeTestArenaZoomPercent(zoomPercent);
+    const scale = normalized / 100;
+    if (isBattleScreen()) {
+      const rect = canvasViewport.getBoundingClientRect();
+      const centerX = rect.left + rect.width * 0.5;
+      const centerY = rect.top + rect.height * 0.5;
+      adjustBattleViewScaleAtClientPoint(scale, centerX, centerY);
+      return;
+    }
+    battleViewScale = Math.max(0.45, Math.min(2.4, scale));
+    applyBattleViewTransform();
+    syncTestArenaZoomInput();
+  };
+
   const startTestArena = (): void => {
+    applyTestArenaBattlefieldSize();
     if (battle.getState().active && !battle.getState().outcome) {
       battle.resetToMapMode();
     }
@@ -3398,6 +3484,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         if (!node) {
           return;
         }
+        applyBattlefieldDefaults();
         battle.setAiControllers({});
         battle.start(node);
         addLog(`Battle started at ${node.name}`);
@@ -3447,11 +3534,28 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       renderPanels();
     });
 
-    getOptionalElement<HTMLButtonElement>("#btnApplyEnemyCount")?.addEventListener("click", () => {
+    const bindCommitOnEnterOrBlur = (input: HTMLInputElement | null, onCommit: () => void): void => {
+      if (!input) {
+        return;
+      }
+      input.addEventListener("keydown", (event) => {
+        if (event.key !== "Enter") {
+          return;
+        }
+        event.preventDefault();
+        input.blur();
+      });
+      input.addEventListener("blur", () => {
+        onCommit();
+      });
+    };
+
+    const commitTestArenaEnemyCount = (): void => {
       const raw = getOptionalElement<HTMLInputElement>("#testArenaEnemyCount")?.value ?? "";
       const value = Number.parseInt(raw, 10);
       if (!Number.isFinite(value)) {
         addLog("Enemy count must be a number.", "warn");
+        renderPanels();
         return;
       }
       testArenaEnemyCount = Math.max(0, Math.min(40, value));
@@ -3462,7 +3566,79 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         addLog(`Test Arena enemy count queued: ${testArenaEnemyCount}.`, "warn");
       }
       renderPanels();
-    });
+    };
+    bindCommitOnEnterOrBlur(getOptionalElement<HTMLInputElement>("#testArenaEnemyCount"), commitTestArenaEnemyCount);
+
+    const commitTestArenaBattlefieldWidth = (): void => {
+      const raw = getOptionalElement<HTMLInputElement>("#testArenaBattlefieldWidth")?.value ?? "";
+      const value = Number.parseInt(raw, 10);
+      if (!Number.isFinite(value)) {
+        addLog("Battlefield width must be a number.", "warn");
+        renderPanels();
+        return;
+      }
+      testArenaBattlefieldWidth = normalizeTestArenaBattlefieldWidth(value);
+      if (battle.getState().active && battle.getState().nodeId !== testArenaNode.id) {
+        addLog(`Test Arena battlefield width queued: ${testArenaBattlefieldWidth}.`, "warn");
+      } else {
+        applyTestArenaBattlefieldSize();
+        addLog(`Test Arena battlefield size set to ${testArenaBattlefieldWidth}x${testArenaBattlefieldHeight}.`, "good");
+      }
+      renderPanels();
+    };
+    bindCommitOnEnterOrBlur(getOptionalElement<HTMLInputElement>("#testArenaBattlefieldWidth"), commitTestArenaBattlefieldWidth);
+
+    const commitTestArenaBattlefieldHeight = (): void => {
+      const raw = getOptionalElement<HTMLInputElement>("#testArenaBattlefieldHeight")?.value ?? "";
+      const value = Number.parseInt(raw, 10);
+      if (!Number.isFinite(value)) {
+        addLog("Battlefield height must be a number.", "warn");
+        renderPanels();
+        return;
+      }
+      testArenaBattlefieldHeight = normalizeTestArenaBattlefieldHeight(value);
+      if (battle.getState().active && battle.getState().nodeId !== testArenaNode.id) {
+        addLog(`Test Arena battlefield height queued: ${testArenaBattlefieldHeight}.`, "warn");
+      } else {
+        applyTestArenaBattlefieldSize();
+        addLog(`Test Arena battlefield size set to ${testArenaBattlefieldWidth}x${testArenaBattlefieldHeight}.`, "good");
+      }
+      renderPanels();
+    };
+    bindCommitOnEnterOrBlur(getOptionalElement<HTMLInputElement>("#testArenaBattlefieldHeight"), commitTestArenaBattlefieldHeight);
+
+    const commitTestArenaZoomPercent = (): void => {
+      const raw = getOptionalElement<HTMLInputElement>("#testArenaZoomPercent")?.value ?? "";
+      const value = Number.parseInt(raw, 10);
+      if (!Number.isFinite(value)) {
+        addLog("Zoom percentage must be a number.", "warn");
+        renderPanels();
+        return;
+      }
+      setBattleZoomPercent(value);
+      addLog(`Battlefield zoom set to ${Math.round(battleViewScale * 100)}%.`, "good");
+      renderPanels();
+    };
+    bindCommitOnEnterOrBlur(getOptionalElement<HTMLInputElement>("#testArenaZoomPercent"), commitTestArenaZoomPercent);
+
+    const commitTestArenaGroundHeight = (): void => {
+      const raw = getOptionalElement<HTMLInputElement>("#testArenaGroundHeight")?.value ?? "";
+      const value = Number.parseInt(raw, 10);
+      if (!Number.isFinite(value)) {
+        addLog("Ground height must be a number.", "warn");
+        renderPanels();
+        return;
+      }
+      testArenaGroundHeight = normalizeTestArenaGroundHeight(value);
+      if (battle.getState().active && battle.getState().nodeId !== testArenaNode.id) {
+        addLog(`Test Arena ground height queued: ${testArenaGroundHeight}.`, "warn");
+      } else {
+        testArenaGroundHeight = battle.setGroundHeight(testArenaGroundHeight);
+        addLog(`Test Arena ground height set to ${testArenaGroundHeight}.`, "good");
+      }
+      renderPanels();
+    };
+    bindCommitOnEnterOrBlur(getOptionalElement<HTMLInputElement>("#testArenaGroundHeight"), commitTestArenaGroundHeight);
 
     getOptionalElement<HTMLButtonElement>("#btnSpawnTestEnemy")?.addEventListener("click", () => {
       const selection = getOptionalElement<HTMLSelectElement>("#testArenaSpawnTemplate")?.value ?? "";
@@ -3562,8 +3738,57 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         renderPanels();
       });
     });
+    document.querySelectorAll<HTMLButtonElement>("button[data-editor-open-delete]").forEach((button) => {
+      button.addEventListener("click", async () => {
+        const templateId = button.getAttribute("data-editor-open-delete");
+        if (!templateId) {
+          return;
+        }
+        const source = templates.find((template) => template.id === templateId);
+        if (!source) {
+          return;
+        }
+        if (!window.confirm(`Delete template "${source.name}" (${source.id})?`)) {
+          return;
+        }
+        const deletedUser = await deleteUserTemplateFromStore(templateId);
+        const deletedDefault = await deleteDefaultTemplateFromStore(templateId);
+        if (!deletedUser && !deletedDefault) {
+          addLog(`Failed to delete template: ${source.name}`, "bad");
+          return;
+        }
+        await refreshTemplatesFromStore();
+        const stillExists = templates.some((template) => template.id === templateId);
+        if (stillExists) {
+          addLog(`Cannot delete built-in template: ${source.name}`, "warn");
+        } else {
+          addLog(`Deleted template: ${source.name}`, "good");
+        }
+        if (editorDraft.id === templateId) {
+          const fallback = templates[0];
+          if (fallback) {
+            editorDraft = cloneTemplate(fallback);
+            loadTemplateIntoEditorSlots(editorDraft);
+            editorTemplateDialogSelectedId = fallback.id;
+            editorDeleteMode = false;
+            editorWeaponRotateQuarter = 0;
+            ensureEditorSelectionForLayer();
+          }
+        } else if (editorTemplateDialogSelectedId === templateId) {
+          editorTemplateDialogSelectedId = templates[0]?.id ?? null;
+        }
+        renderPanels();
+      });
+    });
 
     getOptionalElement<HTMLButtonElement>("#btnOpenTemplateClose")?.addEventListener("click", () => {
+      editorTemplateDialogOpen = false;
+      renderPanels();
+    });
+    getOptionalElement<HTMLDivElement>("#editorOpenTemplateOverlay")?.addEventListener("click", (event) => {
+      if (event.target !== event.currentTarget) {
+        return;
+      }
       editorTemplateDialogOpen = false;
       renderPanels();
     });
@@ -3693,8 +3918,54 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         renderPanels();
       });
     });
+    document.querySelectorAll<HTMLButtonElement>("button[data-part-open-delete]").forEach((button) => {
+      button.addEventListener("click", async () => {
+        const partId = button.getAttribute("data-part-open-delete");
+        if (!partId) {
+          return;
+        }
+        const source = parts.find((part) => part.id === partId);
+        if (!source) {
+          return;
+        }
+        if (!window.confirm(`Delete part "${source.name}" (${source.id})?`)) {
+          return;
+        }
+        const deletedUser = await deleteUserPartFromStore(partId);
+        const deletedDefault = await deleteDefaultPartFromStore(partId);
+        if (!deletedUser && !deletedDefault) {
+          addLog(`Failed to delete part: ${source.name}`, "bad");
+          return;
+        }
+        await refreshPartsFromStore();
+        await refreshTemplatesFromStore();
+        const stillExists = parts.some((part) => part.id === partId);
+        if (stillExists) {
+          addLog(`Cannot delete built-in part: ${source.name}`, "warn");
+        } else {
+          addLog(`Deleted part: ${source.name}`, "good");
+        }
+        if (partDesignerDraft.id === partId) {
+          const fallback = parts[0];
+          if (fallback) {
+            partDesignerSelectedId = fallback.id;
+            loadPartIntoDesignerSlots(fallback);
+          }
+        } else if (partDesignerSelectedId === partId) {
+          partDesignerSelectedId = parts[0]?.id ?? null;
+        }
+        renderPanels();
+      });
+    });
 
     getOptionalElement<HTMLButtonElement>("#btnOpenPartClose")?.addEventListener("click", () => {
+      partDesignerDialogOpen = false;
+      renderPanels();
+    });
+    getOptionalElement<HTMLDivElement>("#editorOpenPartOverlay")?.addEventListener("click", (event) => {
+      if (event.target !== event.currentTarget) {
+        return;
+      }
       partDesignerDialogOpen = false;
       renderPanels();
     });

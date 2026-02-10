@@ -62,3 +62,25 @@ export async function saveDefaultTemplateToStore(template: UnitTemplate): Promis
     return false;
   }
 }
+
+export async function deleteUserTemplateFromStore(templateId: string): Promise<boolean> {
+  try {
+    const response = await fetch(`/__templates/user/${encodeURIComponent(templateId)}`, {
+      method: "DELETE",
+    });
+    return response.ok;
+  } catch {
+    return false;
+  }
+}
+
+export async function deleteDefaultTemplateFromStore(templateId: string): Promise<boolean> {
+  try {
+    const response = await fetch(`/__templates/default/${encodeURIComponent(templateId)}`, {
+      method: "DELETE",
+    });
+    return response.ok;
+  } catch {
+    return false;
+  }
+}

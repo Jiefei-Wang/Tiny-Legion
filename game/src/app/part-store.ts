@@ -66,6 +66,17 @@ export async function saveDefaultPartToStore(part: PartDefinition): Promise<bool
   }
 }
 
+export async function deleteDefaultPartFromStore(partId: string): Promise<boolean> {
+  try {
+    const response = await fetch(`/__parts/default/${encodeURIComponent(partId)}`, {
+      method: "DELETE",
+    });
+    return response.ok;
+  } catch {
+    return false;
+  }
+}
+
 export async function deleteUserPartFromStore(partId: string): Promise<boolean> {
   try {
     const response = await fetch(`/__parts/user/${encodeURIComponent(partId)}`, {
