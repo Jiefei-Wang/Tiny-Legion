@@ -75,6 +75,9 @@ class TrainConfig:
     battle_initial_units_per_side: int = 2
     battle_external_ai_player: bool = True
     battle_external_ai_enemy: bool = False
+    battle_width: int = 2000
+    battle_height: int = 1000
+    battle_ground_height: int = 700
 
 
 class ArenaGrpcStubAdapter:
@@ -323,6 +326,11 @@ def _episode_config(seed: int, cfg: TrainConfig) -> Dict[str, Any]:
             "withBase": bool(cfg.battle_with_base),
             "initialUnitsPerSide": int(cfg.battle_initial_units_per_side),
         },
+        "battlefield": {
+            "width": int(cfg.battle_width),
+            "height": int(cfg.battle_height),
+            "groundHeight": int(cfg.battle_ground_height),
+        },
         "externalAiSides": {
             "player": bool(cfg.battle_external_ai_player),
             "enemy": bool(cfg.battle_external_ai_enemy),
@@ -440,6 +448,14 @@ def main() -> None:
         default=None,
         help="CreateBattle.externalAiSides.enemy",
     )
+    parser.add_argument("--battle-width", type=int, default=None, help="CreateBattle.battlefield.width")
+    parser.add_argument("--battle-height", type=int, default=None, help="CreateBattle.battlefield.height")
+    parser.add_argument(
+        "--battle-ground-height",
+        type=int,
+        default=None,
+        help="CreateBattle.battlefield.groundHeight",
+    )
     args = parser.parse_args()
 
     cfg = TrainConfig()
@@ -465,6 +481,12 @@ def main() -> None:
         cfg.battle_external_ai_player = args.battle_external_ai_player == "true"
     if args.battle_external_ai_enemy is not None:
         cfg.battle_external_ai_enemy = args.battle_external_ai_enemy == "true"
+    if args.battle_width is not None:
+        cfg.battle_width = max(640, int(args.battle_width))
+    if args.battle_height is not None:
+        cfg.battle_height = max(360, int(args.battle_height))
+    if args.battle_ground_height is not None:
+        cfg.battle_ground_height = max(40, int(args.battle_ground_height))
     train(cfg)
 
 

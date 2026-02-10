@@ -485,6 +485,7 @@ Developer Part Designer UX:
 - Dedicated editor workspace for authoring a single reusable part definition.
 - Part Designer layer mode is integrated into `Base Component` selection using a `structure-layer` pseudo-option instead of a separate layer selector.
 - `Open Part` rows include explicit layer labels and default catalog includes `structure-box` so structure authoring is immediately discoverable.
+- `Open Part` modal includes tab-style filtering by part kind (`all`, `structure`, and functional component types).
 - In `structure-layer` mode, functional-only part-property and placement controls are hidden.
 - Category/subcategory auto-sync to base defaults only while those fields remain unmodified by the user.
 - `createDefaultPartDefinitions()` now ships implicit structure-material part entries (`material-basic`, `material-reinforced`, `material-ceramic`, `material-reactive`, `material-combined`) and `bootstrap.ts` applies their overrides into runtime `MATERIALS`.

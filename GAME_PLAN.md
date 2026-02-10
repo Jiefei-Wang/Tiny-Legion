@@ -101,6 +101,7 @@ Current implementation includes dedicated in-app editor tabs where the player ca
 - Part Designer edits a **single reusable part definition** (not a full unit template).
 - Part Designer integrates layer mode into the `Base Component` selector via a `structure-layer` option (no separate layer control).
 - `Open Part` now shows each row with explicit `[layer]` and includes a canonical default `Structure Box` entry.
+- `Open Part` includes top filter tabs for `All`, `Structure`, and functional base-component types (`control`/`engine`/`weapon`/`loader`/`ammo`).
 - In `structure-layer` mode, functional-only metadata/constraints are hidden (for example engine/weapon/loader toggles, category/subcategory, and require-structure placement flags).
 - When base component changes in functional mode, category/subcategory auto-follow defaults unless the user has manually edited those fields.
 - Part catalog now includes editable default structure-material parts for `basic`, `reinforced`, `ceramic`, `reactive`, and `combined` (as structure-layer entries), and their edited material stats drive runtime material balance.

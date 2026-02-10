@@ -322,6 +322,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     | "markSupport"
     | "markEmptyStructure"
     | "markEmptyFunctional";
+  type PartOpenFilter = "all" | "structure" | "control" | "engine" | "weapon" | "loader" | "ammo";
   type PartDesignerSlot = {
     occupiesFunctionalSpace: boolean;
     occupiesStructureSpace: boolean;
@@ -364,6 +365,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
   let editorTemplateDialogSelectedId: string | null = null;
   let partDesignerDialogOpen = false;
   let partDesignerSelectedId: string | null = null;
+  let partDesignerOpenFilter: PartOpenFilter = "all";
   let partDesignerTool: PartDesignerTool = "select";
   const STRUCTURE_LAYER_BASE_OPTION = "__structure_layer__";
   let partDesignerDraft: PartDefinition = clonePartDefinition(parts[0] ?? {
@@ -3362,7 +3364,26 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       if (partDesignerSelectedId !== partDesignerDraft.id && !parts.some((part) => part.id === partDesignerSelectedId)) {
         partDesignerSelectedId = parts[0]?.id ?? null;
       }
-      const partOpenRows = parts
+      const partOpenFilterOptions: Array<{ value: PartOpenFilter; label: string }> = [{ value: "all", label: "All" }];
+      if (parts.some((part) => part.layer === "structure")) {
+        partOpenFilterOptions.push({ value: "structure", label: "Structure" });
+      }
+      const functionalTypeOrder: Array<Exclude<PartOpenFilter, "all" | "structure">> = ["control", "engine", "weapon", "loader", "ammo"];
+      for (const type of functionalTypeOrder) {
+        if (parts.some((part) => part.layer === "functional" && COMPONENTS[part.baseComponent].type === type)) {
+          partOpenFilterOptions.push({ value: type, label: type });
+        }
+      }
+      const filteredPartOpenList = parts.filter((part) => {
+        if (partDesignerOpenFilter === "all") {
+          return true;
+        }
+        if (partDesignerOpenFilter === "structure") {
+          return part.layer === "structure";
+        }
+        return part.layer === "functional" && COMPONENTS[part.baseComponent].type === partDesignerOpenFilter;
+      });
+      const partOpenRows = filteredPartOpenList
         .map((part) => {
           const selectedClass = part.id === partDesignerSelectedId ? "active" : "";
           return `<div class="row" style="gap:8px; flex-wrap:nowrap; align-items:center;">
@@ -3442,6 +3463,11 @@ export function bootstrap(options: BootstrapOptions = {}): void {
           <div class="node-card editor-open-modal">
             <div><strong>Open Part</strong></div>
             <div class="small">Click a part row to open it. Use Copy to clone it, or Delete to remove file-backed entries.</div>
+            <div class="row" style="gap:6px; margin-top:8px; flex-wrap:wrap;">
+              ${partOpenFilterOptions
+                .map((option) => `<button data-part-open-filter="${option.value}" class="${partDesignerOpenFilter === option.value ? "active" : ""}">${option.label}</button>`)
+                .join("")}
+            </div>
             <div style="display:flex; flex:1; min-height:0; flex-direction:column; gap:6px; margin-top:8px; overflow:auto;">
               ${partOpenRows || `<div class="small">No part available.</div>`}
             </div>
@@ -4202,6 +4228,17 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         partDesignerSelectedId = parts[0]?.id ?? null;
       }
       renderPanels();
+    });
+
+    document.querySelectorAll<HTMLButtonElement>("button[data-part-open-filter]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const nextFilter = button.getAttribute("data-part-open-filter") as PartOpenFilter | null;
+        if (!nextFilter) {
+          return;
+        }
+        partDesignerOpenFilter = nextFilter;
+        renderPanels();
+      });
     });
 
     document.querySelectorAll<HTMLButtonElement>("button[data-part-open-select]").forEach((button) => {
