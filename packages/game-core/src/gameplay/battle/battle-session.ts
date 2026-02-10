@@ -222,21 +222,7 @@ export class BattleSession {
     this.canvas.width = normalizedWidth;
     this.canvas.height = normalizedHeight;
     this.groundHeightPx = clamp(this.groundHeightPx, 80, Math.max(120, this.canvas.height - 40));
-
-    const nextPlayerBase = this.createDefaultBase("player");
-    const nextEnemyBase = this.createDefaultBase("enemy");
-    const playerRatio = this.state.playerBase.maxHp > 0 ? clamp(this.state.playerBase.hp / this.state.playerBase.maxHp, 0, 1) : 1;
-    const enemyRatio = this.state.enemyBase.maxHp > 0 ? clamp(this.state.enemyBase.hp / this.state.enemyBase.maxHp, 0, 1) : 1;
-    this.state.playerBase.x = nextPlayerBase.x;
-    this.state.playerBase.y = nextPlayerBase.y;
-    this.state.playerBase.w = nextPlayerBase.w;
-    this.state.playerBase.h = nextPlayerBase.h;
-    this.state.playerBase.hp = this.state.playerBase.maxHp * playerRatio;
-    this.state.enemyBase.x = nextEnemyBase.x;
-    this.state.enemyBase.y = nextEnemyBase.y;
-    this.state.enemyBase.w = nextEnemyBase.w;
-    this.state.enemyBase.h = nextEnemyBase.h;
-    this.state.enemyBase.hp = this.state.enemyBase.maxHp * enemyRatio;
+    this.relayoutBasesPreservingHp();
 
     this.aimX = clamp(this.aimX, 0, this.canvas.width);
     this.aimY = clamp(this.aimY, 0, this.canvas.height);
@@ -247,6 +233,7 @@ export class BattleSession {
   public setGroundHeight(height: number): number {
     const normalized = clamp(Math.floor(height), 80, Math.max(120, this.canvas.height - 40));
     this.groundHeightPx = normalized;
+    this.relayoutBasesPreservingHp();
     this.clampEntitiesToBattlefield();
     return this.groundHeightPx;
   }
@@ -938,9 +925,28 @@ export class BattleSession {
   private createDefaultBase(side: Side): { x: number; y: number; w: number; h: number } {
     const w = clamp(Math.round(this.canvas.width * (38 / 2000)), 28, 70);
     const h = clamp(Math.round(this.canvas.height * (160 / 1000)), 90, Math.floor(this.canvas.height * 0.5));
-    const y = clamp(Math.round(this.canvas.height * (300 / 1000)), 18, Math.max(18, this.canvas.height - h - 18));
+    const laneBounds = this.getLaneBounds();
+    const verticalMid = (laneBounds.airMaxZ + laneBounds.groundMinY) * 0.5;
+    const y = clamp(Math.round(verticalMid - h * 0.5), 18, Math.max(18, this.canvas.height - h - 18));
     const x = side === "player" ? 18 : this.canvas.width - w - 18;
     return { x, y, w, h };
+  }
+
+  private relayoutBasesPreservingHp(): void {
+    const nextPlayerBase = this.createDefaultBase("player");
+    const nextEnemyBase = this.createDefaultBase("enemy");
+    const playerRatio = this.state.playerBase.maxHp > 0 ? clamp(this.state.playerBase.hp / this.state.playerBase.maxHp, 0, 1) : 1;
+    const enemyRatio = this.state.enemyBase.maxHp > 0 ? clamp(this.state.enemyBase.hp / this.state.enemyBase.maxHp, 0, 1) : 1;
+    this.state.playerBase.x = nextPlayerBase.x;
+    this.state.playerBase.y = nextPlayerBase.y;
+    this.state.playerBase.w = nextPlayerBase.w;
+    this.state.playerBase.h = nextPlayerBase.h;
+    this.state.playerBase.hp = this.state.playerBase.maxHp * playerRatio;
+    this.state.enemyBase.x = nextEnemyBase.x;
+    this.state.enemyBase.y = nextEnemyBase.y;
+    this.state.enemyBase.w = nextEnemyBase.w;
+    this.state.enemyBase.h = nextEnemyBase.h;
+    this.state.enemyBase.hp = this.state.enemyBase.maxHp * enemyRatio;
   }
 
   private getLaneBounds(): {
