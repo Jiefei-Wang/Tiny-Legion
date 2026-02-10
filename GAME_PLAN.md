@@ -109,8 +109,8 @@ Current implementation includes dedicated in-app editor tabs where the player ca
   - developer metadata (`category`, `subcategory`, `tags`),
   - part-property groups (`is_engine`, `is_weapon`, `is_loader`, `is_armor`, core tuning) with scoped parameters:
     - engine: `engineType`, power/speed tuning,
-    - weapon: `weaponType`, damage/range/cooldown/angle/spread tuning,
-    - loader: served tag groups + cooldown multiplier,
+    - weapon: `weaponType`, recoil/hit impulse, damage/range/cooldown/angle, projectile speed/gravity, spread, plus class-specific tuning (`explosive` blast/fuse, `tracking` turn rate, `control-utility` impair factor/duration),
+    - loader: supported weapon classes + load multiplier + fast-operation + min-load-time + store-capacity + min-burst-interval,
     - armor: hp,
     - core tuning: mass/hp multiplier,
   - footprint boxes (`boxes`) with per-box flags:
@@ -575,6 +575,10 @@ The current playable implementation already includes:
   - Loader `loadMultiplier` + `fastOperation` modify load time, bounded by `minLoadTime`.
   - Loader `storeCapacity` allows charge overfill (burst behavior), with minimum burst interval floor of `0.5s`.
   - Fire commands sent to a cooling/reloading weapon slot are ignored (no projectile and no recoil/knockback side effects).
+- Part-level functional overrides now drive runtime behavior for all current functional families:
+  - weapon parts can override recoil/hit impulse, projectile speed/gravity, explosive blast/fuse parameters, tracking turn rate, and control-impair tuning;
+  - loader parts can override supported weapon classes and loader timing/capacity parameters;
+  - armor `hp` metadata is translated into effective attachment durability scaling.
 - Projectile gravity, range-limited lifetime, and debris persistence.
 - Ground-vehicle-fired non-tracking projectiles now auto-terminate after falling `200` Y-units below their firing Y origin only when the shot was fired above horizontal (`initialVy < 0`); downward-fired shots are excluded. Termination triggers blast when explosive data exists.
 - AI split into targeting, movement, and shooting modules with a shared composite interface in `packages/game-core/src/ai/composite/`.

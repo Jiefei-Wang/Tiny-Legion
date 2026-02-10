@@ -18,7 +18,8 @@
       "isAttachPoint": false,
       "isAnchorPoint": true,
       "isShootingPoint": false,
-      "takesDamage": false
+      "takesDamage": false,
+      "takesFunctionalDamage": false
     }
   ],
   "placement": {
@@ -37,8 +38,7 @@
     "isLoader": true,
     "isArmor": false,
     "loaderServesTags": [
-      "heavy-shot",
-      "explosive"
+      "heavy-shot"
     ],
     "loaderCooldownMultiplier": 0.95,
     "hasCoreTuning": false

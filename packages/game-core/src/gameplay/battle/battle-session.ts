@@ -35,7 +35,7 @@ import { createBaselineCompositeAiController } from "../../ai/composite/baseline
 import { validateTemplateDetailed } from "../../templates/template-validation.ts";
 import { createDefaultPartDefinitions, mergePartCatalogs } from "../../parts/part-schema.ts";
 import type { BattleAiController, CombatDecision } from "../../ai/composite/composite-ai.ts";
-import type { BattleState, CommandResult, FireBlockDetail, FireRequest, KeyState, MapNode, PartDefinition, Side, UnitCommand, UnitInstance, UnitTemplate } from "../../types.ts";
+import type { BattleState, CommandResult, FireBlockDetail, FireRequest, KeyState, MapNode, PartDefinition, Side, UnitCommand, UnitInstance, UnitTemplate, WeaponClass } from "../../types.ts";
 
 export interface BattleHooks {
   addLog: (text: string, tone?: "good" | "warn" | "bad" | "") => void;
@@ -1433,6 +1433,64 @@ export class BattleSession {
     return weaponClass === "heavy-shot" || weaponClass === "explosive" || weaponClass === "tracking";
   }
 
+  private normalizeLoaderSupports(values: ReadonlyArray<string> | undefined): WeaponClass[] {
+    if (!values || values.length <= 0) {
+      return [];
+    }
+    const supports: WeaponClass[] = [];
+    for (const value of values) {
+      if (
+        value === "rapid-fire"
+        || value === "heavy-shot"
+        || value === "explosive"
+        || value === "tracking"
+        || value === "beam-precision"
+        || value === "control-utility"
+      ) {
+        supports.push(value);
+      }
+    }
+    return supports;
+  }
+
+  private getLoaderConfig(loaderAttachment: UnitInstance["attachments"][number]): {
+    supports: WeaponClass[];
+    loadMultiplier: number;
+    fastOperation: boolean;
+    minLoadTime: number;
+    storeCapacity: number;
+    minBurstInterval: number;
+  } | null {
+    const loaderStats = COMPONENTS[loaderAttachment.component];
+    if (loaderStats.type !== "loader" || !loaderStats.loader) {
+      return null;
+    }
+    const partDefinition = loaderAttachment.partId
+      ? this.partCatalog.find((part) => part.id === loaderAttachment.partId)
+      : undefined;
+    const supportsFromStats = loaderAttachment.stats?.loaderSupports && loaderAttachment.stats.loaderSupports.length > 0
+      ? [...loaderAttachment.stats.loaderSupports]
+      : [];
+    const supportsLegacy = this.normalizeLoaderSupports(
+      partDefinition?.properties?.loaderServesTags,
+    );
+    const supports = supportsFromStats.length > 0
+      ? supportsFromStats
+      : supportsLegacy.length > 0
+        ? supportsLegacy
+        : [...loaderStats.loader.supports];
+    return {
+      supports,
+      loadMultiplier: loaderAttachment.stats?.loaderLoadMultiplier
+        ?? partDefinition?.properties?.loaderCooldownMultiplier
+        ?? loaderStats.loader.loadMultiplier,
+      fastOperation: loaderAttachment.stats?.loaderFastOperation ?? loaderStats.loader.fastOperation,
+      minLoadTime: loaderAttachment.stats?.loaderMinLoadTime ?? loaderStats.loader.minLoadTime,
+      storeCapacity: loaderAttachment.stats?.loaderStoreCapacity ?? loaderStats.loader.storeCapacity,
+      minBurstInterval: loaderAttachment.stats?.loaderMinBurstInterval ?? loaderStats.loader.minBurstInterval,
+    };
+  }
+
   private getLoaderMinBurstInterval(unit: UnitInstance, slot: number): number {
     const weaponAttachmentId = unit.weaponAttachmentIds[slot];
     const weaponAttachment = unit.attachments.find((entry) => entry.id === weaponAttachmentId && entry.alive);
@@ -1449,11 +1507,7 @@ export class BattleSession {
       if (!loaderAttachment) {
         continue;
       }
-      const loaderStats = COMPONENTS[loaderAttachment.component];
-      if (loaderStats.type !== "loader") {
-        continue;
-      }
-      const loader = loaderStats.loader;
+      const loader = this.getLoaderConfig(loaderAttachment);
       if (!loader || !loader.supports.includes(weaponStats.weaponClass ?? "rapid-fire")) {
         continue;
       }
@@ -1481,11 +1535,7 @@ export class BattleSession {
       if (!loaderAttachment) {
         continue;
       }
-      const loaderStats = COMPONENTS[loaderAttachment.component];
-      if (loaderStats.type !== "loader") {
-        continue;
-      }
-      const loader = loaderStats.loader;
+      const loader = this.getLoaderConfig(loaderAttachment);
       if (!loader || !loader.supports.includes(weaponStats.weaponClass ?? "rapid-fire")) {
         continue;
       }
@@ -1494,11 +1544,14 @@ export class BattleSession {
     return Math.max(0, capacity);
   }
 
-  private computeLoaderDuration(loaderStats: (typeof COMPONENTS)[keyof typeof COMPONENTS], weaponCooldown: number): number {
-    const loader = loaderStats.loader;
-    if (!loader) {
-      return weaponCooldown;
-    }
+  private computeLoaderDuration(
+    loader: {
+      loadMultiplier: number;
+      fastOperation: boolean;
+      minLoadTime: number;
+    },
+    weaponCooldown: number,
+  ): number {
     const operationFactor = loader.fastOperation ? 0.82 : 1.08;
     const scaled = weaponCooldown * loader.loadMultiplier * operationFactor;
     return Math.max(loader.minLoadTime, scaled);
@@ -1519,13 +1572,12 @@ export class BattleSession {
         loaderState.remaining = 0;
         continue;
       }
-      const loaderStats = COMPONENTS[loaderAttachment.component];
-      if (loaderStats.type !== "loader" || !loaderStats.loader) {
+      const loaderConfig = this.getLoaderConfig(loaderAttachment);
+      if (!loaderConfig) {
         loaderState.targetWeaponSlot = null;
         loaderState.remaining = 0;
         continue;
       }
-      const loaderConfig = loaderStats.loader;
 
       if (loaderState.targetWeaponSlot !== null) {
         const targetSlot = loaderState.targetWeaponSlot;
@@ -1565,11 +1617,10 @@ export class BattleSession {
       if (!loaderAttachment) {
         continue;
       }
-      const loaderStats = COMPONENTS[loaderAttachment.component];
-      if (loaderStats.type !== "loader" || !loaderStats.loader) {
+      const loaderConfig = this.getLoaderConfig(loaderAttachment);
+      if (!loaderConfig) {
         continue;
       }
-      const loaderConfig = loaderStats.loader;
 
       const slotOrder: number[] = [];
       if (prioritizeSelectedWeapon) {
@@ -1615,7 +1666,7 @@ export class BattleSession {
       const weaponCooldown = weaponAttachment?.stats?.cooldown ?? weaponStats.cooldown ?? 1;
 
       loaderState.targetWeaponSlot = nextSlot;
-      loaderState.remaining = this.computeLoaderDuration(loaderStats, weaponCooldown);
+      loaderState.remaining = this.computeLoaderDuration(loaderConfig, weaponCooldown);
       unit.weaponLoadTimers[nextSlot] = Math.max(unit.weaponLoadTimers[nextSlot] ?? 0, loaderState.remaining);
       alreadyLoading.add(nextSlot);
     }

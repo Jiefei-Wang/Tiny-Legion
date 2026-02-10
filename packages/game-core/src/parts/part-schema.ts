@@ -240,11 +240,30 @@ export function clonePartDefinition(part: PartDefinition): PartDefinition {
           hpMul: part.stats.hpMul,
           power: part.stats.power,
           maxSpeed: part.stats.maxSpeed,
+          recoil: part.stats.recoil,
+          hitImpulse: part.stats.hitImpulse,
           damage: part.stats.damage,
           range: part.stats.range,
           cooldown: part.stats.cooldown,
           shootAngleDeg: part.stats.shootAngleDeg,
+          projectileSpeed: part.stats.projectileSpeed,
+          projectileGravity: part.stats.projectileGravity,
           spreadDeg: part.stats.spreadDeg,
+          explosiveDeliveryMode: part.stats.explosiveDeliveryMode,
+          explosiveBlastRadius: part.stats.explosiveBlastRadius,
+          explosiveBlastDamage: part.stats.explosiveBlastDamage,
+          explosiveFalloffPower: part.stats.explosiveFalloffPower,
+          explosiveFuse: part.stats.explosiveFuse,
+          explosiveFuseTime: part.stats.explosiveFuseTime,
+          trackingTurnRateDegPerSec: part.stats.trackingTurnRateDegPerSec,
+          controlImpairFactor: part.stats.controlImpairFactor,
+          controlDuration: part.stats.controlDuration,
+          loaderSupports: part.stats.loaderSupports ? [...part.stats.loaderSupports] : undefined,
+          loaderLoadMultiplier: part.stats.loaderLoadMultiplier,
+          loaderFastOperation: part.stats.loaderFastOperation,
+          loaderMinLoadTime: part.stats.loaderMinLoadTime,
+          loaderStoreCapacity: part.stats.loaderStoreCapacity,
+          loaderMinBurstInterval: part.stats.loaderMinBurstInterval,
         }
       : undefined,
     properties: part.properties
@@ -332,7 +351,19 @@ export function parsePartDefinition(input: unknown): PartDefinition | null {
       ? (data.runtimeOverrides as Record<string, unknown>)
       : data.parameters && typeof data.parameters === "object"
         ? (data.parameters as Record<string, unknown>)
-        : {};
+      : {};
+  const runtimeExplosiveRecord = runtimeRecord.explosive && typeof runtimeRecord.explosive === "object"
+    ? (runtimeRecord.explosive as Record<string, unknown>)
+    : {};
+  const runtimeTrackingRecord = runtimeRecord.tracking && typeof runtimeRecord.tracking === "object"
+    ? (runtimeRecord.tracking as Record<string, unknown>)
+    : {};
+  const runtimeControlRecord = runtimeRecord.control && typeof runtimeRecord.control === "object"
+    ? (runtimeRecord.control as Record<string, unknown>)
+    : {};
+  const runtimeLoaderRecord = runtimeRecord.loader && typeof runtimeRecord.loader === "object"
+    ? (runtimeRecord.loader as Record<string, unknown>)
+    : {};
   const propertiesRecord = data.properties && typeof data.properties === "object"
     ? (data.properties as Record<string, unknown>)
     : {};
@@ -358,11 +389,46 @@ export function parsePartDefinition(input: unknown): PartDefinition | null {
       hpMul: readOptionalNumber(runtimeRecord.hpMul),
       power: readOptionalNumber(runtimeRecord.power),
       maxSpeed: readOptionalNumber(runtimeRecord.maxSpeed),
+      recoil: readOptionalNumber(runtimeRecord.recoil),
+      hitImpulse: readOptionalNumber(runtimeRecord.hitImpulse),
       damage: readOptionalNumber(runtimeRecord.damage),
       range: readOptionalNumber(runtimeRecord.range),
       cooldown: readOptionalNumber(runtimeRecord.cooldown),
       shootAngleDeg: readOptionalNumber(runtimeRecord.shootAngleDeg),
+      projectileSpeed: readOptionalNumber(runtimeRecord.projectileSpeed),
+      projectileGravity: readOptionalNumber(runtimeRecord.projectileGravity),
       spreadDeg: readOptionalNumber(runtimeRecord.spreadDeg),
+      explosiveDeliveryMode: runtimeRecord.explosiveDeliveryMode === "shell" || runtimeRecord.explosiveDeliveryMode === "bomb"
+        ? runtimeRecord.explosiveDeliveryMode
+        : runtimeExplosiveRecord.deliveryMode === "shell" || runtimeExplosiveRecord.deliveryMode === "bomb"
+          ? runtimeExplosiveRecord.deliveryMode
+        : undefined,
+      explosiveBlastRadius: readOptionalNumber(runtimeRecord.explosiveBlastRadius ?? runtimeExplosiveRecord.blastRadius),
+      explosiveBlastDamage: readOptionalNumber(runtimeRecord.explosiveBlastDamage ?? runtimeExplosiveRecord.blastDamage),
+      explosiveFalloffPower: readOptionalNumber(runtimeRecord.explosiveFalloffPower ?? runtimeExplosiveRecord.falloffPower),
+      explosiveFuse: runtimeRecord.explosiveFuse === "impact" || runtimeRecord.explosiveFuse === "timed"
+        ? runtimeRecord.explosiveFuse
+        : runtimeExplosiveRecord.fuse === "impact" || runtimeExplosiveRecord.fuse === "timed"
+          ? runtimeExplosiveRecord.fuse
+        : undefined,
+      explosiveFuseTime: readOptionalNumber(runtimeRecord.explosiveFuseTime ?? runtimeExplosiveRecord.fuseTime),
+      trackingTurnRateDegPerSec: readOptionalNumber(runtimeRecord.trackingTurnRateDegPerSec ?? runtimeTrackingRecord.turnRateDegPerSec),
+      controlImpairFactor: readOptionalNumber(runtimeRecord.controlImpairFactor ?? runtimeControlRecord.impairFactor),
+      controlDuration: readOptionalNumber(runtimeRecord.controlDuration ?? runtimeControlRecord.duration),
+      loaderSupports: Array.isArray(runtimeRecord.loaderSupports)
+        ? runtimeRecord.loaderSupports
+            .map((entry) => readOptionalWeaponClass(entry))
+            .filter((entry): entry is "rapid-fire" | "heavy-shot" | "explosive" | "tracking" | "beam-precision" | "control-utility" => entry !== undefined)
+        : Array.isArray(runtimeLoaderRecord.supports)
+          ? runtimeLoaderRecord.supports
+              .map((entry) => readOptionalWeaponClass(entry))
+              .filter((entry): entry is "rapid-fire" | "heavy-shot" | "explosive" | "tracking" | "beam-precision" | "control-utility" => entry !== undefined)
+        : undefined,
+      loaderLoadMultiplier: readOptionalNumber(runtimeRecord.loaderLoadMultiplier ?? runtimeLoaderRecord.loadMultiplier),
+      loaderFastOperation: readOptionalBoolean(runtimeRecord.loaderFastOperation ?? runtimeLoaderRecord.fastOperation),
+      loaderMinLoadTime: readOptionalNumber(runtimeRecord.loaderMinLoadTime ?? runtimeLoaderRecord.minLoadTime),
+      loaderStoreCapacity: readOptionalNumber(runtimeRecord.loaderStoreCapacity ?? runtimeLoaderRecord.storeCapacity),
+      loaderMinBurstInterval: readOptionalNumber(runtimeRecord.loaderMinBurstInterval ?? runtimeLoaderRecord.minBurstInterval),
     },
     properties: {
       category: readOptionalString(propertiesRecord.category ?? data.category),

@@ -7,3 +7,18 @@ bridge = TestArenaBridgeClient(
     callback=baseline_ai_callback,
 )
 bridge.run_forever()
+
+
+# bridge.connect()
+# bridge.heartbeat()
+# next_payload = bridge.poll_next()
+# request_obj = next_payload.get("request")
+
+# request_id = str(request_obj.get("id", ""))
+# payload = request_obj.get("payload", {})
+# snapshot_block = payload.get("snapshot", {})
+# snapshot = snapshot_block.get("state", snapshot_block)
+# pending_units = payload.get("pendingUnits", [])
+
+
+# snapshot.keys()

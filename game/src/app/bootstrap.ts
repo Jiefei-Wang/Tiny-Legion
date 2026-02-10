@@ -1606,6 +1606,23 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     return copy;
   };
 
+  const parseWeaponClassList = (values: ReadonlyArray<string>): Array<"rapid-fire" | "heavy-shot" | "explosive" | "tracking" | "beam-precision" | "control-utility"> => {
+    const result: Array<"rapid-fire" | "heavy-shot" | "explosive" | "tracking" | "beam-precision" | "control-utility"> = [];
+    for (const value of values) {
+      if (
+        value === "rapid-fire"
+        || value === "heavy-shot"
+        || value === "explosive"
+        || value === "tracking"
+        || value === "beam-precision"
+        || value === "control-utility"
+      ) {
+        result.push(value);
+      }
+    }
+    return result;
+  };
+
   const getPartMetadataDefaults = (baseComponent: ComponentId): NonNullable<PartDefinition["properties"]> => {
     const stats = COMPONENTS[baseComponent];
     return {
@@ -3229,11 +3246,26 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         hpMul: String(baseStats.hpMul),
         power: baseStats.power !== undefined ? String(baseStats.power) : "none",
         maxSpeed: baseStats.maxSpeed !== undefined ? String(baseStats.maxSpeed) : "none",
+        recoil: baseStats.recoil !== undefined ? String(baseStats.recoil) : "none",
+        hitImpulse: baseStats.hitImpulse !== undefined ? String(baseStats.hitImpulse) : "none",
         damage: baseStats.damage !== undefined ? String(baseStats.damage) : "none",
         range: baseStats.range !== undefined ? String(baseStats.range) : "none",
         cooldown: baseStats.cooldown !== undefined ? String(baseStats.cooldown) : "none",
         shootAngleDeg: baseStats.shootAngleDeg !== undefined ? String(baseStats.shootAngleDeg) : "none",
+        projectileSpeed: baseStats.projectileSpeed !== undefined ? String(baseStats.projectileSpeed) : "none",
+        projectileGravity: baseStats.projectileGravity !== undefined ? String(baseStats.projectileGravity) : "none",
         spreadDeg: baseStats.spreadDeg !== undefined ? String(baseStats.spreadDeg) : "none",
+        explosiveBlastRadius: baseStats.explosive?.blastRadius !== undefined ? String(baseStats.explosive.blastRadius) : "none",
+        explosiveBlastDamage: baseStats.explosive?.blastDamage !== undefined ? String(baseStats.explosive.blastDamage) : "none",
+        explosiveFalloffPower: baseStats.explosive?.falloffPower !== undefined ? String(baseStats.explosive.falloffPower) : "none",
+        explosiveFuseTime: baseStats.explosive?.fuseTime !== undefined ? String(baseStats.explosive.fuseTime) : "none",
+        trackingTurnRateDegPerSec: baseStats.tracking?.turnRateDegPerSec !== undefined ? String(baseStats.tracking.turnRateDegPerSec) : "none",
+        controlImpairFactor: baseStats.control?.impairFactor !== undefined ? String(baseStats.control.impairFactor) : "none",
+        controlDuration: baseStats.control?.duration !== undefined ? String(baseStats.control.duration) : "none",
+        loaderLoadMultiplier: baseStats.loader?.loadMultiplier !== undefined ? String(baseStats.loader.loadMultiplier) : "none",
+        loaderMinLoadTime: baseStats.loader?.minLoadTime !== undefined ? String(baseStats.loader.minLoadTime) : "none",
+        loaderStoreCapacity: baseStats.loader?.storeCapacity !== undefined ? String(baseStats.loader.storeCapacity) : "none",
+        loaderMinBurstInterval: baseStats.loader?.minBurstInterval !== undefined ? String(baseStats.loader.minBurstInterval) : "none",
       };
       const categoryOptionsBase: string[] = ["functional", "weapon", "mobility", "support", "defense", "utility", "other"];
       const weaponTypeOptions: Array<{ value: NonNullable<PartDefinition["properties"]>["weaponType"]; label: string }> = [
@@ -3253,6 +3285,11 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       const propIsLoader = partProps.isLoader === true;
       const propIsArmor = partProps.isArmor === true;
       const propHasCoreTuning = partProps.hasCoreTuning === true;
+      const resolvedWeaponType = partProps.weaponType ?? baseStats.weaponClass;
+      const weaponSupportsExplosive = resolvedWeaponType === "explosive";
+      const weaponSupportsTracking = resolvedWeaponType === "tracking";
+      const weaponSupportsControl = resolvedWeaponType === "control-utility";
+      const loaderSupportsPlaceholder = baseStats.loader?.supports?.join(", ") ?? "none";
       editorPanel.innerHTML = `
         <h3>Part Designer</h3>
         <div class="small">Left panel edits part-level metadata and runtime values. Right panel edits single-box properties for the currently selected cell.</div>
@@ -3320,17 +3357,56 @@ export function bootstrap(options: BootstrapOptions = {}): void {
               ${weaponTypeOptions.map((option) => `<option value="${option.value}" ${partProps.weaponType === option.value ? "selected" : ""}>${option.label}</option>`).join("")}
             </select>
           </label>
-          <label class="small">Damage <input id="partDamage" type="number" step="1" value="${partDesignerDraft.stats?.damage ?? ""}" placeholder="${runtimePlaceholders.damage}" /></label>
-          <label class="small">Range <input id="partRange" type="number" step="1" value="${partDesignerDraft.stats?.range ?? ""}" placeholder="${runtimePlaceholders.range}" /></label>
+          <label class="small">Recoil <input id="partRecoil" type="number" step="0.1" value="${partDesignerDraft.stats?.recoil ?? ""}" placeholder="${runtimePlaceholders.recoil}" /></label>
+          <label class="small">Hit Impulse <input id="partHitImpulse" type="number" step="0.1" value="${partDesignerDraft.stats?.hitImpulse ?? ""}" placeholder="${runtimePlaceholders.hitImpulse}" /></label>
         </div>
         <div class="row">
+          <label class="small">Damage <input id="partDamage" type="number" step="1" value="${partDesignerDraft.stats?.damage ?? ""}" placeholder="${runtimePlaceholders.damage}" /></label>
+          <label class="small">Range <input id="partRange" type="number" step="1" value="${partDesignerDraft.stats?.range ?? ""}" placeholder="${runtimePlaceholders.range}" /></label>
           <label class="small">Cooldown <input id="partCooldown" type="number" step="0.05" value="${partDesignerDraft.stats?.cooldown ?? ""}" placeholder="${runtimePlaceholders.cooldown}" /></label>
+        </div>
+        <div class="row">
           <label class="small">Shoot Angle <input id="partShootAngle" type="number" step="1" value="${partDesignerDraft.stats?.shootAngleDeg ?? ""}" placeholder="${runtimePlaceholders.shootAngleDeg}" /></label>
+          <label class="small">Projectile Speed <input id="partProjectileSpeed" type="number" step="1" value="${partDesignerDraft.stats?.projectileSpeed ?? ""}" placeholder="${runtimePlaceholders.projectileSpeed}" /></label>
+          <label class="small">Projectile Gravity <input id="partProjectileGravity" type="number" step="1" value="${partDesignerDraft.stats?.projectileGravity ?? ""}" placeholder="${runtimePlaceholders.projectileGravity}" /></label>
+        </div>
+        <div class="row">
           <label class="small">Spread <input id="partSpread" type="number" step="0.1" value="${partDesignerDraft.stats?.spreadDeg ?? ""}" placeholder="${runtimePlaceholders.spreadDeg}" /></label>
+          ${weaponSupportsTracking ? `<label class="small">Tracking Turn Rate <input id="partTrackingTurnRate" type="number" step="1" value="${partDesignerDraft.stats?.trackingTurnRateDegPerSec ?? ""}" placeholder="${runtimePlaceholders.trackingTurnRateDegPerSec}" /></label>` : ""}
+          ${weaponSupportsControl ? `<label class="small">Control Impair Factor <input id="partControlImpairFactor" type="number" step="0.01" value="${partDesignerDraft.stats?.controlImpairFactor ?? ""}" placeholder="${runtimePlaceholders.controlImpairFactor}" /></label>` : ""}
+        </div>
+        ${weaponSupportsControl ? `<div class="row">
+          <label class="small">Control Duration <input id="partControlDuration" type="number" step="0.05" value="${partDesignerDraft.stats?.controlDuration ?? ""}" placeholder="${runtimePlaceholders.controlDuration}" /></label>
         </div>` : ""}
+        ${weaponSupportsExplosive ? `<div class="row">
+          <label class="small">Explosive Delivery
+            <select id="partExplosiveDeliveryMode">
+              <option value="shell" ${(partDesignerDraft.stats?.explosiveDeliveryMode ?? baseStats.explosive?.deliveryMode ?? "shell") === "shell" ? "selected" : ""}>shell</option>
+              <option value="bomb" ${(partDesignerDraft.stats?.explosiveDeliveryMode ?? baseStats.explosive?.deliveryMode ?? "shell") === "bomb" ? "selected" : ""}>bomb</option>
+            </select>
+          </label>
+          <label class="small">Explosive Fuse
+            <select id="partExplosiveFuse">
+              <option value="impact" ${(partDesignerDraft.stats?.explosiveFuse ?? baseStats.explosive?.fuse ?? "impact") === "impact" ? "selected" : ""}>impact</option>
+              <option value="timed" ${(partDesignerDraft.stats?.explosiveFuse ?? baseStats.explosive?.fuse ?? "impact") === "timed" ? "selected" : ""}>timed</option>
+            </select>
+          </label>
+          <label class="small">Fuse Time <input id="partExplosiveFuseTime" type="number" step="0.05" value="${partDesignerDraft.stats?.explosiveFuseTime ?? ""}" placeholder="${runtimePlaceholders.explosiveFuseTime}" /></label>
+        </div>
+        <div class="row">
+          <label class="small">Blast Radius <input id="partExplosiveBlastRadius" type="number" step="1" value="${partDesignerDraft.stats?.explosiveBlastRadius ?? ""}" placeholder="${runtimePlaceholders.explosiveBlastRadius}" /></label>
+          <label class="small">Blast Damage <input id="partExplosiveBlastDamage" type="number" step="1" value="${partDesignerDraft.stats?.explosiveBlastDamage ?? ""}" placeholder="${runtimePlaceholders.explosiveBlastDamage}" /></label>
+          <label class="small">Falloff Power <input id="partExplosiveFalloffPower" type="number" step="0.1" value="${partDesignerDraft.stats?.explosiveFalloffPower ?? ""}" placeholder="${runtimePlaceholders.explosiveFalloffPower}" /></label>
+        </div>` : ""}` : ""}
         ${propIsLoader ? `<div class="row">
-          <label class="small" style="flex:1;">Loader serves tags (comma separated) <input id="partLoaderServesTags" value="${(partProps.loaderServesTags ?? []).join(", ")}" /></label>
-          <label class="small">Cooldown Multiplier <input id="partLoaderCooldownMultiplier" type="number" step="0.01" value="${partProps.loaderCooldownMultiplier ?? ""}" placeholder="1.0" /></label>
+          <label class="small" style="flex:1;">Loader supports (comma separated weapon classes) <input id="partLoaderSupports" value="${(partDesignerDraft.stats?.loaderSupports ?? partProps.loaderServesTags ?? []).join(", ")}" placeholder="${loaderSupportsPlaceholder}" /></label>
+          <label class="small">Load Multiplier <input id="partLoaderLoadMultiplier" type="number" step="0.01" value="${partDesignerDraft.stats?.loaderLoadMultiplier ?? partProps.loaderCooldownMultiplier ?? ""}" placeholder="${runtimePlaceholders.loaderLoadMultiplier}" /></label>
+          <label class="small"><input id="partLoaderFastOperation" type="checkbox" ${(partDesignerDraft.stats?.loaderFastOperation ?? baseStats.loader?.fastOperation ?? false) ? "checked" : ""} /> Fast Operation</label>
+        </div>
+        <div class="row">
+          <label class="small">Min Load Time <input id="partLoaderMinLoadTime" type="number" step="0.05" value="${partDesignerDraft.stats?.loaderMinLoadTime ?? ""}" placeholder="${runtimePlaceholders.loaderMinLoadTime}" /></label>
+          <label class="small">Store Capacity <input id="partLoaderStoreCapacity" type="number" step="1" value="${partDesignerDraft.stats?.loaderStoreCapacity ?? ""}" placeholder="${runtimePlaceholders.loaderStoreCapacity}" /></label>
+          <label class="small">Min Burst Interval <input id="partLoaderMinBurstInterval" type="number" step="0.05" value="${partDesignerDraft.stats?.loaderMinBurstInterval ?? ""}" placeholder="${runtimePlaceholders.loaderMinBurstInterval}" /></label>
         </div>` : ""}
         ${propIsArmor ? `<div class="row">
           <label class="small">HP <input id="partMetaHp" type="number" step="1" value="${partProps.hp ?? ""}" /></label>
@@ -4154,11 +4230,24 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         partDesignerDraft.properties.weaponType = undefined;
         partDesignerDraft.stats = {
           ...(partDesignerDraft.stats ?? {}),
+          recoil: undefined,
+          hitImpulse: undefined,
           damage: undefined,
           range: undefined,
           cooldown: undefined,
           shootAngleDeg: undefined,
+          projectileSpeed: undefined,
+          projectileGravity: undefined,
           spreadDeg: undefined,
+          explosiveDeliveryMode: undefined,
+          explosiveBlastRadius: undefined,
+          explosiveBlastDamage: undefined,
+          explosiveFalloffPower: undefined,
+          explosiveFuse: undefined,
+          explosiveFuseTime: undefined,
+          trackingTurnRateDegPerSec: undefined,
+          controlImpairFactor: undefined,
+          controlDuration: undefined,
         };
       } else if (!partDesignerDraft.properties.weaponType) {
         partDesignerDraft.properties.weaponType = "rapid-fire";
@@ -4174,6 +4263,17 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         loaderServesTags: checked ? (props.loaderServesTags ?? []) : undefined,
         loaderCooldownMultiplier: checked ? props.loaderCooldownMultiplier : undefined,
       };
+      if (!checked) {
+        partDesignerDraft.stats = {
+          ...(partDesignerDraft.stats ?? {}),
+          loaderSupports: undefined,
+          loaderLoadMultiplier: undefined,
+          loaderFastOperation: undefined,
+          loaderMinLoadTime: undefined,
+          loaderStoreCapacity: undefined,
+          loaderMinBurstInterval: undefined,
+        };
+      }
       renderPanels();
     });
     getOptionalElement<HTMLInputElement>("#partPropIsArmor")?.addEventListener("change", (event) => {
@@ -4218,24 +4318,58 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       };
       renderPanels();
     });
-    getOptionalElement<HTMLInputElement>("#partLoaderServesTags")?.addEventListener("input", (event) => {
+    getOptionalElement<HTMLInputElement>("#partLoaderSupports")?.addEventListener("input", (event) => {
       const raw = (event.currentTarget as HTMLInputElement).value;
-      const tags = raw
+      const supportsRaw = raw
         .split(",")
-        .map((tag) => tag.trim())
-        .filter((tag) => tag.length > 0);
+        .map((entry) => entry.trim())
+        .filter((entry) => entry.length > 0);
+      const supports = parseWeaponClassList(supportsRaw);
+      partDesignerDraft.stats = {
+        ...(partDesignerDraft.stats ?? {}),
+        loaderSupports: supports.length > 0 ? supports : undefined,
+      };
       partDesignerDraft.properties = {
         ...(partDesignerDraft.properties ?? {}),
-        loaderServesTags: tags.length > 0 ? tags : undefined,
+        loaderServesTags: supports.length > 0 ? supports : undefined,
       };
       updateSelectedInfo();
     });
-    getOptionalElement<HTMLInputElement>("#partLoaderCooldownMultiplier")?.addEventListener("input", (event) => {
+    getOptionalElement<HTMLInputElement>("#partLoaderLoadMultiplier")?.addEventListener("input", (event) => {
       const raw = (event.currentTarget as HTMLInputElement).value.trim();
       const numeric = raw.length > 0 ? Number(raw) : Number.NaN;
+      const next = Number.isFinite(numeric) ? numeric : undefined;
+      partDesignerDraft.stats = {
+        ...(partDesignerDraft.stats ?? {}),
+        loaderLoadMultiplier: next,
+      };
       partDesignerDraft.properties = {
         ...(partDesignerDraft.properties ?? {}),
-        loaderCooldownMultiplier: Number.isFinite(numeric) ? numeric : undefined,
+        loaderCooldownMultiplier: next,
+      };
+      updateSelectedInfo();
+    });
+    getOptionalElement<HTMLInputElement>("#partLoaderFastOperation")?.addEventListener("change", (event) => {
+      const checked = (event.currentTarget as HTMLInputElement).checked;
+      partDesignerDraft.stats = {
+        ...(partDesignerDraft.stats ?? {}),
+        loaderFastOperation: checked,
+      };
+      updateSelectedInfo();
+    });
+    getOptionalElement<HTMLSelectElement>("#partExplosiveDeliveryMode")?.addEventListener("change", (event) => {
+      const value = (event.currentTarget as HTMLSelectElement).value;
+      partDesignerDraft.stats = {
+        ...(partDesignerDraft.stats ?? {}),
+        explosiveDeliveryMode: value === "bomb" ? "bomb" : "shell",
+      };
+      updateSelectedInfo();
+    });
+    getOptionalElement<HTMLSelectElement>("#partExplosiveFuse")?.addEventListener("change", (event) => {
+      const value = (event.currentTarget as HTMLSelectElement).value;
+      partDesignerDraft.stats = {
+        ...(partDesignerDraft.stats ?? {}),
+        explosiveFuse: value === "timed" ? "timed" : "impact",
       };
       updateSelectedInfo();
     });
@@ -4284,11 +4418,25 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     bindRuntimeInput("#partHpMul", "hpMul");
     bindRuntimeInput("#partPower", "power");
     bindRuntimeInput("#partMaxSpeed", "maxSpeed");
+    bindRuntimeInput("#partRecoil", "recoil");
+    bindRuntimeInput("#partHitImpulse", "hitImpulse");
     bindRuntimeInput("#partDamage", "damage");
     bindRuntimeInput("#partRange", "range");
     bindRuntimeInput("#partCooldown", "cooldown");
     bindRuntimeInput("#partShootAngle", "shootAngleDeg");
+    bindRuntimeInput("#partProjectileSpeed", "projectileSpeed");
+    bindRuntimeInput("#partProjectileGravity", "projectileGravity");
     bindRuntimeInput("#partSpread", "spreadDeg");
+    bindRuntimeInput("#partExplosiveFuseTime", "explosiveFuseTime");
+    bindRuntimeInput("#partExplosiveBlastRadius", "explosiveBlastRadius");
+    bindRuntimeInput("#partExplosiveBlastDamage", "explosiveBlastDamage");
+    bindRuntimeInput("#partExplosiveFalloffPower", "explosiveFalloffPower");
+    bindRuntimeInput("#partTrackingTurnRate", "trackingTurnRateDegPerSec");
+    bindRuntimeInput("#partControlImpairFactor", "controlImpairFactor");
+    bindRuntimeInput("#partControlDuration", "controlDuration");
+    bindRuntimeInput("#partLoaderMinLoadTime", "loaderMinLoadTime");
+    bindRuntimeInput("#partLoaderStoreCapacity", "loaderStoreCapacity");
+    bindRuntimeInput("#partLoaderMinBurstInterval", "loaderMinBurstInterval");
 
     getOptionalElement<HTMLButtonElement>("#btnNewPartDraft")?.addEventListener("click", () => {
       const newName = "Custom Part";

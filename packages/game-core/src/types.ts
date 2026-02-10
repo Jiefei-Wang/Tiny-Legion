@@ -122,11 +122,30 @@ export interface PartStats {
   hpMul?: number;
   power?: number;
   maxSpeed?: number;
+  recoil?: number;
+  hitImpulse?: number;
   damage?: number;
   range?: number;
   cooldown?: number;
   shootAngleDeg?: number;
+  projectileSpeed?: number;
+  projectileGravity?: number;
   spreadDeg?: number;
+  explosiveDeliveryMode?: ExplosiveDeliveryMode;
+  explosiveBlastRadius?: number;
+  explosiveBlastDamage?: number;
+  explosiveFalloffPower?: number;
+  explosiveFuse?: "impact" | "timed";
+  explosiveFuseTime?: number;
+  trackingTurnRateDegPerSec?: number;
+  controlImpairFactor?: number;
+  controlDuration?: number;
+  loaderSupports?: WeaponClass[];
+  loaderLoadMultiplier?: number;
+  loaderFastOperation?: boolean;
+  loaderMinLoadTime?: number;
+  loaderStoreCapacity?: number;
+  loaderMinBurstInterval?: number;
 }
 
 export interface PartDesignerProperties {

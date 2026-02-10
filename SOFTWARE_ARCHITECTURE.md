@@ -460,6 +460,10 @@ Editor UX implementation details:
   - Each loader services one weapon at a time via per-unit loader state.
   - Weapon slots now track ready charges and load timers.
   - Loader settings (`supports`, `loadMultiplier`, `fastOperation`, `minLoadTime`, `storeCapacity`, `minBurstInterval`) drive reload and burst cadence.
+- Part-level runtime override coverage now includes full functional tuning:
+  - weapon overrides: recoil/hit impulse, projectile speed/gravity, explosive blast/fuse settings, tracking turn rate, control-impair factor/duration;
+  - loader overrides: supports/load-multiplier/fast-operation/min-load-time/store-capacity/min-burst-interval;
+  - armor `hp` metadata is converted to effective attachment durability scaling (`hpMul`) during unit instancing.
 - Selection highlight rendering traces outer alive-structure edges.
 - Tracking projectiles keep homing-aim coordinates and reacquire nearest valid enemy when initial target is unavailable.
 - Runtime attachment instances now carry part metadata (`partId`, footprint occupancy flags, optional runtime overrides) for movement/fire/damage systems.
@@ -475,6 +479,8 @@ Developer Part Designer UX:
   - left panel edits part-level fields (`name`, `id`, `baseComponent`, `directional`) plus grouped controls:
     - `Editor Meta` (`category` dropdown + `subcategory` text),
     - `Part Properties` (`tags` and checkbox-enabled groups for engine/weapon/loader/armor/core tuning with conditional parameter blocks),
+    - weapon group exposes projectile + class-specific params (explosive/tracking/control-utility),
+    - loader group exposes supports + full reload cadence/capacity params.
   - right panel edits per-box properties for the currently selected grid cell.
 - Per-box properties include:
   - occupies structure space,

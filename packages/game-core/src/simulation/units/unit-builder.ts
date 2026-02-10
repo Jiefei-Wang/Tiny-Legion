@@ -10,7 +10,7 @@ import {
 } from "../../parts/part-schema.ts";
 import { recalcMass } from "../physics/mass-cache.ts";
 import { getControlUnit, validateSingleControlUnit } from "./control-unit-rules.ts";
-import type { LoaderState, PartDefinition, Side, UnitInstance, UnitTemplate } from "../../types.ts";
+import type { LoaderState, PartDefinition, Side, UnitInstance, UnitTemplate, WeaponClass } from "../../types.ts";
 
 function resolveCatalog(partCatalog?: ReadonlyArray<PartDefinition>): PartDefinition[] {
   const defaults = createDefaultPartDefinitions();
@@ -147,6 +147,12 @@ export function instantiateUnit(
     );
     const anchorX = attachment.x ?? host?.x ?? attachment.cell;
     const anchorY = attachment.y ?? host?.y ?? 0;
+    const hpMulFromAbsoluteHp = ((): number | undefined => {
+      if (!part?.properties?.hp || !host) {
+        return undefined;
+      }
+      return Math.max(0.05, part.properties.hp / Math.max(1, host.breakThreshold));
+    })();
     const partOffsets = part
       ? getPartFootprintOffsets(part, rotateQuarter)
       : null;
@@ -188,16 +194,37 @@ export function instantiateUnit(
       stats: part?.stats
         ? {
             mass: part.stats.mass,
-            hpMul: part.stats.hpMul,
+            hpMul: part.stats.hpMul ?? hpMulFromAbsoluteHp,
             power: part.stats.power,
             maxSpeed: part.stats.maxSpeed,
+            recoil: part.stats.recoil,
+            hitImpulse: part.stats.hitImpulse,
             damage: part.stats.damage,
             range: part.stats.range,
             cooldown: part.stats.cooldown,
             shootAngleDeg: part.stats.shootAngleDeg,
+            projectileSpeed: part.stats.projectileSpeed,
+            projectileGravity: part.stats.projectileGravity,
             spreadDeg: part.stats.spreadDeg,
+            explosiveDeliveryMode: part.stats.explosiveDeliveryMode,
+            explosiveBlastRadius: part.stats.explosiveBlastRadius,
+            explosiveBlastDamage: part.stats.explosiveBlastDamage,
+            explosiveFalloffPower: part.stats.explosiveFalloffPower,
+            explosiveFuse: part.stats.explosiveFuse,
+            explosiveFuseTime: part.stats.explosiveFuseTime,
+            trackingTurnRateDegPerSec: part.stats.trackingTurnRateDegPerSec,
+            controlImpairFactor: part.stats.controlImpairFactor,
+            controlDuration: part.stats.controlDuration,
+            loaderSupports: part.stats.loaderSupports ? [...part.stats.loaderSupports] : undefined,
+            loaderLoadMultiplier: part.stats.loaderLoadMultiplier,
+            loaderFastOperation: part.stats.loaderFastOperation,
+            loaderMinLoadTime: part.stats.loaderMinLoadTime,
+            loaderStoreCapacity: part.stats.loaderStoreCapacity,
+            loaderMinBurstInterval: part.stats.loaderMinBurstInterval,
           }
-        : undefined,
+        : hpMulFromAbsoluteHp !== undefined
+          ? { hpMul: hpMulFromAbsoluteHp }
+          : undefined,
     };
   });
 
@@ -229,6 +256,42 @@ export function instantiateUnit(
       targetWeaponSlot: null,
       remaining: 0,
     }));
+  const normalizeLoaderSupports = (values: ReadonlyArray<string> | undefined): WeaponClass[] => {
+    if (!values || values.length <= 0) {
+      return [];
+    }
+    const supports: WeaponClass[] = [];
+    for (const value of values) {
+      if (
+        value === "rapid-fire"
+        || value === "heavy-shot"
+        || value === "explosive"
+        || value === "tracking"
+        || value === "beam-precision"
+        || value === "control-utility"
+      ) {
+        supports.push(value);
+      }
+    }
+    return supports;
+  };
+  const getLoaderSupports = (attachment: UnitInstance["attachments"][number]): WeaponClass[] => {
+    if (attachment.stats?.loaderSupports && attachment.stats.loaderSupports.length > 0) {
+      return attachment.stats.loaderSupports;
+    }
+    if (attachment.partId) {
+      const part = partCatalog.find((entry) => entry.id === attachment.partId);
+      const legacy = normalizeLoaderSupports(part?.properties?.loaderServesTags);
+      if (legacy.length > 0) {
+        return legacy;
+      }
+    }
+    const base = COMPONENTS[attachment.component];
+    if (base.type !== "loader") {
+      return [];
+    }
+    return [...(base.loader?.supports ?? [])];
+  };
 
   const unit: UnitInstance = {
     id: nextUid(`${side}-${template.type}`),
@@ -279,7 +342,8 @@ export function instantiateUnit(
           return false;
         }
         const loaderStats = COMPONENTS[loaderAttachment.component];
-        return loaderStats.type === "loader" && (loaderStats.loader?.supports ?? []).includes(weaponStats.weaponClass ?? "rapid-fire");
+        const supports = getLoaderSupports(loaderAttachment);
+        return loaderStats.type === "loader" && supports.includes(weaponStats.weaponClass ?? "rapid-fire");
       });
       return hasCompatibleLoader ? 1 : 0;
     }),

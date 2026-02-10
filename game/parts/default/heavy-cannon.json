@@ -45,7 +45,9 @@
   "stats": {
     "damage": 100,
     "range": 500,
-    "spreadDeg": 1
+    "cooldown": 0.5,
+    "shootAngleDeg": 100,
+    "projectileSpeed": 500
   },
   "properties": {
     "category": "weapon",

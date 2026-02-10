@@ -50,10 +50,12 @@ export function applyRecoilForAttachment(
   const range = weaponAttachment.stats?.range ?? weapon.range;
   const cooldown = weaponAttachment.stats?.cooldown ?? weapon.cooldown;
   const spreadDeg = weaponAttachment.stats?.spreadDeg ?? weapon.spreadDeg;
+  const recoil = weaponAttachment.stats?.recoil ?? weapon.recoil;
+  const hitImpulse = weaponAttachment.stats?.hitImpulse ?? weapon.hitImpulse;
   if (
     weapon.type !== "weapon" ||
-    weapon.recoil === undefined ||
-    weapon.hitImpulse === undefined ||
+    recoil === undefined ||
+    hitImpulse === undefined ||
     damage === undefined ||
     range === undefined ||
     cooldown === undefined
@@ -62,22 +64,33 @@ export function applyRecoilForAttachment(
   }
 
   const direction = unit.side === "player" ? 1 : -1;
-  unit.vx -= direction * impulseToDeltaV(weapon.recoil, unit.mass);
-  unit.vibrate = Math.min(1.2, unit.vibrate + impulseToDeltaV(weapon.recoil, unit.mass) * 2.2);
+  unit.vx -= direction * impulseToDeltaV(recoil, unit.mass);
+  unit.vibrate = Math.min(1.2, unit.vibrate + impulseToDeltaV(recoil, unit.mass) * 2.2);
+
+  const explosive = weapon.explosive
+    ? {
+        deliveryMode: weaponAttachment.stats?.explosiveDeliveryMode ?? weapon.explosive.deliveryMode,
+        blastRadius: weaponAttachment.stats?.explosiveBlastRadius ?? weapon.explosive.blastRadius,
+        blastDamage: weaponAttachment.stats?.explosiveBlastDamage ?? weapon.explosive.blastDamage,
+        falloffPower: weaponAttachment.stats?.explosiveFalloffPower ?? weapon.explosive.falloffPower,
+        fuse: weaponAttachment.stats?.explosiveFuse ?? weapon.explosive.fuse,
+        fuseTime: weaponAttachment.stats?.explosiveFuseTime ?? weapon.explosive.fuseTime,
+      }
+    : null;
 
   return {
     damage,
-    impulse: weapon.hitImpulse,
+    impulse: hitImpulse,
     range,
     cooldown,
     weaponClass: weapon.weaponClass ?? "rapid-fire",
-    projectileSpeed: weapon.projectileSpeed ?? PROJECTILE_SPEED,
-    projectileGravity: weapon.projectileGravity ?? PROJECTILE_GRAVITY,
+    projectileSpeed: weaponAttachment.stats?.projectileSpeed ?? weapon.projectileSpeed ?? PROJECTILE_SPEED,
+    projectileGravity: weaponAttachment.stats?.projectileGravity ?? weapon.projectileGravity ?? PROJECTILE_GRAVITY,
     spreadDeg: spreadDeg ?? 0,
-    explosive: weapon.explosive ?? null,
-    trackingTurnRateDegPerSec: weapon.tracking?.turnRateDegPerSec ?? 0,
-    controlImpairFactor: weapon.control?.impairFactor ?? 1,
-    controlDuration: weapon.control?.duration ?? 0,
+    explosive,
+    trackingTurnRateDegPerSec: weaponAttachment.stats?.trackingTurnRateDegPerSec ?? weapon.tracking?.turnRateDegPerSec ?? 0,
+    controlImpairFactor: weaponAttachment.stats?.controlImpairFactor ?? weapon.control?.impairFactor ?? 1,
+    controlDuration: weaponAttachment.stats?.controlDuration ?? weapon.control?.duration ?? 0,
   };
 }
 

@@ -14,6 +14,15 @@ function isFiniteInteger(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value) && Number.isInteger(value);
 }
 
+function isWeaponClass(value: string): boolean {
+  return value === "rapid-fire"
+    || value === "heavy-shot"
+    || value === "explosive"
+    || value === "tracking"
+    || value === "beam-precision"
+    || value === "control-utility";
+}
+
 export function validatePartDefinitionDetailed(part: PartDefinition): PartValidationResult {
   const errors: string[] = [];
   const warnings: string[] = [];
@@ -143,6 +152,50 @@ export function validatePartDefinitionDetailed(part: PartDefinition): PartValida
   if (part.properties?.loaderCooldownMultiplier !== undefined && (!Number.isFinite(part.properties.loaderCooldownMultiplier) || part.properties.loaderCooldownMultiplier <= 0)) {
     errors.push("part properties.loaderCooldownMultiplier must be > 0.");
   }
+  if (part.stats?.loaderLoadMultiplier !== undefined && (!Number.isFinite(part.stats.loaderLoadMultiplier) || part.stats.loaderLoadMultiplier <= 0)) {
+    errors.push("part stats.loaderLoadMultiplier must be > 0.");
+  }
+  if (part.stats?.loaderMinLoadTime !== undefined && (!Number.isFinite(part.stats.loaderMinLoadTime) || part.stats.loaderMinLoadTime < 0)) {
+    errors.push("part stats.loaderMinLoadTime must be >= 0.");
+  }
+  if (part.stats?.loaderStoreCapacity !== undefined && (!Number.isFinite(part.stats.loaderStoreCapacity) || part.stats.loaderStoreCapacity < 0)) {
+    errors.push("part stats.loaderStoreCapacity must be >= 0.");
+  }
+  if (part.stats?.loaderMinBurstInterval !== undefined && (!Number.isFinite(part.stats.loaderMinBurstInterval) || part.stats.loaderMinBurstInterval <= 0)) {
+    errors.push("part stats.loaderMinBurstInterval must be > 0.");
+  }
+  if (part.stats?.loaderSupports) {
+    for (const supported of part.stats.loaderSupports) {
+      if (!isWeaponClass(supported)) {
+        errors.push("part stats.loaderSupports includes invalid weapon class.");
+        break;
+      }
+    }
+  }
+  if (part.stats?.explosiveDeliveryMode !== undefined && part.stats.explosiveDeliveryMode !== "shell" && part.stats.explosiveDeliveryMode !== "bomb") {
+    errors.push("part stats.explosiveDeliveryMode must be shell or bomb.");
+  }
+  if (part.stats?.explosiveFuse !== undefined && part.stats.explosiveFuse !== "impact" && part.stats.explosiveFuse !== "timed") {
+    errors.push("part stats.explosiveFuse must be impact or timed.");
+  }
+  if (part.stats?.explosiveBlastRadius !== undefined && (!Number.isFinite(part.stats.explosiveBlastRadius) || part.stats.explosiveBlastRadius < 0)) {
+    errors.push("part stats.explosiveBlastRadius must be >= 0.");
+  }
+  if (part.stats?.explosiveBlastDamage !== undefined && (!Number.isFinite(part.stats.explosiveBlastDamage) || part.stats.explosiveBlastDamage < 0)) {
+    errors.push("part stats.explosiveBlastDamage must be >= 0.");
+  }
+  if (part.stats?.explosiveFalloffPower !== undefined && (!Number.isFinite(part.stats.explosiveFalloffPower) || part.stats.explosiveFalloffPower <= 0)) {
+    errors.push("part stats.explosiveFalloffPower must be > 0.");
+  }
+  if (part.stats?.explosiveFuseTime !== undefined && (!Number.isFinite(part.stats.explosiveFuseTime) || part.stats.explosiveFuseTime <= 0)) {
+    errors.push("part stats.explosiveFuseTime must be > 0.");
+  }
+  if (part.stats?.controlImpairFactor !== undefined && (!Number.isFinite(part.stats.controlImpairFactor) || part.stats.controlImpairFactor <= 0 || part.stats.controlImpairFactor > 1)) {
+    errors.push("part stats.controlImpairFactor must be in (0, 1].");
+  }
+  if (part.stats?.controlDuration !== undefined && (!Number.isFinite(part.stats.controlDuration) || part.stats.controlDuration < 0)) {
+    errors.push("part stats.controlDuration must be >= 0.");
+  }
   if (part.properties?.engineType !== undefined && part.properties.engineType !== "ground" && part.properties.engineType !== "air") {
     errors.push("part properties.engineType must be ground or air.");
   }
@@ -157,6 +210,9 @@ export function validatePartDefinitionDetailed(part: PartDefinition): PartValida
   }
   if (part.properties?.isLoader === true && part.properties.loaderCooldownMultiplier === undefined) {
     warnings.push("is_loader is enabled but loaderCooldownMultiplier is not set.");
+  }
+  if (part.properties?.isLoader === true && (!part.stats?.loaderSupports || part.stats.loaderSupports.length <= 0) && (!part.properties.loaderServesTags || part.properties.loaderServesTags.length <= 0)) {
+    warnings.push("is_loader is enabled but neither stats.loaderSupports nor loaderServesTags is set.");
   }
   if (part.properties?.isArmor === true && part.properties.hp === undefined) {
     warnings.push("is_armor is enabled but hp is not set.");
