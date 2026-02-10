@@ -1,5 +1,17 @@
 import { armyCap } from "../../config/balance/commander.ts";
-import { DEFAULT_GROUND_HEIGHT_RATIO } from "../../config/balance/battlefield.ts";
+import {
+  DEFAULT_GROUND_HEIGHT_RATIO,
+  AIR_MIN_Z_RATIO,
+  AIR_GROUND_GAP_RATIO,
+  AIR_TARGET_Z_TOLERANCE_RATIO,
+  AIR_MIN_LIFT_SPEED,
+  AIR_HOLD_GRAVITY,
+  AIR_DROP_GRAVITY,
+  AIR_DROP_SPEED_CAP,
+  AIR_THRUST_ACCEL_SCALE,
+  GROUND_PROJECTILE_MAX_DROP_BELOW_FIRE_Y,
+  BATTLE_SALVAGE_REFUND_FACTOR,
+} from "../../config/balance/battlefield.ts";
 import { COMPONENTS } from "../../config/balance/weapons.ts";
 import { MATERIALS } from "../../config/balance/materials.ts";
 import {
@@ -24,18 +36,6 @@ import { validateTemplateDetailed } from "../../templates/template-validation.ts
 import { createDefaultPartDefinitions, mergePartCatalogs } from "../../parts/part-schema.ts";
 import type { BattleAiController, CombatDecision } from "../../ai/composite/composite-ai.ts";
 import type { BattleState, CommandResult, FireBlockDetail, FireRequest, KeyState, MapNode, PartDefinition, Side, UnitCommand, UnitInstance, UnitTemplate } from "../../types.ts";
-
-const AIR_MIN_Z_RATIO = 70 / 1000;
-const AIR_GROUND_GAP_RATIO = 30 / 1000;
-const AIR_TARGET_Z_TOLERANCE_RATIO = 22 / 1000;
-
-export const BATTLE_SALVAGE_REFUND_FACTOR = 0.6;
-const AIR_MIN_LIFT_SPEED = 100;
-const AIR_HOLD_GRAVITY = 110;
-const AIR_DROP_GRAVITY = 210;
-const AIR_DROP_SPEED_CAP = 260;
-const AIR_THRUST_ACCEL_SCALE = 70;
-const GROUND_PROJECTILE_MAX_DROP_BELOW_FIRE_Y = 200;
 
 export interface BattleHooks {
   addLog: (text: string, tone?: "good" | "warn" | "bad" | "") => void;

@@ -1,5 +1,6 @@
 import { COMPONENTS } from "../config/balance/weapons.ts";
 import { MATERIALS } from "../config/balance/materials.ts";
+import { AIR_HOLD_GRAVITY, AIR_THRUST_ACCEL_SCALE } from "../config/balance/battlefield.ts";
 import {
   createDefaultPartDefinitions,
   getPartFootprintOffsets,
@@ -9,9 +10,6 @@ import {
   resolvePartDefinitionForAttachment,
 } from "../parts/part-schema.ts";
 import type { DisplayAttachmentTemplate, MaterialId, PartDefinition, UnitTemplate, UnitType } from "../types.ts";
-
-const AIR_HOLD_GRAVITY = 110;
-const AIR_THRUST_ACCEL_SCALE = 70;
 
 export type TemplateValidationResult = {
   errors: string[];

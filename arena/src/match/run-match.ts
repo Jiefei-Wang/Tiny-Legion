@@ -3,11 +3,12 @@ import { setMathRandomSeed } from "../lib/seeded-rng.ts";
 import { loadRuntimeMergedTemplates } from "./templates.ts";
 import { mulberry32 } from "../lib/seeded-rng.ts";
 import { getSpawnFamily } from "../spawn/families.ts";
+import { BattleSession } from "../../../packages/game-core/src/gameplay/battle/battle-session.ts";
 import {
+  BATTLEFIELD_HEIGHT,
+  BATTLEFIELD_WIDTH,
   BATTLE_SALVAGE_REFUND_FACTOR,
-  BattleSession,
-} from "../../../packages/game-core/src/gameplay/battle/battle-session.ts";
-import { BATTLEFIELD_HEIGHT, BATTLEFIELD_WIDTH } from "../../../packages/game-core/src/config/balance/battlefield.ts";
+} from "../../../packages/game-core/src/config/balance/battlefield.ts";
 import { evaluateCombatDecisionTree } from "../../../packages/game-core/src/ai/decision-tree/combat-decision-tree.ts";
 import { structureIntegrity } from "../../../packages/game-core/src/simulation/units/structure-grid.ts";
 import { makeCompositeAiController } from "../ai/composite-controller.ts";

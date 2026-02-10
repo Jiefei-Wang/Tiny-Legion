@@ -1,5 +1,5 @@
 import { armyCap } from "../config/balance/commander.ts";
-import { BATTLEFIELD_HEIGHT, BATTLEFIELD_WIDTH, DEFAULT_GROUND_HEIGHT_RATIO } from "../config/balance/battlefield.ts";
+import { BATTLEFIELD_HEIGHT, BATTLEFIELD_WIDTH, DEFAULT_GROUND_HEIGHT_RATIO, BATTLE_SALVAGE_REFUND_FACTOR } from "../config/balance/battlefield.ts";
 import { applyStrategicEconomyTick } from "../gameplay/map/garrison-upkeep.ts";
 import { createMapNodes } from "../gameplay/map/node-graph.ts";
 import { settleGarrison as settleNodeGarrison, setNodeOwner } from "../gameplay/map/occupation.ts";
@@ -11,7 +11,6 @@ import { MATERIALS } from "../config/balance/materials.ts";
 import { BattleSession } from "../gameplay/battle/battle-session.ts";
 import type { BattleSessionOptions } from "../gameplay/battle/battle-session.ts";
 import type { BattleAiController } from "../gameplay/battle/battle-session.ts";
-import { BATTLE_SALVAGE_REFUND_FACTOR } from "../gameplay/battle/battle-session.ts";
 import { createBaselineCompositeAiController } from "../ai/composite/baseline-modules.ts";
 import {
   cloneTemplate,
