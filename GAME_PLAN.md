@@ -595,7 +595,10 @@ The current playable implementation already includes:
   - Phase 1: no-base 1v1 (shoot/movement only)
   - Phase 2: no-base NvN
   - Phase 3: full battlefield with bases
-- Test Arena now supports independent AI preset selection for player and enemy (`baseline`, `composite baseline`, `composite neural new`, `latest trained composite`).
+- Test Arena includes a `2 x 3` AI component grid (player/enemy x target/movement/shoot), and each cell is a single dropdown for quick switching.
+- Each dropdown lists built-in module options plus all saved module specs discovered from arena run artifacts (`arena/.arena-data/runs/*/best-composite.json`).
+- Grid changes apply immediately (no manual apply step).
+- Test Arena module-selection contract is documented in `game/AI_COMPONENT_CONFIG.md`.
 - Test Arena Python bridge status is shown in-panel (`Waiting for connection` until a Python bridge client connects to `/__pyai/*` endpoints).
 - Training automation script `train_ai.sh` provides module-specific training (`shoot`/`movement`/`target`) and full compose training (`compose`) with per-module neural depth/hidden-size controls and trained/new component source selection.
 

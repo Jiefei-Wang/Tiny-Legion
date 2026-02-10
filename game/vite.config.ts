@@ -613,10 +613,102 @@ function partStorePlugin() {
 
 function arenaModelPlugin() {
   const runsDir = resolve(process.cwd(), "..", "arena", ".arena-data", "runs");
+  const pythonModelsDir = resolve(process.cwd(), "..", "arena", ".arena-data", "python-models");
+  type ModuleEntry = {
+    id: string;
+    label: string;
+    spec?: { familyId: string; params: Record<string, number | boolean> };
+    compatible?: boolean;
+    reason?: string;
+  };
 
   return {
     name: "arena-models",
     configureServer(server: import("vite").ViteDevServer) {
+      server.middlewares.use("/__arena/composite/modules", (req, res) => {
+        if (req.method !== "GET") {
+          res.statusCode = 405;
+          res.end("method not allowed");
+          return;
+        }
+        const modules: { target: ModuleEntry[]; movement: ModuleEntry[]; shoot: ModuleEntry[] } = {
+          target: [],
+          movement: [],
+          shoot: [],
+        };
+        if (existsSync(runsDir)) {
+          const runIds = readdirSync(runsDir);
+          for (const runId of runIds) {
+            const filePath = resolve(runsDir, runId, "best-composite.json");
+            if (!existsSync(filePath)) {
+              continue;
+            }
+            try {
+              const raw = readFileSync(filePath, "utf8");
+              const parsed = JSON.parse(raw) as {
+                familyId?: string;
+                composite?: {
+                  target?: { familyId?: string; params?: Record<string, number | boolean> };
+                  movement?: { familyId?: string; params?: Record<string, number | boolean> };
+                  shoot?: { familyId?: string; params?: Record<string, number | boolean> };
+                };
+              };
+              if (parsed?.familyId !== "composite" || !parsed.composite) {
+                continue;
+              }
+              const pushModule = (kind: "target" | "movement" | "shoot"): void => {
+                const module = parsed.composite?.[kind];
+                const familyId = typeof module?.familyId === "string" ? module.familyId : "";
+                if (!familyId) {
+                  return;
+                }
+                modules[kind].push({
+                  id: `${runId}:${kind}:${familyId}`,
+                  label: `saved:${runId}:${kind}:${familyId}`,
+                  spec: {
+                    familyId,
+                    params: module?.params ?? {},
+                  },
+                });
+              };
+              pushModule("target");
+              pushModule("movement");
+              pushModule("shoot");
+            } catch {
+              continue;
+            }
+          }
+        }
+        if (existsSync(pythonModelsDir)) {
+          const fileNames = readdirSync(pythonModelsDir).filter((name) => name.endsWith(".component.json"));
+          for (const fileName of fileNames) {
+            const filePath = resolve(pythonModelsDir, fileName);
+            try {
+              const raw = readFileSync(filePath, "utf8");
+              const parsed = JSON.parse(raw) as {
+                moduleKind?: string;
+                aiType?: string;
+                modelPath?: string;
+              };
+              const moduleKind = parsed.moduleKind;
+              if (moduleKind !== "target" && moduleKind !== "movement" && moduleKind !== "shoot") {
+                continue;
+              }
+              modules[moduleKind].push({
+                id: `python:${fileName}`,
+                label: `python:${fileName} (onnx)`,
+                compatible: false,
+                reason: "ONNX model requires JS ONNX runtime adapter; not yet wired into composite-controller.",
+              });
+            } catch {
+              continue;
+            }
+          }
+        }
+        res.setHeader("content-type", "application/json");
+        res.end(JSON.stringify({ ok: true, modules }));
+      });
+
       server.middlewares.use("/__arena/composite/latest", (req, res) => {
         if (req.method !== "GET") {
           res.statusCode = 405;

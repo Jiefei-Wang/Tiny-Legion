@@ -168,3 +168,10 @@ Python training script:
 - `arena/python/train.py`
   - Builds baseline composer then replaces selected modules with neural modules.
   - Uses delayed reward updates (10s chunks) from gas-value differential.
+  - Saves `.pt` and auto-converts each trained component to `.onnx` plus `*.component.json` metadata.
+
+Convert an existing checkpoint manually:
+
+```bash
+python arena/python/train.py --convert-checkpoint arena/.arena-data/python-models/fire_YYYYMMDD_HHMMSS.pt --convert-component fire
+```

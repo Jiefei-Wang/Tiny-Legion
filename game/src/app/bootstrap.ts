@@ -36,7 +36,7 @@ import {
   saveDefaultPartToStore,
   validatePartDefinitionDetailed,
 } from "./part-store.ts";
-import { makeCompositeAiController } from "../../../arena/src/ai/composite-controller.ts";
+import { makeCompositeAiController, type CompositeModuleSpec } from "../../../arena/src/ai/composite-controller.ts";
 import type { MatchAiSpec } from "../../../arena/src/match/match-types.ts";
 import type {
   ComponentId,
@@ -274,10 +274,68 @@ export function bootstrap(options: BootstrapOptions = {}): void {
   let testArenaGroundHeight = Math.floor(BATTLEFIELD_HEIGHT * DEFAULT_GROUND_HEIGHT_RATIO);
   let testArenaSpawnTemplateId: string | null = null;
   let testArenaInvinciblePlayer = false;
-  type TestArenaAiPreset = "baseline" | "composite-baseline" | "composite-neural-default" | "composite-latest-trained" | "python-bridge";
-  let testArenaPlayerAiPreset: TestArenaAiPreset = "baseline";
-  let testArenaEnemyAiPreset: TestArenaAiPreset = "baseline";
+  type TestArenaAiPreset =
+    | "baseline"
+    | "composite-baseline"
+    | "composite-neural-default"
+    | "component-config"
+    | "python-bridge";
+  type TestArenaAiModuleKind = "target" | "movement" | "shoot";
+  type TestArenaSide = "player" | "enemy";
+  type TestArenaAiOption = {
+    id: string;
+    label: string;
+    spec?: CompositeModuleSpec;
+    compatible?: boolean;
+    reason?: string;
+  };
+  type TestArenaAiSelectionGrid = Record<TestArenaSide, Record<TestArenaAiModuleKind, string>>;
+  let testArenaPlayerAiPreset: TestArenaAiPreset = "component-config";
+  let testArenaEnemyAiPreset: TestArenaAiPreset = "component-config";
   let latestCompositeSpec: MatchAiSpec | null = null;
+  const defaultAiOptions: Record<TestArenaAiModuleKind, TestArenaAiOption[]> = {
+    target: [
+      { id: "baseline-target", label: "builtin: baseline-target", spec: { familyId: "baseline-target", params: {} } },
+      { id: "neural-target-default", label: "builtin: neural-target (default)", spec: { familyId: "neural-target", params: {} } },
+    ],
+    movement: [
+      { id: "baseline-movement", label: "builtin: baseline-movement", spec: { familyId: "baseline-movement", params: {} } },
+      { id: "neural-movement-default", label: "builtin: neural-movement (default)", spec: { familyId: "neural-movement", params: {} } },
+    ],
+    shoot: [
+      { id: "baseline-shoot", label: "builtin: baseline-shoot", spec: { familyId: "baseline-shoot", params: {} } },
+      { id: "neural-shoot-default", label: "builtin: neural-shoot (default)", spec: { familyId: "neural-shoot", params: {} } },
+    ],
+  };
+  let testArenaAiOptions: Record<TestArenaAiModuleKind, TestArenaAiOption[]> = {
+    target: [...defaultAiOptions.target],
+    movement: [...defaultAiOptions.movement],
+    shoot: [...defaultAiOptions.shoot],
+  };
+  let testArenaAiSelections: TestArenaAiSelectionGrid = {
+    player: {
+      target: "baseline-target",
+      movement: "baseline-movement",
+      shoot: "baseline-shoot",
+    },
+    enemy: {
+      target: "baseline-target",
+      movement: "baseline-movement",
+      shoot: "baseline-shoot",
+    },
+  };
+  let testArenaResolvedCompositeModules: Record<TestArenaSide, MatchAiSpec["composite"] | null> = {
+    player: {
+      target: { familyId: "baseline-target", params: {} },
+      movement: { familyId: "baseline-movement", params: {} },
+      shoot: { familyId: "baseline-shoot", params: {} },
+    },
+    enemy: {
+      target: { familyId: "baseline-target", params: {} },
+      movement: { familyId: "baseline-movement", params: {} },
+      shoot: { familyId: "baseline-shoot", params: {} },
+    },
+  };
   const isTemplateEditorScreen = (): boolean => screen === "templateEditor";
   const isPartEditorScreen = (): boolean => screen === "partEditor";
   const isEditorScreen = (): boolean => isTemplateEditorScreen() || isPartEditorScreen();
@@ -789,7 +847,103 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     }
   };
 
-  const buildAiControllerFromPreset = (preset: TestArenaAiPreset): BattleAiController | null => {
+  const findAiOptionById = (kind: TestArenaAiModuleKind, id: string): TestArenaAiOption | null => {
+    const options = testArenaAiOptions[kind];
+    for (const option of options) {
+      if (option.id === id) {
+        return option;
+      }
+    }
+    return null;
+  };
+
+  const refreshTestArenaAiOptions = async (): Promise<void> => {
+    type ResponseShape = {
+      ok?: boolean;
+      modules?: {
+        target?: Array<{ id?: string; label?: string; spec?: CompositeModuleSpec; compatible?: boolean; reason?: string }>;
+        movement?: Array<{ id?: string; label?: string; spec?: CompositeModuleSpec; compatible?: boolean; reason?: string }>;
+        shoot?: Array<{ id?: string; label?: string; spec?: CompositeModuleSpec; compatible?: boolean; reason?: string }>;
+      };
+    };
+    const merged: Record<TestArenaAiModuleKind, TestArenaAiOption[]> = {
+      target: [...defaultAiOptions.target],
+      movement: [...defaultAiOptions.movement],
+      shoot: [...defaultAiOptions.shoot],
+    };
+    try {
+      const res = await fetch("/__arena/composite/modules", { method: "GET" });
+      if (res.ok) {
+        const parsed = await res.json().catch(() => null) as ResponseShape | null;
+        const appendOptions = (kind: TestArenaAiModuleKind): void => {
+          const list = parsed?.modules?.[kind] ?? [];
+          for (const entry of list) {
+            const id = typeof entry.id === "string" ? entry.id : "";
+            const label = typeof entry.label === "string" ? entry.label : id;
+            const spec = entry.spec;
+            const compatible = entry.compatible !== false;
+            const reason = typeof entry.reason === "string" ? entry.reason : undefined;
+            if (!id || !spec?.familyId) {
+              if (!id) {
+                continue;
+              }
+              merged[kind].push({
+                id,
+                label,
+                compatible: false,
+                reason: reason ?? "No compatible composite spec found.",
+              });
+              continue;
+            }
+            merged[kind].push({
+              id,
+              label,
+              spec: {
+                familyId: spec.familyId,
+                params: spec.params ?? {},
+              },
+              compatible,
+              reason,
+            });
+          }
+        };
+        appendOptions("target");
+        appendOptions("movement");
+        appendOptions("shoot");
+      }
+    } catch {
+      // Keep built-in options only.
+    }
+    testArenaAiOptions = merged;
+    for (const side of ["player", "enemy"] as const) {
+      for (const kind of ["target", "movement", "shoot"] as const) {
+        const current = testArenaAiSelections[side][kind];
+        const isSelectable = (entry: TestArenaAiOption): boolean => entry.compatible !== false && Boolean(entry.spec?.familyId);
+        if (!findAiOptionById(kind, current) || !isSelectable(findAiOptionById(kind, current) as TestArenaAiOption)) {
+          const fallback = merged[kind].find((entry) => isSelectable(entry));
+          testArenaAiSelections[side][kind] = fallback?.id ?? current;
+        }
+      }
+    }
+  };
+
+  const refreshTestArenaComponentGrid = async (): Promise<void> => {
+    for (const side of ["player", "enemy"] as const) {
+      const target = findAiOptionById("target", testArenaAiSelections[side].target);
+      const movement = findAiOptionById("movement", testArenaAiSelections[side].movement);
+      const shoot = findAiOptionById("shoot", testArenaAiSelections[side].shoot);
+      const targetSpec = target?.compatible === false ? null : (target?.spec ?? null);
+      const movementSpec = movement?.compatible === false ? null : (movement?.spec ?? null);
+      const shootSpec = shoot?.compatible === false ? null : (shoot?.spec ?? null);
+      if (!targetSpec || !movementSpec || !shootSpec) {
+        testArenaResolvedCompositeModules[side] = null;
+        continue;
+      }
+      testArenaResolvedCompositeModules[side] = { target: targetSpec, movement: movementSpec, shoot: shootSpec };
+    }
+  };
+
+  const buildAiControllerFromPreset = (side: TestArenaSide, preset: TestArenaAiPreset): BattleAiController | null => {
     if (preset === "baseline" || preset === "python-bridge") {
       return null;
     }
@@ -808,6 +962,18 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       };
       return makeCompositeAiController(spec);
     }
+    if (preset === "component-config") {
+      const modules = testArenaResolvedCompositeModules[side];
+      if (!modules) {
+        return null;
+      }
+      const spec: MatchAiSpec = {
+        familyId: "composite",
+        params: {},
+        composite: modules,
+      };
+      return makeCompositeAiController(spec);
+    }
     if (!latestCompositeSpec) {
       return null;
     }
@@ -815,8 +981,14 @@ export function bootstrap(options: BootstrapOptions = {}): void {
   };
 
   const applyTestArenaAiControllers = (): void => {
-    const playerController = buildAiControllerFromPreset(testArenaPlayerAiPreset);
-    const enemyController = buildAiControllerFromPreset(testArenaEnemyAiPreset);
+    const playerController = buildAiControllerFromPreset("player", testArenaPlayerAiPreset);
+    const enemyController = buildAiControllerFromPreset("enemy", testArenaEnemyAiPreset);
+    if (testArenaPlayerAiPreset === "component-config" && !playerController) {
+      addLog("Player component config is invalid; falling back to default battle AI.", "warn");
+    }
+    if (testArenaEnemyAiPreset === "component-config" && !enemyController) {
+      addLog("Enemy component config is invalid; falling back to default battle AI.", "warn");
+    }
     const externalSides = getExternalAiSidesFromPresets();
     battle.setExternalAiSides(externalSides);
     battle.setAiControllers({
@@ -877,9 +1049,14 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         : parts,
     },
   );
-  void fetchLatestCompositeSpec().then(() => {
-    renderPanels();
-  });
+  void fetchLatestCompositeSpec()
+    .then(async () => {
+      await refreshTestArenaAiOptions();
+      await refreshTestArenaComponentGrid();
+    })
+    .finally(() => {
+      renderPanels();
+    });
 
   const startDebugProbeLoop = (): void => {
     const pollEveryMs = 250;
@@ -3221,15 +3398,18 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     const enemyTemplateOptions = templates
       .map((template) => `<option value="${template.id}" ${template.id === testArenaSpawnTemplateId ? "selected" : ""}>${template.name}</option>`)
       .join("");
-    const aiPresetOptions = (selected: TestArenaAiPreset): string => [
-      { value: "baseline", label: "Baseline (default battle AI)" },
-      { value: "composite-baseline", label: "Composite Baseline" },
-      { value: "composite-neural-default", label: "Composite Neural (new)" },
-      { value: "composite-latest-trained", label: latestCompositeSpec ? "Composite Latest Trained" : "Composite Latest Trained (not found)" },
-      { value: "python-bridge", label: "Python Bridge (external)" },
-    ]
-      .map((entry) => `<option value="${entry.value}" ${selected === entry.value ? "selected" : ""} ${entry.value === "composite-latest-trained" && !latestCompositeSpec ? "disabled" : ""}>${entry.label}</option>`)
-      .join("");
+    const renderModuleCell = (side: TestArenaSide, kind: TestArenaAiModuleKind): string => {
+      const selectedId = testArenaAiSelections[side][kind];
+      const options = testArenaAiOptions[kind]
+        .map((entry) => {
+          const disabled = entry.compatible === false || !entry.spec?.familyId;
+          return `<option value="${entry.id}" ${entry.id === selectedId ? "selected" : ""} ${disabled ? "disabled" : ""}>${escapeHtml(entry.label)}</option>`;
+        })
+        .join("");
+      return `
+        <select id="testArenaCompSelect_${side}_${kind}">${options}</select>
+      `;
+    };
     const pythonStatusText = pythonAiBridgeConnected
       ? `Connected${pythonAiBridgeClientId ? ` (${pythonAiBridgeClientId})` : ""}`
       : "Waiting for connection";
@@ -3279,13 +3459,22 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         <label class="small"><input id="testArenaInvinciblePlayer" type="checkbox" ${testArenaInvinciblePlayer ? "checked" : ""} /> Player controlled invincible</label>
       </div>
       <div class="row">
-        <label class="small">Player AI
-          <select id="testArenaPlayerAiPreset">${aiPresetOptions(testArenaPlayerAiPreset)}</select>
-        </label>
-        <label class="small">Enemy AI
-          <select id="testArenaEnemyAiPreset">${aiPresetOptions(testArenaEnemyAiPreset)}</select>
-        </label>
-        <button id="btnRefreshArenaAiModels">Refresh trained AI</button>
+        <button id="btnRefreshArenaAiModels">Refresh AI list</button>
+      </div>
+      <div class="small">Select AI module per side (player/enemy) and stage (target/movement/shoot).</div>
+      <div style="display:grid; grid-template-columns:120px minmax(0,1fr) minmax(0,1fr); gap:6px; align-items:start;">
+        <div class="small"></div>
+        <div class="small"><strong>Player</strong></div>
+        <div class="small"><strong>Enemy</strong></div>
+        <div class="small">Target</div>
+        ${renderModuleCell("player", "target")}
+        ${renderModuleCell("enemy", "target")}
+        <div class="small">Movement</div>
+        ${renderModuleCell("player", "movement")}
+        ${renderModuleCell("enemy", "movement")}
+        <div class="small">Shoot</div>
+        ${renderModuleCell("player", "shoot")}
+        ${renderModuleCell("enemy", "shoot")}
       </div>
       ${testArenaNeedsPythonBridge() ? `<div class="small ${pythonStatusTone}">Python AI bridge: ${pythonStatusText}${pythonLastSeenLabel}</div>` : ""}
       <div class="small">Invincible player still collides and can be targeted, but takes no damage.</div>
@@ -3715,7 +3904,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     syncTestArenaZoomInput();
   };
 
-  const startTestArena = (): void => {
+  const startTestArena = async (): Promise<void> => {
     applyTestArenaBattlefieldSize();
     if (battle.getState().active && !battle.getState().outcome) {
       battle.resetToMapMode();
@@ -3723,11 +3912,15 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     pythonAiBridgeRequestInFlight = null;
     pythonAiBridgeRequestPostedAtMs = 0;
     pythonAiBridgeResultPollAtMs = 0;
+    await refreshTestArenaComponentGrid();
     applyTestArenaAiControllers();
     battle.start(testArenaNode);
     battle.setControlledUnitInvincible(testArenaInvinciblePlayer);
     battle.setEnemyActiveCount(testArenaEnemyCount);
-    addLog(`Test Arena started. AI: P=${testArenaPlayerAiPreset}, E=${testArenaEnemyAiPreset}.`);
+    addLog(
+      `Test Arena started. P[target=${testArenaAiSelections.player.target}, movement=${testArenaAiSelections.player.movement}, shoot=${testArenaAiSelections.player.shoot}] `
+      + `E[target=${testArenaAiSelections.enemy.target}, movement=${testArenaAiSelections.enemy.movement}, shoot=${testArenaAiSelections.enemy.shoot}].`,
+    );
     if (testArenaNeedsPythonBridge() && !pythonAiBridgeConnected) {
       addLog("Python AI bridge waiting for connection...", "warn");
     }
@@ -3856,7 +4049,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     });
 
     getOptionalElement<HTMLButtonElement>("#btnStartTestArena")?.addEventListener("click", () => {
-      startTestArena();
+      void startTestArena();
     });
 
     getOptionalElement<HTMLButtonElement>("#btnEndTestArena")?.addEventListener("click", () => {
@@ -3983,7 +4176,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       }
       testArenaSpawnTemplateId = selection;
       if (!battle.getState().active || battle.getState().nodeId !== testArenaNode.id) {
-        startTestArena();
+        void startTestArena();
       }
       const spawned = battle.spawnEnemyTemplate(selection);
       addLog(spawned ? `Spawned enemy: ${selection}.` : `Failed to spawn enemy: ${selection}.`, spawned ? "good" : "bad");
@@ -3997,41 +4190,41 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       renderPanels();
     });
 
-    getOptionalElement<HTMLSelectElement>("#testArenaPlayerAiPreset")?.addEventListener("change", (event) => {
-      const value = (event.currentTarget as HTMLSelectElement).value as TestArenaAiPreset;
-      testArenaPlayerAiPreset = value;
-      pythonAiBridgeRequestInFlight = null;
-      pythonAiBridgeRequestPostedAtMs = 0;
-      pythonAiBridgeResultPollAtMs = 0;
-      if (battle.getState().active && battle.getState().nodeId === testArenaNode.id) {
-        applyTestArenaAiControllers();
-      }
-      if (isPythonBridgePreset(value) || isPythonBridgePreset(testArenaEnemyAiPreset)) {
-        void fetchPythonAiBridgeStatus();
-      }
-      addLog(`Test Arena player AI set to ${value}.`, "good");
-      renderPanels();
-    });
-
-    getOptionalElement<HTMLSelectElement>("#testArenaEnemyAiPreset")?.addEventListener("change", (event) => {
-      const value = (event.currentTarget as HTMLSelectElement).value as TestArenaAiPreset;
-      testArenaEnemyAiPreset = value;
-      pythonAiBridgeRequestInFlight = null;
-      pythonAiBridgeRequestPostedAtMs = 0;
-      pythonAiBridgeResultPollAtMs = 0;
-      if (battle.getState().active && battle.getState().nodeId === testArenaNode.id) {
-        applyTestArenaAiControllers();
-      }
-      if (isPythonBridgePreset(value) || isPythonBridgePreset(testArenaPlayerAiPreset)) {
-        void fetchPythonAiBridgeStatus();
-      }
-      addLog(`Test Arena enemy AI set to ${value}.`, "good");
-      renderPanels();
-    });
+    const bindComponentSelect = (side: TestArenaSide, kind: TestArenaAiModuleKind): void => {
+      getOptionalElement<HTMLSelectElement>(`#testArenaCompSelect_${side}_${kind}`)?.addEventListener("change", async (event) => {
+        const nextId = (event.currentTarget as HTMLSelectElement).value;
+        const option = findAiOptionById(kind, nextId);
+        if (!option || option.compatible === false || !option.spec?.familyId) {
+          if (option?.reason) {
+            addLog(`${side}.${kind}: ${option.reason}`, "warn");
+          }
+          renderPanels();
+          return;
+        }
+        testArenaAiSelections[side][kind] = nextId;
+        await refreshTestArenaComponentGrid();
+        if (battle.getState().active && battle.getState().nodeId === testArenaNode.id) {
+          applyTestArenaAiControllers();
+        }
+        addLog(`Test Arena AI set: ${side}.${kind} -> ${nextId}`, "good");
+        renderPanels();
+      });
+    };
+    bindComponentSelect("player", "target");
+    bindComponentSelect("player", "movement");
+    bindComponentSelect("player", "shoot");
+    bindComponentSelect("enemy", "target");
+    bindComponentSelect("enemy", "movement");
+    bindComponentSelect("enemy", "shoot");
 
     getOptionalElement<HTMLButtonElement>("#btnRefreshArenaAiModels")?.addEventListener("click", async () => {
       await fetchLatestCompositeSpec();
-      addLog(latestCompositeSpec ? "Refreshed latest trained composite AI." : "No trained composite AI found.", latestCompositeSpec ? "good" : "warn");
+      await refreshTestArenaAiOptions();
+      await refreshTestArenaComponentGrid();
+      if (battle.getState().active && battle.getState().nodeId === testArenaNode.id) {
+        applyTestArenaAiControllers();
+      }
+      addLog("Refreshed available AI module list.", "good");
       renderPanels();
     });
 
@@ -5572,6 +5765,15 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       startArenaReplay();
     });
   }
+}
+
+function escapeHtml(value: string): string {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll("\"", "&quot;")
+    .replaceAll("'", "&#39;");
 }
 
 function getElement<T extends HTMLElement>(selector: string): T {

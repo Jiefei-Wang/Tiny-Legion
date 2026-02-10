@@ -274,6 +274,12 @@ Map node metadata supports test-only battle tuning via optional fields on `MapNo
 - `testBaseHpOverride` sets both player/enemy battle base HP and max HP for long-running test battles.
 - The `Test Arena` tab uses these overrides while skipping campaign rewards/ownership changes.
 - Test Arena UI controls for enemy count / battlefield size / zoom apply on input commit (`Enter` or blur) without extra apply buttons.
+- Test Arena AI control uses a `2 x 3` component grid (`player|enemy` x `target|movement|shoot`) with one dropdown per cell.
+- Dropdown inventory is populated from:
+  - built-in module presets,
+  - saved module specs enumerated from `arena/.arena-data/runs/*/best-composite.json` via dev endpoint `GET /__arena/composite/modules`.
+- Selecting a dropdown value maps directly to one composite module spec (`{ familyId, params }`) and reapplies controller wiring immediately.
+- Selection format and examples are documented in `game/AI_COMPONENT_CONFIG.md`.
 
 Template/editor architecture notes:
 
