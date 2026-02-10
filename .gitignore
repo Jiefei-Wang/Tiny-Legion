@@ -18,4 +18,6 @@ packages/*/dist/
 packages/*/build/
 game/.headless-dist/
 arena/.dist/
+arena/modules
 .DS_Store
+**__pycache__

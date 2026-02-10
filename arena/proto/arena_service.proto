@@ -1,0 +1,84 @@
+syntax = "proto3";
+
+package arena.v1;
+
+service ArenaService {
+  rpc CreateBattle(CreateBattleRequest) returns (BattleStepResponse);
+  rpc StepBattle(StepBattleRequest) returns (BattleStepResponse);
+  rpc GetBattle(GetBattleRequest) returns (BattleStepResponse);
+  rpc CloseBattle(CloseBattleRequest) returns (CloseBattleResponse);
+}
+
+message CreateBattleRequest {
+  string config_json = 1;
+}
+
+message MoveCommand {
+  double dir_x = 1;
+  double dir_y = 2;
+  bool allow_descend = 3;
+}
+
+message FireRequest {
+  int32 slot = 1;
+  double aim_x = 2;
+  double aim_y = 3;
+  string intended_target_id = 4;
+  double intended_target_y = 5;
+  bool has_intended_target_y = 6;
+}
+
+message UnitStepCommand {
+  string unit_id = 1;
+  MoveCommand move = 2;
+  int32 facing = 3; // -1, 0, 1 ; 0 => unchanged
+  repeated FireRequest fire_requests = 4;
+}
+
+message StepBattleRequest {
+  string battle_id = 1;
+  repeated UnitStepCommand commands = 2;
+  uint32 n_steps = 3;
+}
+
+message GetBattleRequest {
+  string battle_id = 1;
+}
+
+message CloseBattleRequest {
+  string battle_id = 1;
+}
+
+message PendingUnit {
+  string unit_id = 1;
+  string side = 2;
+  string type = 3;
+  bool alive = 4;
+  bool can_operate = 5;
+  double x = 6;
+  double y = 7;
+  double vx = 8;
+  double vy = 9;
+  uint32 weapon_count = 10;
+}
+
+message Outcome {
+  bool victory = 1;
+  string reason = 2;
+}
+
+message BattleStepResponse {
+  string battle_id = 1;
+  uint64 tick = 2;
+  double dt_seconds = 3;
+  string snapshot_json = 4;
+  repeated PendingUnit pending_units = 5;
+  bool terminal = 6;
+  Outcome outcome = 7;
+  repeated string errors = 8;
+}
+
+message CloseBattleResponse {
+  bool ok = 1;
+  string error = 2;
+}

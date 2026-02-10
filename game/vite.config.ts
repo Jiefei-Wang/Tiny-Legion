@@ -662,6 +662,211 @@ function arenaModelPlugin() {
   };
 }
 
+function pythonAiBridgePlugin() {
+  type BridgeRequest = {
+    id: string;
+    createdAtMs: number;
+    payload: unknown;
+  };
+  type BridgeResult = {
+    completedAtMs: number;
+    commands: unknown[];
+    errors: string[];
+  };
+
+  const pending: BridgeRequest[] = [];
+  const resultsById = new Map<string, BridgeResult>();
+  let connectedClientId: string | null = null;
+  let lastSeenMs = 0;
+  let seq = 1;
+
+  const json = (res: any, status: number, payload: unknown): void => {
+    res.statusCode = status;
+    res.setHeader("content-type", "application/json");
+    res.end(JSON.stringify(payload));
+  };
+
+  const parseJsonBody = (req: any, res: any, cb: (parsed: any) => void): void => {
+    let body = "";
+    req.on("data", (chunk: any) => {
+      body += String(chunk);
+    });
+    req.on("end", () => {
+      try {
+        cb(JSON.parse(body || "{}"));
+      } catch {
+        json(res, 400, { ok: false, reason: "bad_json" });
+      }
+    });
+  };
+
+  const nextId = (): string => {
+    const id = `pyai_${Date.now().toString(36)}_${(seq++).toString(36)}`;
+    return id;
+  };
+
+  const trimOldResults = (): void => {
+    const now = Date.now();
+    for (const [id, result] of resultsById.entries()) {
+      if (now - result.completedAtMs > 5 * 60 * 1000) {
+        resultsById.delete(id);
+      }
+    }
+  };
+
+  return {
+    name: "python-ai-bridge",
+    configureServer(server: import("vite").ViteDevServer) {
+      server.middlewares.use("/__pyai/connect", (req, res) => {
+        if (req.method !== "POST") {
+          return json(res, 405, { ok: false, reason: "method_not_allowed" });
+        }
+        return parseJsonBody(req, res, (parsed) => {
+          const clientId = typeof parsed.clientId === "string" ? parsed.clientId.trim() : "";
+          if (!clientId) {
+            return json(res, 400, { ok: false, reason: "missing_client_id" });
+          }
+          connectedClientId = clientId;
+          lastSeenMs = Date.now();
+          return json(res, 200, { ok: true, connected: true, clientId: connectedClientId });
+        });
+      });
+
+      server.middlewares.use("/__pyai/heartbeat", (req, res) => {
+        if (req.method !== "POST") {
+          return json(res, 405, { ok: false, reason: "method_not_allowed" });
+        }
+        return parseJsonBody(req, res, (parsed) => {
+          const clientId = typeof parsed.clientId === "string" ? parsed.clientId.trim() : "";
+          if (!clientId || !connectedClientId || clientId !== connectedClientId) {
+            return json(res, 403, { ok: false, reason: "not_connected" });
+          }
+          lastSeenMs = Date.now();
+          return json(res, 200, { ok: true, connected: true, clientId: connectedClientId });
+        });
+      });
+
+      server.middlewares.use("/__pyai/disconnect", (req, res) => {
+        if (req.method !== "POST") {
+          return json(res, 405, { ok: false, reason: "method_not_allowed" });
+        }
+        return parseJsonBody(req, res, (parsed) => {
+          const clientId = typeof parsed.clientId === "string" ? parsed.clientId.trim() : "";
+          if (connectedClientId && (!clientId || clientId === connectedClientId)) {
+            connectedClientId = null;
+            lastSeenMs = 0;
+          }
+          return json(res, 200, { ok: true, connected: false });
+        });
+      });
+
+      server.middlewares.use("/__pyai/status", (req, res) => {
+        if (req.method !== "GET") {
+          return json(res, 405, { ok: false, reason: "method_not_allowed" });
+        }
+        trimOldResults();
+        const connected = Boolean(connectedClientId) && (Date.now() - lastSeenMs <= 15_000);
+        if (!connected) {
+          connectedClientId = null;
+        }
+        return json(res, 200, {
+          ok: true,
+          connected,
+          clientId: connectedClientId,
+          lastSeenMs,
+          pendingCount: pending.length,
+        });
+      });
+
+      server.middlewares.use("/__pyai/request", (req, res) => {
+        if (req.method !== "POST") {
+          return json(res, 405, { ok: false, reason: "method_not_allowed" });
+        }
+        return parseJsonBody(req, res, (parsed) => {
+          const connected = Boolean(connectedClientId) && (Date.now() - lastSeenMs <= 15_000);
+          if (!connected) {
+            connectedClientId = null;
+            return json(res, 200, { ok: false, connected: false, reason: "python_not_connected" });
+          }
+          const id = nextId();
+          pending.push({
+            id,
+            createdAtMs: Date.now(),
+            payload: parsed,
+          });
+          return json(res, 200, { ok: true, connected: true, requestId: id });
+        });
+      });
+
+      server.middlewares.use("/__pyai/next", (req, res) => {
+        if (req.method !== "GET") {
+          return json(res, 405, { ok: false, reason: "method_not_allowed" });
+        }
+        const url = new URL(req.url ?? "", "http://localhost");
+        const clientId = url.searchParams.get("clientId")?.trim() ?? "";
+        if (!connectedClientId || clientId !== connectedClientId) {
+          return json(res, 403, { ok: false, reason: "not_connected" });
+        }
+        lastSeenMs = Date.now();
+        const request = pending.shift() ?? null;
+        return json(res, 200, { ok: true, request });
+      });
+
+      server.middlewares.use("/__pyai/respond", (req, res) => {
+        const path = req.url ?? "";
+        const segments = path.split("/").filter(Boolean);
+        const requestId = segments[segments.length - 1] ?? "";
+        if (!requestId) {
+          return json(res, 400, { ok: false, reason: "missing_request_id" });
+        }
+        if (req.method !== "POST") {
+          return json(res, 405, { ok: false, reason: "method_not_allowed" });
+        }
+        return parseJsonBody(req, res, (parsed) => {
+          const clientId = typeof parsed.clientId === "string" ? parsed.clientId.trim() : "";
+          if (!connectedClientId || clientId !== connectedClientId) {
+            return json(res, 403, { ok: false, reason: "not_connected" });
+          }
+          lastSeenMs = Date.now();
+          const commands = Array.isArray(parsed.commands) ? parsed.commands : [];
+          const errors = Array.isArray(parsed.errors) ? parsed.errors.map((e: unknown) => String(e)) : [];
+          resultsById.set(requestId, {
+            completedAtMs: Date.now(),
+            commands,
+            errors,
+          });
+          return json(res, 200, { ok: true });
+        });
+      });
+
+      server.middlewares.use("/__pyai/result", (req, res) => {
+        const path = req.url ?? "";
+        const segments = path.split("/").filter(Boolean);
+        const requestId = segments[segments.length - 1] ?? "";
+        if (!requestId) {
+          return json(res, 400, { ok: false, reason: "missing_request_id" });
+        }
+        if (req.method !== "GET") {
+          return json(res, 405, { ok: false, reason: "method_not_allowed" });
+        }
+        trimOldResults();
+        const result = resultsById.get(requestId);
+        if (!result) {
+          return json(res, 200, { ok: true, status: "pending" });
+        }
+        return json(res, 200, {
+          ok: true,
+          status: "done",
+          result: {
+            commands: result.commands,
+            errors: result.errors,
+          },
+        });
+      });
+    },
+  };
+}
+
 export default defineConfig({
-  plugins: [debugLogPlugin(), templateStorePlugin(), partStorePlugin(), debugProbePlugin(), arenaModelPlugin()],
+  plugins: [debugLogPlugin(), templateStorePlugin(), partStorePlugin(), debugProbePlugin(), arenaModelPlugin(), pythonAiBridgePlugin()],
 });

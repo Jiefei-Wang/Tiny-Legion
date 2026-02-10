@@ -172,6 +172,9 @@ Arena training/runtime package (implemented):
 
 ```text
 arena/src/
+  grpc/
+    server.ts
+    session-manager.ts
   ai/
     ai-schema.ts
     composite-controller.ts
@@ -209,6 +212,27 @@ arena/src/
     open-replay-ui.ts
 ```
 
+Python training helper surface (new):
+
+```text
+arena/
+  AI_INTERFACE_PYTHON.md
+  AI_INTERFACE_JS.md
+  python/
+    arena_client.py
+    example_baseline_ai.py
+```
+
+Notes:
+
+- `arena/python/arena_client.py` defines Python helper APIs:
+  - `start_battle(client, config)`
+  - `AI_callback(fun)`
+  - `ArenaClient.run_until_terminal(...)`
+- `arena/python/example_baseline_ai.py` provides a baseline-style callback example that maps full snapshot input to per-unit commands.
+- These files define and document the Python/JS AI boundary before gRPC server rollout, so training callback shape and JS model adapter shape remain stable.
+- `BattleSessionOptions` now supports external AI control flags (`externalAiSides`) and external-command helpers used by arena gRPC sessions.
+
 Arena-specific architecture notes:
 
 - Arena runtime imports battle/simulation/template domain code directly from `packages/game-core/src/*` (no dynamic loading from `game/.headless-dist`).
@@ -227,6 +251,12 @@ Arena-specific architecture notes:
 - `cli.ts` includes an `eval` command for reproducible held-out benchmarking versus `baseline`.
 - Replay UI (`arena-ui/src/main.ts`) still uses game interface bootstrap (`game/src/app/bootstrap.ts`) while consuming AI/simulation primitives from `packages/game-core`.
 - Game dev server exposes `/__arena/composite/latest` for Test Arena to load latest trained composite spec from `arena/.arena-data/runs/*/best-composite.json`.
+- Game dev server exposes `/__pyai/*` broker endpoints for Test Arena external Python AI bridge (connect/status/request/next/respond/result).
+- Arena includes a gRPC training-session interface (`serve:grpc`) with lifecycle RPCs in `arena/proto/arena_service.proto`:
+  - `CreateBattle`
+  - `StepBattle`
+  - `GetBattle`
+  - `CloseBattle`
 
 Map node metadata supports test-only battle tuning via optional fields on `MapNode`:
 
@@ -476,6 +506,17 @@ Dev-server debug probe RPC (dev-only, no eval; used by agents/scripts to fetch a
 - `GET /__debug/probe/next?clientId=...` -> client polls for work
 - `POST /__debug/probe/<probeId>/response` -> client returns results
 - `GET /__debug/probe/<probeId>` -> fetch probe status/results
+
+Dev-server Python AI bridge RPC (dev-only; Test Arena external AI handshake + request/response broker):
+
+- `POST /__pyai/connect` -> register Python bridge client
+- `POST /__pyai/heartbeat` -> keep client alive
+- `POST /__pyai/disconnect` -> unregister client
+- `GET /__pyai/status` -> bridge connection status
+- `POST /__pyai/request` -> browser enqueues AI decision request
+- `GET /__pyai/next?clientId=...` -> Python client polls for pending request
+- `POST /__pyai/respond/<requestId>` -> Python posts commands for one request
+- `GET /__pyai/result/<requestId>` -> browser polls request result
 
 Runtime log file path:
 

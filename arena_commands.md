@@ -137,3 +137,28 @@ Endpoints:
 
 - `POST /match` with a `MatchSpec` JSON
 - `POST /train` with training options JSON (starts training async; returns 202)
+
+## Serve (gRPC, Training Session API)
+
+```bash
+npm --prefix arena run serve:grpc
+# or custom port
+npm --prefix arena run serve:grpc -- --port 50051
+```
+
+Service definition:
+
+- `arena/proto/arena_service.proto`
+
+Core RPCs:
+
+- `CreateBattle`
+- `StepBattle`
+- `GetBattle`
+- `CloseBattle`
+
+Python helper files:
+
+- `arena/python/arena_client.py`
+- `arena/python/example_baseline_ai.py`
+- `arena/python/test_arena_bridge.py` (Test Arena browser bridge client)

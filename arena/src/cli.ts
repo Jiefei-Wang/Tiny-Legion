@@ -6,6 +6,7 @@ import { runSpawnTraining } from "./train/run-spawn-training.ts";
 import { openReplayUiFromFile } from "./replay/open-replay-ui.ts";
 import { evaluateVsBaseline } from "./eval/evaluate-vs-baseline.ts";
 import { runCompositeTraining } from "./train/run-composite-training.ts";
+import { startGrpcServer } from "./grpc/server.ts";
 
 type Args = Record<string, string | boolean>;
 
@@ -262,6 +263,11 @@ async function main(): Promise<void> {
     });
     return;
   }
+  if (cmd === "serve-grpc") {
+    const port = asNumber(args.port, Number(process.env.ARENA_GRPC_PORT ?? 50051));
+    await startGrpcServer(Math.max(1, Math.floor(port)));
+    return;
+  }
 
   // eslint-disable-next-line no-console
   console.log(
@@ -275,6 +281,7 @@ async function main(): Promise<void> {
       "  train-composite --scope all --generations 20 --population 24 --phaseSeeds 16 --nUnits 4",
       "  train-composite --scope shoot --shootSource new --movementSource baseline --targetSource baseline --shootLayers 2 --shootHidden 16",
       "  eval --ai range-bias --fromStore true --seeds 200 --parallel 20",
+      "  serve-grpc --port 50051",
       "  replay --file match.json",
       "",
       "Common flags:",

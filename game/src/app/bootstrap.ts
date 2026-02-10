@@ -273,7 +273,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
   let testArenaGroundHeight = Math.floor(BATTLEFIELD_HEIGHT * DEFAULT_GROUND_HEIGHT_RATIO);
   let testArenaSpawnTemplateId: string | null = null;
   let testArenaInvinciblePlayer = false;
-  type TestArenaAiPreset = "baseline" | "composite-baseline" | "composite-neural-default" | "composite-latest-trained";
+  type TestArenaAiPreset = "baseline" | "composite-baseline" | "composite-neural-default" | "composite-latest-trained" | "python-bridge";
   let testArenaPlayerAiPreset: TestArenaAiPreset = "baseline";
   let testArenaEnemyAiPreset: TestArenaAiPreset = "baseline";
   let latestCompositeSpec: MatchAiSpec | null = null;
@@ -292,6 +292,14 @@ export function bootstrap(options: BootstrapOptions = {}): void {
   let debugDisplayLayer = false;
   let debugPartHpOverlay = false;
   let debugServerEnabled = false;
+  let pythonAiBridgeConnected = false;
+  let pythonAiBridgeClientId: string | null = null;
+  let pythonAiBridgeLastSeenMs = 0;
+  let pythonAiBridgeLastStatusPollMs = 0;
+  let pythonAiBridgeStatusInFlight = false;
+  let pythonAiBridgeRequestInFlight: string | null = null;
+  let pythonAiBridgeRequestPostedAtMs = 0;
+  let pythonAiBridgeResultPollAtMs = 0;
   const EDITOR_GRID_MAX_COLS = 10;
   const EDITOR_GRID_MAX_ROWS = 10;
   const EDITOR_GRID_MAX_SIZE = EDITOR_GRID_MAX_COLS * EDITOR_GRID_MAX_ROWS;
@@ -768,7 +776,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
   };
 
   const buildAiControllerFromPreset = (preset: TestArenaAiPreset): BattleAiController | null => {
-    if (preset === "baseline") {
+    if (preset === "baseline" || preset === "python-bridge") {
       return null;
     }
     if (preset === "composite-baseline") {
@@ -795,6 +803,8 @@ export function bootstrap(options: BootstrapOptions = {}): void {
   const applyTestArenaAiControllers = (): void => {
     const playerController = buildAiControllerFromPreset(testArenaPlayerAiPreset);
     const enemyController = buildAiControllerFromPreset(testArenaEnemyAiPreset);
+    const externalSides = getExternalAiSidesFromPresets();
+    battle.setExternalAiSides(externalSides);
     battle.setAiControllers({
       ...(playerController ? { player: playerController } : {}),
       ...(enemyController ? { enemy: enemyController } : {}),
@@ -3060,9 +3070,17 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       { value: "composite-baseline", label: "Composite Baseline" },
       { value: "composite-neural-default", label: "Composite Neural (new)" },
       { value: "composite-latest-trained", label: latestCompositeSpec ? "Composite Latest Trained" : "Composite Latest Trained (not found)" },
+      { value: "python-bridge", label: "Python Bridge (external)" },
     ]
       .map((entry) => `<option value="${entry.value}" ${selected === entry.value ? "selected" : ""} ${entry.value === "composite-latest-trained" && !latestCompositeSpec ? "disabled" : ""}>${entry.label}</option>`)
       .join("");
+    const pythonStatusText = pythonAiBridgeConnected
+      ? `Connected${pythonAiBridgeClientId ? ` (${pythonAiBridgeClientId})` : ""}`
+      : "Waiting for connection";
+    const pythonLastSeenLabel = pythonAiBridgeLastSeenMs > 0
+      ? `, last heartbeat ${Math.max(0, Math.round((Date.now() - pythonAiBridgeLastSeenMs) / 1000))}s ago`
+      : "";
+    const pythonStatusTone = pythonAiBridgeConnected ? "good" : "warn";
     const enemyCountLabel = Math.max(0, Math.floor(testArenaEnemyCount));
     const enemyCountActive = isTestArenaActive
       ? battle.getAliveEnemyCount()
@@ -3113,6 +3131,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         </label>
         <button id="btnRefreshArenaAiModels">Refresh trained AI</button>
       </div>
+      ${testArenaNeedsPythonBridge() ? `<div class="small ${pythonStatusTone}">Python AI bridge: ${pythonStatusText}${pythonLastSeenLabel}</div>` : ""}
       <div class="small">Invincible player still collides and can be targeted, but takes no damage.</div>
       <div class="small">AI presets apply to Test Arena only; campaign battles keep default behavior.</div>
     `;
@@ -3362,6 +3381,48 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     }
   };
 
+  const isPythonBridgePreset = (preset: TestArenaAiPreset): boolean => preset === "python-bridge";
+
+  const getExternalAiSidesFromPresets = (): { player: boolean; enemy: boolean } => ({
+    player: isPythonBridgePreset(testArenaPlayerAiPreset),
+    enemy: isPythonBridgePreset(testArenaEnemyAiPreset),
+  });
+
+  const testArenaNeedsPythonBridge = (): boolean => {
+    const externalSides = getExternalAiSidesFromPresets();
+    return externalSides.player || externalSides.enemy;
+  };
+
+  const fetchPythonAiBridgeStatus = async (): Promise<void> => {
+    if (pythonAiBridgeStatusInFlight) {
+      return;
+    }
+    pythonAiBridgeStatusInFlight = true;
+    try {
+      const res = await fetch("/__pyai/status", { method: "GET" });
+      if (!res.ok) {
+        pythonAiBridgeConnected = false;
+        pythonAiBridgeClientId = null;
+        pythonAiBridgeLastSeenMs = 0;
+        return;
+      }
+      const parsed = await res.json().catch(() => null) as {
+        connected?: boolean;
+        clientId?: string | null;
+        lastSeenMs?: number;
+      } | null;
+      pythonAiBridgeConnected = parsed?.connected === true;
+      pythonAiBridgeClientId = typeof parsed?.clientId === "string" ? parsed.clientId : null;
+      pythonAiBridgeLastSeenMs = Number.isFinite(parsed?.lastSeenMs) ? Number(parsed?.lastSeenMs) : 0;
+    } catch {
+      pythonAiBridgeConnected = false;
+      pythonAiBridgeClientId = null;
+      pythonAiBridgeLastSeenMs = 0;
+    } finally {
+      pythonAiBridgeStatusInFlight = false;
+    }
+  };
+
   const applyTestArenaBattlefieldSize = (): void => {
     const width = normalizeTestArenaBattlefieldWidth(testArenaBattlefieldWidth);
     const height = normalizeTestArenaBattlefieldHeight(testArenaBattlefieldHeight);
@@ -3398,11 +3459,17 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     if (battle.getState().active && !battle.getState().outcome) {
       battle.resetToMapMode();
     }
+    pythonAiBridgeRequestInFlight = null;
+    pythonAiBridgeRequestPostedAtMs = 0;
+    pythonAiBridgeResultPollAtMs = 0;
     applyTestArenaAiControllers();
     battle.start(testArenaNode);
     battle.setControlledUnitInvincible(testArenaInvinciblePlayer);
     battle.setEnemyActiveCount(testArenaEnemyCount);
     addLog(`Test Arena started. AI: P=${testArenaPlayerAiPreset}, E=${testArenaEnemyAiPreset}.`);
+    if (testArenaNeedsPythonBridge() && !pythonAiBridgeConnected) {
+      addLog("Python AI bridge waiting for connection...", "warn");
+    }
     setScreen("testArena");
     renderPanels();
   };
@@ -3485,6 +3552,10 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         }
         applyBattlefieldDefaults();
         battle.setAiControllers({});
+        battle.setExternalAiSides({ player: false, enemy: false });
+        pythonAiBridgeRequestInFlight = null;
+        pythonAiBridgeRequestPostedAtMs = 0;
+        pythonAiBridgeResultPollAtMs = 0;
         battle.start(node);
         addLog(`Battle started at ${node.name}`);
         setScreen("battle");
@@ -3528,6 +3599,10 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     });
 
     getOptionalElement<HTMLButtonElement>("#btnEndTestArena")?.addEventListener("click", () => {
+      pythonAiBridgeRequestInFlight = null;
+      pythonAiBridgeRequestPostedAtMs = 0;
+      pythonAiBridgeResultPollAtMs = 0;
+      battle.setExternalAiSides({ player: false, enemy: false });
       battle.resetToMapMode();
       setScreen("testArena");
       renderPanels();
@@ -3664,8 +3739,14 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     getOptionalElement<HTMLSelectElement>("#testArenaPlayerAiPreset")?.addEventListener("change", (event) => {
       const value = (event.currentTarget as HTMLSelectElement).value as TestArenaAiPreset;
       testArenaPlayerAiPreset = value;
+      pythonAiBridgeRequestInFlight = null;
+      pythonAiBridgeRequestPostedAtMs = 0;
+      pythonAiBridgeResultPollAtMs = 0;
       if (battle.getState().active && battle.getState().nodeId === testArenaNode.id) {
         applyTestArenaAiControllers();
+      }
+      if (isPythonBridgePreset(value) || isPythonBridgePreset(testArenaEnemyAiPreset)) {
+        void fetchPythonAiBridgeStatus();
       }
       addLog(`Test Arena player AI set to ${value}.`, "good");
       renderPanels();
@@ -3674,8 +3755,14 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     getOptionalElement<HTMLSelectElement>("#testArenaEnemyAiPreset")?.addEventListener("change", (event) => {
       const value = (event.currentTarget as HTMLSelectElement).value as TestArenaAiPreset;
       testArenaEnemyAiPreset = value;
+      pythonAiBridgeRequestInFlight = null;
+      pythonAiBridgeRequestPostedAtMs = 0;
+      pythonAiBridgeResultPollAtMs = 0;
       if (battle.getState().active && battle.getState().nodeId === testArenaNode.id) {
         applyTestArenaAiControllers();
+      }
+      if (isPythonBridgePreset(value) || isPythonBridgePreset(testArenaPlayerAiPreset)) {
+        void fetchPythonAiBridgeStatus();
       }
       addLog(`Test Arena enemy AI set to ${value}.`, "good");
       renderPanels();
@@ -4804,21 +4891,170 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       addLog("Failed to load part/template data from store", "bad");
       renderPanels();
     });
-  let panelBucket = -1;
 
-  let loopUpdate = (dt: number): void => {
-      if (!running) {
-        return;
+  const toExternalCommandEntries = (rawCommands: unknown): Array<{ unitId: string; command: any }> => {
+    if (!Array.isArray(rawCommands)) {
+      return [];
+    }
+    const out: Array<{ unitId: string; command: any }> = [];
+    for (const raw of rawCommands) {
+      const entry = raw as {
+        unit_id?: string;
+        move?: { dir_x?: number; dir_y?: number; allow_descend?: boolean };
+        facing?: number;
+        fire_requests?: Array<{ slot?: number; aim_x?: number; aim_y?: number; intended_target_id?: string; intended_target_y?: number }>;
+      };
+      const unitId = typeof entry.unit_id === "string" ? entry.unit_id.trim() : "";
+      if (!unitId) {
+        continue;
       }
-      if (isBattleScreen() && battle.getState().active) {
-        battle.update(dt, keys);
-        followSelectedUnitWithCamera();
+      const move = entry.move ?? {};
+      const facingRaw = Number(entry.facing ?? 0);
+      const fireRequests = Array.isArray(entry.fire_requests)
+        ? entry.fire_requests.map((req) => ({
+            slot: Number(req.slot ?? -1),
+            aimX: Number(req.aim_x ?? 0),
+            aimY: Number(req.aim_y ?? 0),
+            intendedTargetId: typeof req.intended_target_id === "string" && req.intended_target_id.length > 0 ? req.intended_target_id : null,
+            intendedTargetY: Number.isFinite(req.intended_target_y) ? Number(req.intended_target_y) : null,
+            manual: false,
+          }))
+        : [];
+      out.push({
+        unitId,
+        command: {
+          move: {
+            dirX: Number.isFinite(move.dir_x) ? Number(move.dir_x) : 0,
+            dirY: Number.isFinite(move.dir_y) ? Number(move.dir_y) : 0,
+            allowDescend: move.allow_descend === true,
+          },
+          facing: facingRaw === 1 ? 1 : facingRaw === -1 ? -1 : null,
+          fire: fireRequests,
+        },
+      });
+    }
+    return out;
+  };
+
+  const runExternalPythonBridgeStep = async (dt: number): Promise<boolean> => {
+    const state = battle.getState();
+    if (!(state.active && state.nodeId === testArenaNode.id && testArenaNeedsPythonBridge())) {
+      return false;
+    }
+    const nowMs = Date.now();
+    if (nowMs - pythonAiBridgeLastStatusPollMs > 1000) {
+      pythonAiBridgeLastStatusPollMs = nowMs;
+      await fetchPythonAiBridgeStatus();
+    }
+    if (!pythonAiBridgeConnected) {
+      return true;
+    }
+
+    const externalSides = getExternalAiSidesFromPresets();
+    const pendingUnits = battle.getPendingExternalAiUnits().filter((unit) => {
+      return (unit.side === "player" && externalSides.player) || (unit.side === "enemy" && externalSides.enemy);
+    });
+
+    if (pendingUnits.length <= 0) {
+      battle.clearExternalCommands();
+      battle.update(dt, keys);
+      followSelectedUnitWithCamera();
+      return true;
+    }
+
+    if (!pythonAiBridgeRequestInFlight) {
+      try {
+        const res = await fetch("/__pyai/request", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            battleId: state.nodeId,
+            simTimeMs: nowMs,
+            snapshot: {
+              battlefield: battle.getBattlefieldInfo(),
+              state,
+            },
+            pendingUnits,
+            externalSides,
+          }),
+        });
+        const parsed = await res.json().catch(() => null) as { ok?: boolean; connected?: boolean; requestId?: string } | null;
+        if (parsed?.ok && parsed.requestId) {
+          pythonAiBridgeRequestInFlight = parsed.requestId;
+          pythonAiBridgeRequestPostedAtMs = nowMs;
+          pythonAiBridgeResultPollAtMs = 0;
+        } else if (parsed?.connected === false) {
+          pythonAiBridgeConnected = false;
+        }
+      } catch {
+        pythonAiBridgeConnected = false;
       }
-    };
+      return true;
+    }
+
+    if (nowMs - pythonAiBridgeResultPollAtMs < 16) {
+      return true;
+    }
+    pythonAiBridgeResultPollAtMs = nowMs;
+    if (nowMs - pythonAiBridgeRequestPostedAtMs > 30_000) {
+      pythonAiBridgeRequestInFlight = null;
+      pythonAiBridgeConnected = false;
+      return true;
+    }
+
+    try {
+      const requestId = pythonAiBridgeRequestInFlight;
+      const resultRes = await fetch(`/__pyai/result/${encodeURIComponent(requestId)}`, { method: "GET" });
+      if (!resultRes.ok) {
+        return true;
+      }
+      const resultJson = await resultRes.json().catch(() => null) as {
+        status?: "pending" | "done";
+        result?: { commands?: unknown[]; errors?: string[] };
+      } | null;
+      if (resultJson?.status !== "done") {
+        return true;
+      }
+      const commands = toExternalCommandEntries(resultJson?.result?.commands ?? []);
+      battle.setExternalCommands(commands);
+      pythonAiBridgeRequestInFlight = null;
+      pythonAiBridgeRequestPostedAtMs = 0;
+      pythonAiBridgeResultPollAtMs = 0;
+      battle.update(dt, keys);
+      followSelectedUnitWithCamera();
+      return true;
+    } catch {
+      return true;
+    }
+  };
+
+  let panelBucket = -1;
+  let loopUpdateBusy = false;
+
+  let loopUpdate: (dt: number) => void | Promise<void> = async (dt: number): Promise<void> => {
+    if (!running) {
+      return;
+    }
+    if (!(isBattleScreen() && battle.getState().active)) {
+      return;
+    }
+    const handledByExternalBridge = await runExternalPythonBridgeStep(dt);
+    if (handledByExternalBridge) {
+      return;
+    }
+    battle.update(dt, keys);
+    followSelectedUnitWithCamera();
+  };
 
   const loop = new GameLoop(
     (dt) => {
-      loopUpdate(dt);
+      if (loopUpdateBusy) {
+        return;
+      }
+      loopUpdateBusy = true;
+      void Promise.resolve(loopUpdate(dt)).finally(() => {
+        loopUpdateBusy = false;
+      });
     },
     (_alpha, now) => {
       if (isEditorScreen()) {

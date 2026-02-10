@@ -46,6 +46,7 @@ Lose condition chain:
 - Includes a dedicated `Test Arena` top-level tab (parallel to `Battle`) for debug scenarios.
 - Test Arena overrides both battle bases to extremely high HP so base destruction does not end the test run.
 - Test Arena controls allow setting enemy count, battlefield simulation size (`W`/`H`), ground-zone height, display zoom percentage, spawning a specific enemy template, and toggling controlled-unit invincibility (no HP loss, still collides and can be hit).
+- Test Arena AI presets for player/enemy include a `Python Bridge (external)` option; when selected, battle stepping waits for Python bridge connection and per-tick command responses.
 - Test Arena parameter inputs apply on `Enter` or input blur (no separate apply button).
 - Test Arena zoom percentage is live-synced when mouse-wheel zoom changes the battlefield view.
 
@@ -558,6 +559,7 @@ Exclude for MVP:
 The current playable implementation already includes:
 
 - Ground XY movement and air XZ movement abstraction.
+- Battle bases auto-place vertically from runtime lane bounds (midpoint of the air/ground boundary band between `airMaxZ` and `groundMinY`), and reflow when battlefield size or ground height changes.
 - Structure/functional/display layer split with debug-menu display toggle (default display OFF) and optional per-cell part HP overlay.
 - Multi-weapon units and independent weapon cooldown timers.
 - Weapon slot manual-control toggles (default `ON`) and per-slot auto-fire toggles.
@@ -584,6 +586,7 @@ The current playable implementation already includes:
   - Phase 2: no-base NvN
   - Phase 3: full battlefield with bases
 - Test Arena now supports independent AI preset selection for player and enemy (`baseline`, `composite baseline`, `composite neural new`, `latest trained composite`).
+- Test Arena Python bridge status is shown in-panel (`Waiting for connection` until a Python bridge client connects to `/__pyai/*` endpoints).
 - Training automation script `train_ai.sh` provides module-specific training (`shoot`/`movement`/`target`) and full compose training (`compose`) with per-module neural depth/hidden-size controls and trained/new component source selection.
 
 Current gaps still being iterated:

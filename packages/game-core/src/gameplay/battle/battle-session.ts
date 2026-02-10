@@ -54,6 +54,7 @@ export interface BattleSessionOptions {
   disableAutoEnemySpawns?: boolean;
   disableEnemyMinimumPresence?: boolean;
   disableDefaultStarters?: boolean;
+  externalAiSides?: Partial<Record<Side, boolean>>;
   partCatalog?: ReadonlyArray<PartDefinition>;
 }
 
@@ -67,6 +68,8 @@ export class BattleSession {
   private readonly disableAutoEnemySpawns: boolean;
   private readonly disableEnemyMinimumPresence: boolean;
   private readonly disableDefaultStarters: boolean;
+  private externalAiSides: Partial<Record<Side, boolean>>;
+  private externalCommandsByUnitId: Map<string, UnitCommand>;
   private partCatalog: PartDefinition[];
   private state: BattleState;
   private selectedUnitId: string | null;
@@ -96,6 +99,11 @@ export class BattleSession {
     this.disableAutoEnemySpawns = options.disableAutoEnemySpawns ?? false;
     this.disableEnemyMinimumPresence = options.disableEnemyMinimumPresence ?? false;
     this.disableDefaultStarters = options.disableDefaultStarters ?? false;
+    this.externalAiSides = {
+      player: options.externalAiSides?.player === true,
+      enemy: options.externalAiSides?.enemy === true,
+    };
+    this.externalCommandsByUnitId = new Map<string, UnitCommand>();
     this.partCatalog = options.partCatalog && options.partCatalog.length > 0
       ? mergePartCatalogs(createDefaultPartDefinitions(), options.partCatalog)
       : createDefaultPartDefinitions();
@@ -124,6 +132,67 @@ export class BattleSession {
 
   public setAiControllers(aiControllers: Partial<Record<Side, BattleAiController>>): void {
     this.aiControllers = aiControllers;
+  }
+
+  public setExternalAiSides(sides: Partial<Record<Side, boolean>>): void {
+    this.externalAiSides = {
+      player: sides.player === true,
+      enemy: sides.enemy === true,
+    };
+  }
+
+  public clearExternalCommands(): void {
+    this.externalCommandsByUnitId.clear();
+  }
+
+  public setExternalCommands(commands: ReadonlyArray<{ unitId: string; command: UnitCommand }>): void {
+    this.externalCommandsByUnitId.clear();
+    for (const entry of commands) {
+      if (!entry || typeof entry.unitId !== "string" || entry.unitId.length <= 0) {
+        continue;
+      }
+      this.externalCommandsByUnitId.set(entry.unitId, entry.command);
+    }
+  }
+
+  public getPendingExternalAiUnits(side?: Side): UnitInstance[] {
+    const pending: UnitInstance[] = [];
+    for (const unit of this.state.units) {
+      if (!unit.alive || !canOperate(unit)) {
+        continue;
+      }
+      if (side && unit.side !== side) {
+        continue;
+      }
+      if (!this.isExternalAiEnabled(unit.side)) {
+        continue;
+      }
+      if (unit.side === "player" && unit.id === this.playerControlledId) {
+        continue;
+      }
+      if (unit.airDropActive) {
+        continue;
+      }
+      if (!this.hasAliveWeapons(unit)) {
+        continue;
+      }
+      pending.push(unit);
+    }
+    return pending;
+  }
+
+  public getBattlefieldInfo(): {
+    width: number;
+    height: number;
+    groundHeight: number;
+    laneBounds: { airMinZ: number; airMaxZ: number; groundMinY: number; groundMaxY: number; airTargetTolerance: number };
+  } {
+    return {
+      width: this.canvas.width,
+      height: this.canvas.height,
+      groundHeight: Math.floor(this.groundHeightPx),
+      laneBounds: this.getLaneBounds(),
+    };
   }
 
   public isDisplayEnabled(): boolean {
@@ -519,37 +588,41 @@ export class BattleSession {
       } else if (unit.airDropActive) {
         command = this.airDropReturnToCommand(unit, dt);
       } else if (this.hasAliveWeapons(unit)) {
-        if (this.autoEnableAiWeaponAutoFire) {
-          for (let i = 0; i < unit.weaponAutoFire.length; i += 1) {
-            unit.weaponAutoFire[i] = true;
+        if (this.isExternalAiEnabled(unit.side)) {
+          command = this.consumeExternalCommandOrNoop(unit);
+        } else {
+          if (this.autoEnableAiWeaponAutoFire) {
+            for (let i = 0; i < unit.weaponAutoFire.length; i += 1) {
+              unit.weaponAutoFire[i] = true;
+            }
           }
-        }
-        unit.aiStateTimer += dt;
-        unit.aiDodgeCooldown = Math.max(0, unit.aiDodgeCooldown - dt);
+          unit.aiStateTimer += dt;
+          unit.aiDodgeCooldown = Math.max(0, unit.aiDodgeCooldown - dt);
 
-        const desiredRange = this.getDesiredEngageRange(unit);
-        const baseTarget = this.getEnemyBaseCenter(unit.side);
-        const controller = this.aiControllers[unit.side] ?? null;
-        const decision = controller
-          ? controller.decide({
-              unit,
-              state: this.state,
-              dt,
-              desiredRange,
-              baseTarget,
-              canShootAtAngle: (componentId, dx, dy, shootAngleDegOverride) => this.canShootAtAngle(unit, componentId, dx, dy, shootAngleDegOverride),
-              getEffectiveWeaponRange: (baseRange) => this.getEffectiveWeaponRange(unit, baseRange),
-            })
-          : this.baselineController.decide({
-              unit,
-              state: this.state,
-              dt,
-              desiredRange,
-              baseTarget,
-              canShootAtAngle: (componentId, dx, dy, shootAngleDegOverride) => this.canShootAtAngle(unit, componentId, dx, dy, shootAngleDegOverride),
-              getEffectiveWeaponRange: (baseRange) => this.getEffectiveWeaponRange(unit, baseRange),
-            });
-        command = this.aiDecisionToCommand(unit, decision);
+          const desiredRange = this.getDesiredEngageRange(unit);
+          const baseTarget = this.getEnemyBaseCenter(unit.side);
+          const controller = this.aiControllers[unit.side] ?? null;
+          const decision = controller
+            ? controller.decide({
+                unit,
+                state: this.state,
+                dt,
+                desiredRange,
+                baseTarget,
+                canShootAtAngle: (componentId, dx, dy, shootAngleDegOverride) => this.canShootAtAngle(unit, componentId, dx, dy, shootAngleDegOverride),
+                getEffectiveWeaponRange: (baseRange) => this.getEffectiveWeaponRange(unit, baseRange),
+              })
+            : this.baselineController.decide({
+                unit,
+                state: this.state,
+                dt,
+                desiredRange,
+                baseTarget,
+                canShootAtAngle: (componentId, dx, dy, shootAngleDegOverride) => this.canShootAtAngle(unit, componentId, dx, dy, shootAngleDegOverride),
+                getEffectiveWeaponRange: (baseRange) => this.getEffectiveWeaponRange(unit, baseRange),
+              });
+          command = this.aiDecisionToCommand(unit, decision);
+        }
       } else if (unit.type === "air") {
         if (!unit.airDropActive) {
           unit.airDropActive = true;
@@ -2135,6 +2208,41 @@ export class BattleSession {
 
   private hasAliveWeapons(unit: UnitInstance): boolean {
     return getAliveWeaponAttachments(unit).length > 0;
+  }
+
+  private isExternalAiEnabled(side: Side): boolean {
+    return this.externalAiSides[side] === true;
+  }
+
+  private noopCommandFor(): UnitCommand {
+    return {
+      move: { dirX: 0, dirY: 0, allowDescend: false },
+      facing: null,
+      fire: [],
+    };
+  }
+
+  private consumeExternalCommandOrNoop(unit: UnitInstance): UnitCommand {
+    const provided = this.externalCommandsByUnitId.get(unit.id) ?? null;
+    if (provided) {
+      this.externalCommandsByUnitId.delete(unit.id);
+      unit.aiState = "engage";
+      unit.aiDebugShouldEvade = false;
+      unit.aiDebugTargetId = null;
+      unit.aiDebugDecisionPath = "external-ai.command";
+      unit.aiDebugFireBlockReason = null;
+      return provided;
+    }
+    unit.aiState = "engage";
+    unit.aiDebugShouldEvade = false;
+    unit.aiDebugTargetId = null;
+    unit.aiDebugDecisionPath = "external-ai.noop";
+    unit.aiDebugFireBlockReason = "missing-command";
+    unit.aiDebugLastRange = 0;
+    unit.aiDebugLastAngleRad = 0;
+    unit.aiDebugPreferredWeaponSlot = -1;
+    unit.aiDebugLeadTimeS = 0;
+    return this.noopCommandFor();
   }
 
   private isUnitInsideBase(unit: UnitInstance, base: BattleState["playerBase"]): boolean {

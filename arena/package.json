@@ -10,7 +10,12 @@
     "train:composite": "npm run build && node .dist/arena/src/cli.js train-composite",
     "train:spawn": "npm run build && node .dist/arena/src/cli.js train-spawn",
     "replay": "npm run build && node .dist/arena/src/cli.js replay",
-    "serve": "npm run build && node .dist/arena/src/server.js"
+    "serve": "npm run build && node .dist/arena/src/server.js",
+    "serve:grpc": "npm run build && node .dist/arena/src/cli.js serve-grpc"
+  },
+  "dependencies": {
+    "@grpc/grpc-js": "^1.14.0",
+    "@grpc/proto-loader": "^0.8.0"
   },
   "devDependencies": {
     "@types/node": "^24.1.0",
