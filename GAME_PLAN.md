@@ -89,6 +89,8 @@ Current implementation includes dedicated in-app editor tabs where the player ca
 - Editor viewport input now supports right-click delete/erase on the targeted cell/box; right-click drag still pans (click vs drag), and mouse-wheel zoom is supported in both Template Editor and Part Editor.
 - In Template Editor, right-click delete is staged per cell: delete functional first; if no functional remains, delete structure (and attached display) on the next click.
 - Battle, Template Editor, and Part Editor each render to their own canvas while sharing the same viewport window.
+- Template Editor and Part Editor canvas overlays show the current template/part name at top-left.
+- First opening of Template Editor/Part Editor without a valid existing selection starts from an empty editor grid.
 - Template Editor and Part Editor now keep independent pan/view memory; switching tabs restores each editor's last view.
 - Editor view defaults to centered origin (`0,0`) on first load and recenters only when loading a different template/part.
 - Battle rendering and hitboxes now honor stored structure/display/functional coordinates instead of compacting to a fixed index grid.

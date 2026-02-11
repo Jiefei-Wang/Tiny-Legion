@@ -429,7 +429,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
   let testArenaLeaderboardLoading = false;
   let testArenaLeaderboardEntries: TestArenaLeaderboardEntry[] = [];
   let testArenaLeaderboardCompeteMode: "random-pair" | "unranked-vs-random" | "manual-pair" = "random-pair";
-  let testArenaLeaderboardCompeteRuns = 12;
+  let testArenaLeaderboardCompeteRuns = 100;
   let testArenaLeaderboardCompeteBusy = false;
   let testArenaLeaderboardCompeteStatus = "";
   let testArenaLeaderboardManualPairA = "";
@@ -532,7 +532,12 @@ export function bootstrap(options: BootstrapOptions = {}): void {
   let partDesignerOpenFilter: PartOpenFilter = "all";
   let partDesignerTool: PartDesignerTool = "select";
   const STRUCTURE_LAYER_BASE_OPTION = "__structure_layer__";
-  let partDesignerDraft: PartDefinition = clonePartDefinition(createDefaultPartDraft("custom-part", "Custom Part"));
+  let partDesignerDraft: PartDefinition = (() => {
+    const draft = clonePartDefinition(createDefaultPartDraft("custom-part", "Custom Part"));
+    draft.anchor = { x: 0, y: 0 };
+    draft.boxes = [];
+    return draft;
+  })();
   let partDesignerAnchorSlot: number | null = null;
   let partDesignerSelectedSlot: number | null = null;
   let partDesignerSlots: PartDesignerSlot[] = new Array<PartDesignerSlot>(EDITOR_GRID_MAX_SIZE).fill(null);
@@ -563,12 +568,9 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     name: "Custom Unit",
     type: "ground",
     gasCost: 0,
-    structure: [{ material: "basic" }, { material: "basic" }, { material: "basic" }],
-    attachments: [
-      { component: "control", cell: 1 },
-      { component: "engineS", cell: 0 },
-    ],
-    display: [{ kind: "panel", cell: 1 }],
+    structure: [],
+    attachments: [],
+    display: [],
   };
 
   const isUnlimitedResources = (): boolean => debugUnlimitedResources;
@@ -3089,7 +3091,6 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       partDesignerSelectedSlot = partDesignerAnchorSlot;
     }
     const anchorCoord = partDesignerAnchorSlot !== null ? slotToCoord(partDesignerAnchorSlot) : { x: 0, y: 0 };
-    const fallbackSlot = normalizePartDesignerSlotForLayer(partDesignerBrushSlot, partDesignerDraft.layer);
     const boxes = partDesignerSlots
       .map((entry, slotIndex) => ({ entry, slotIndex }))
       .filter((item): item is { entry: NonNullable<PartDesignerSlot>; slotIndex: number } => item.entry !== null)
@@ -3112,25 +3113,8 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         };
       });
     if (boxes.length <= 0) {
-      boxes.push({
-        x: anchorCoord.x,
-        y: anchorCoord.y,
-        occupiesFunctionalSpace: fallbackSlot.occupiesFunctionalSpace,
-        occupiesStructureSpace: fallbackSlot.occupiesStructureSpace,
-        needsStructureBehind: fallbackSlot.needsStructureBehind,
-        isAttachPoint: fallbackSlot.isAttachPoint,
-        isAnchorPoint: true,
-        isShootingPoint: fallbackSlot.isShootingPoint,
-        takesDamage: fallbackSlot.takesDamage,
-        takesFunctionalDamage: fallbackSlot.takesDamage,
-      });
-      const anchorSlot = coordToSlot(anchorCoord.x, anchorCoord.y);
-      if (anchorSlot !== null) {
-        partDesignerSlots[anchorSlot] = clonePartDesignerSlot(fallbackSlot);
-        if (partDesignerSelectedSlot === null) {
-          partDesignerSelectedSlot = anchorSlot;
-        }
-      }
+      partDesignerAnchorSlot = null;
+      partDesignerSelectedSlot = null;
     }
     const toRelativeOffsets = (slots: Set<number>): Array<{ x: number; y: number }> => {
       return Array.from(slots)
@@ -3365,10 +3349,11 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     const validation = validatePartDefinitionDetailed(partDesignerDraft);
     context.fillStyle = "#dbe8f6";
     context.font = "14px Trebuchet MS";
-    context.fillText(`Part Designer | Grid ${editorGridCols}x${editorGridRows} | Tool ${partDesignerTool}`, 18, 26);
-    context.fillText("Left-click: apply tool | Right-click: erase | Right-drag: pan | Mouse wheel: zoom.", 18, 46);
+    context.fillText(`Part: ${partDesignerDraft.name}`, 18, 26);
+    context.fillText(`Part Designer | Grid ${editorGridCols}x${editorGridRows} | Tool ${partDesignerTool}`, 18, 46);
+    context.fillText("Left-click: apply tool | Right-click: erase | Right-drag: pan | Mouse wheel: zoom.", 18, 66);
     context.fillStyle = validation.errors.length > 0 ? "#ffd1c1" : "#bde6c6";
-    context.fillText(`Errors ${validation.errors.length} | Warnings ${validation.warnings.length}`, 18, 66);
+    context.fillText(`Errors ${validation.errors.length} | Warnings ${validation.warnings.length}`, 18, 86);
 
     for (let row = 0; row < editorGridRows; row += 1) {
       for (let col = 0; col < editorGridCols; col += 1) {
@@ -3479,8 +3464,9 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     const grid = getEditorGridRect();
     context.fillStyle = "#dbe8f6";
     context.font = "14px Trebuchet MS";
-    context.fillText(`Grid ${editorGridCols}x${editorGridRows} | Layer ${editorLayer.toUpperCase()} ${editorDeleteMode ? "| DELETE" : "| PLACE"}`, 18, 26);
-    context.fillText("Left-click: place/delete | Right-click: delete (functional first) | Right-drag: pan | Mouse wheel: zoom | Origin: (0,0).", 18, 46);
+    context.fillText(`Template: ${editorDraft.name}`, 18, 26);
+    context.fillText(`Grid ${editorGridCols}x${editorGridRows} | Layer ${editorLayer.toUpperCase()} ${editorDeleteMode ? "| DELETE" : "| PLACE"}`, 18, 46);
+    context.fillText("Left-click: place/delete | Right-click: delete (functional first) | Right-drag: pan | Mouse wheel: zoom | Origin: (0,0).", 18, 66);
 
     if (isCurrentEditorSelectionDirectional()) {
       context.fillStyle = "rgba(28, 43, 61, 0.92)";
@@ -4193,10 +4179,10 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       `;
     } else {
       if (partDesignerSelectedId === null) {
-        partDesignerSelectedId = (partDesignerDraft.id || parts[0]?.id) ?? null;
+        partDesignerSelectedId = partDesignerDraft.id || null;
       }
       if (partDesignerSelectedId !== partDesignerDraft.id && !parts.some((part) => part.id === partDesignerSelectedId)) {
-        partDesignerSelectedId = parts[0]?.id ?? null;
+        partDesignerSelectedId = partDesignerDraft.id || null;
       }
       const partOpenFilterOptions: Array<{ value: PartOpenFilter; label: string }> = [{ value: "all", label: "All" }];
       if (parts.some((part) => part.layer === "structure")) {
@@ -4702,7 +4688,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       const raw = getOptionalElement<HTMLInputElement>("#leaderboardCompeteRuns")?.value ?? "";
       const parsed = Number.parseInt(raw, 10);
       if (!Number.isFinite(parsed)) {
-        testArenaLeaderboardCompeteRuns = 12;
+        testArenaLeaderboardCompeteRuns = 100;
       } else {
         testArenaLeaderboardCompeteRuns = Math.max(1, Math.min(200, parsed));
       }
@@ -5167,10 +5153,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       editorTemplateDialogOpen = false;
       editorTemplateDialogSelectedId = editorDraft.id;
       recenterEditorViewForScreen("templateEditor");
-      loadTemplateIntoEditorSlots({
-        ...editorDraft,
-        structure: [{ material: "basic" }, { material: "basic" }, { material: "basic" }],
-      });
+      loadTemplateIntoEditorSlots(editorDraft);
       ensureEditorSelectionForLayer();
       renderPanels();
     });
@@ -5766,6 +5749,8 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       const newName = "Custom Part";
       const nextId = makeUniquePartId(slugifyPartId(newName));
       partDesignerDraft = createDefaultPartDraft(nextId, newName);
+      partDesignerDraft.anchor = { x: 0, y: 0 };
+      partDesignerDraft.boxes = [];
       partDesignerLastFunctionalBaseComponent = partDesignerDraft.baseComponent;
       partDesignerCategoryEdited = false;
       partDesignerSubcategoryEdited = false;
@@ -5839,7 +5824,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
   });
   tabs.partEditor.addEventListener("click", () => {
     setScreen("partEditor");
-    const selected = parts.find((part) => part.id === partDesignerSelectedId) ?? parts[0];
+    const selected = parts.find((part) => part.id === partDesignerSelectedId);
     if (selected) {
       partDesignerSelectedId = selected.id;
       loadPartIntoDesignerSlots(selected);
@@ -6076,7 +6061,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
   debugPartHpChk.addEventListener("change", applyDebugFlags);
   btnOpenPartDesigner.addEventListener("click", () => {
     setScreen("partEditor");
-    const selected = parts.find((part) => part.id === partDesignerSelectedId) ?? parts[0];
+    const selected = parts.find((part) => part.id === partDesignerSelectedId);
     if (selected) {
       partDesignerSelectedId = selected.id;
       loadPartIntoDesignerSlots(selected);
@@ -6325,7 +6310,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
   renderPanels();
   void refreshPartsFromStore()
     .then(async () => {
-      const selectedPart = parts.find((part) => part.id === partDesignerSelectedId) ?? parts[0];
+      const selectedPart = parts.find((part) => part.id === partDesignerSelectedId);
       if (selectedPart) {
         partDesignerSelectedId = selectedPart.id;
         loadPartIntoDesignerSlots(selectedPart);
