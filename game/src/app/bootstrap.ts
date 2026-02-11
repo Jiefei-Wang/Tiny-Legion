@@ -379,6 +379,19 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         },
       },
     },
+    {
+      id: "builtin-dt-atan-default-composite",
+      label: "builtin: dt composite (atan shoot)",
+      spec: {
+        familyId: "composite",
+        params: {},
+        composite: {
+          target: { familyId: "dt-target", params: {} },
+          movement: { familyId: "dt-movement", params: {} },
+          shoot: { familyId: "dt-shoot-atan", params: {} },
+        },
+      },
+    },
   ];
   let testArenaCompositeModelSelections: Record<TestArenaSide, string> = {
     player: "custom-components",
@@ -396,6 +409,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     shoot: [
       { id: "baseline-shoot", label: "builtin: baseline-shoot", spec: { familyId: "baseline-shoot", params: {} } },
       { id: "dt-shoot-default", label: "builtin: dt-shoot (default)", spec: { familyId: "dt-shoot", params: {} } },
+      { id: "dt-shoot-atan-default", label: "builtin: dt-shoot-atan (default)", spec: { familyId: "dt-shoot-atan", params: {} } },
     ],
   };
   let testArenaAiOptions: Record<TestArenaAiModuleKind, TestArenaAiOption[]> = {
@@ -1159,6 +1173,20 @@ export function bootstrap(options: BootstrapOptions = {}): void {
               target: { familyId: "dt-target", params: {} },
               movement: { familyId: "dt-movement", params: {} },
               shoot: { familyId: "dt-shoot", params: {} },
+            },
+          },
+        },
+      testArenaCompositeModelOptions.find((entry) => entry.id === "builtin-dt-atan-default-composite")
+        ?? {
+          id: "builtin-dt-atan-default-composite",
+          label: "builtin: dt composite (atan shoot)",
+          spec: {
+            familyId: "composite",
+            params: {},
+            composite: {
+              target: { familyId: "dt-target", params: {} },
+              movement: { familyId: "dt-movement", params: {} },
+              shoot: { familyId: "dt-shoot-atan", params: {} },
             },
           },
         },

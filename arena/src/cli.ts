@@ -52,6 +52,13 @@ function asModuleSource(value: unknown, fallback: "baseline" | "new" | `trained:
   return fallback;
 }
 
+function asShootFamily(value: unknown, fallback: "dt-shoot" | "dt-shoot-atan"): "dt-shoot" | "dt-shoot-atan" {
+  if (value === "dt-shoot" || value === "dt-shoot-atan") {
+    return value;
+  }
+  return fallback;
+}
+
 async function main(): Promise<void> {
   const { cmd, args } = parseArgs(process.argv.slice(2));
   const defaults = loadArenaDefaults();
@@ -102,6 +109,7 @@ async function main(): Promise<void> {
     const targetSource = asModuleSource(args.targetSource, "baseline");
     const movementSource = asModuleSource(args.movementSource, "baseline");
     const shootSource = asModuleSource(args.shootSource, "baseline");
+    const shootFamily = asShootFamily(args.shootFamily ?? args["shoot-family"], "dt-shoot");
     const quiet = args.quiet === true || args.quiet === "true";
     await runCompositeTraining({
       seed0,
@@ -123,6 +131,7 @@ async function main(): Promise<void> {
       targetSource,
       movementSource,
       shootSource,
+      shootFamily,
       quiet,
     });
     return;
@@ -150,6 +159,7 @@ async function main(): Promise<void> {
       "  match --playerComposite player.json --enemyComposite enemy.json --seed 123 --out match.json",
       "  train-composite --scope all --generations 20 --population 24 --phaseSeeds 16 --nUnits 4",
       "  train-composite --scope shoot --shootSource new --movementSource baseline --targetSource baseline",
+      "  train-composite --scope shoot --shootSource new --shootFamily dt-shoot-atan",
       "  train-composite --phaseConfig composite-training.phases.json",
       "  replay --file match.json",
       "",

@@ -28,12 +28,18 @@ Current available model family per component:
 - `shoot`
   - `baseline-shoot`
   - `dt-shoot`
+  - `dt-shoot-atan`
 
 For `train-composite`, each component source can be:
 
 - `baseline`
 - `new` (new trainable DT params initialized from schema defaults)
 - `trained:<path>` (load from existing trained artifact)
+
+Shoot module family can be selected with:
+
+- `--shootFamily dt-shoot` (default)
+- `--shootFamily dt-shoot-atan`
 
 Composite phases (`p1`..`p4`) are loaded from:
 
@@ -76,6 +82,7 @@ npm --prefix arena run train:composite -- \
   --targetSource new \
   --movementSource baseline \
   --shootSource new \
+  --shootFamily dt-shoot-atan \
   --phaseSeeds 16 \
   --generations 20 \
   --population 24 \
@@ -101,7 +108,8 @@ npm --prefix arena run train:composite -- \
   --scope shoot \
   --targetSource baseline \
   --movementSource baseline \
-  --shootSource new
+  --shootSource new \
+  --shootFamily dt-shoot-atan
 ```
 
 ## Seed From Existing Trained Composite

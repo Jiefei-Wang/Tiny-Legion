@@ -198,6 +198,7 @@ arena/src/
 Notes:
 
 - Composite module families are decision-tree/rule based (`baseline-*` + `dt-*`), with no neural/ONNX runtime path.
+- Shoot module families now include `dt-shoot` and `dt-shoot-atan` (atan2-based correction features), both under the composite decision-tree path.
 - `run-composite-training.ts` performs phased headless compare/optimization over decision-tree module parameters.
 
 Arena-specific architecture notes:

@@ -74,6 +74,17 @@ export const DT_SHOOT_SCHEMA: ParamSchema = {
   "shoot.angleWeightYOverX2": { kind: "number", min: -1.8, max: 1.8, def: 0.0, sigma: 0.2 },
 };
 
+export const DT_SHOOT_ATAN_SCHEMA: ParamSchema = {
+  "shoot.strategy": { kind: "int", min: 0, max: 2, def: 0, step: 1, mutateRate: 0.25 },
+  "shoot.maxRangeRatio": { kind: "number", min: 0.25, max: 1.2, def: 1.0, sigma: 0.12 },
+  "shoot.minIntegrityToFire": { kind: "number", min: 0.0, max: 1.0, def: 0.15, sigma: 0.08 },
+  "shoot.weaponSpeed": { kind: "number", min: 80, max: 2400, def: 900, sigma: 120 },
+  "shoot.angleWeightStdX": { kind: "number", min: -1.8, max: 1.8, def: 0.0, sigma: 0.2 },
+  "shoot.angleWeightStdY": { kind: "number", min: -1.8, max: 1.8, def: 0.0, sigma: 0.2 },
+  "shoot.angleWeightYOverX": { kind: "number", min: -1.8, max: 1.8, def: 0.0, sigma: 0.2 },
+  "shoot.angleWeightYOverX2": { kind: "number", min: -1.8, max: 1.8, def: 0.0, sigma: 0.2 },
+};
+
 export function getModuleSchema(kind: ModuleKind): ParamSchema {
   if (kind === "target") return DT_TARGET_SCHEMA;
   if (kind === "movement") return DT_MOVEMENT_SCHEMA;
@@ -290,6 +301,96 @@ function createDecisionTreeShootAi(params: Params): ShootAiModule {
   };
 }
 
+function createDecisionTreeShootAtanAi(params: Params): ShootAiModule {
+  const baseline = createBaselineShootAi();
+  return {
+    decideShoot: (input, target, movement) => {
+      const strategy = Math.max(0, Math.min(2, pickInt(params, "shoot.strategy", 0)));
+      const maxRangeRatio = pickNumber(params, "shoot.maxRangeRatio", 1.0);
+      const minIntegrityToFire = pickNumber(params, "shoot.minIntegrityToFire", 0.15);
+      const weaponSpeed = Math.max(1, pickNumber(params, "shoot.weaponSpeed", 900));
+      const angleWeightStdX = pickNumber(params, "shoot.angleWeightStdX", 0.0);
+      const angleWeightStdY = pickNumber(params, "shoot.angleWeightStdY", 0.0);
+      const angleWeightYOverX = pickNumber(params, "shoot.angleWeightYOverX", 0.0);
+      const angleWeightYOverX2 = pickNumber(params, "shoot.angleWeightYOverX2", 0.0);
+
+      const decision = baseline.decideShoot(input, target, movement);
+      if (!decision.firePlan) {
+        return decision;
+      }
+
+      const stdX = (target.attackPoint.x - input.unit.x) / weaponSpeed;
+      const stdY = (target.attackPoint.y - input.unit.y) / weaponSpeed;
+      const angleStd = Math.atan2(stdY, stdX);
+      const absStdX = Math.max(1e-6, Math.abs(stdX));
+      const angleCurve = Math.atan2(stdY, absStdX * absStdX);
+      const angleDelta = (
+        stdX * angleWeightStdX
+        + stdY * angleWeightStdY
+        + angleStd * angleWeightYOverX
+        + angleCurve * angleWeightYOverX2
+      );
+      const adjustedAngleRaw = decision.firePlan.angleRad + angleDelta;
+      const adjustedAngle = Number.isFinite(adjustedAngleRaw) ? adjustedAngleRaw : decision.firePlan.angleRad;
+      const adjustedDecision = {
+        ...decision,
+        firePlan: {
+          ...decision.firePlan,
+          angleRad: adjustedAngle,
+        },
+      };
+
+      if (strategy === 0) {
+        return { ...adjustedDecision, debugTag: "shoot.dt-atan.s0" };
+      }
+
+      const primary = target.rankedTargets[0] ?? null;
+      if (primary && !canHitByAxis(input.unit, primary.y, primary.type)) {
+        return {
+          firePlan: null,
+          fireBlockedReason: "axis-mismatch",
+          debugTag: `shoot.dt-atan.s${strategy}.blocked-axis`,
+        };
+      }
+
+      const integrity = structureIntegrity(input.unit);
+      const distance = Math.hypot(target.attackPoint.x - input.unit.x, target.attackPoint.y - input.unit.y);
+      if (strategy === 1) {
+        if (integrity < minIntegrityToFire) {
+          return {
+            firePlan: null,
+            fireBlockedReason: "low-integrity",
+            debugTag: "shoot.dt-atan.s1.blocked-integrity",
+          };
+        }
+        if (distance > decision.firePlan.effectiveRange * maxRangeRatio) {
+          return {
+            firePlan: null,
+            fireBlockedReason: "range-hold",
+            debugTag: "shoot.dt-atan.s1.blocked-range",
+          };
+        }
+        return {
+          ...adjustedDecision,
+          debugTag: "shoot.dt-atan.s1",
+        };
+      }
+
+      if (adjustedDecision.firePlan.leadTimeS > 0.9 && !movement.shouldEvade) {
+        return {
+          firePlan: null,
+          fireBlockedReason: "lead-too-long",
+          debugTag: "shoot.dt-atan.s2.blocked-lead",
+        };
+      }
+      return {
+        ...adjustedDecision,
+        debugTag: "shoot.dt-atan.s2",
+      };
+    },
+  };
+}
+
 function createTargetModule(spec: CompositeModuleSpec): TargetAiModule {
   if (spec.familyId === "baseline-target") {
     return createBaselineTargetAi();
@@ -316,6 +417,9 @@ function createShootModule(spec: CompositeModuleSpec): ShootAiModule {
   }
   if (spec.familyId === "dt-shoot") {
     return createDecisionTreeShootAi(spec.params ?? {});
+  }
+  if (spec.familyId === "dt-shoot-atan") {
+    return createDecisionTreeShootAtanAi(spec.params ?? {});
   }
   throw new Error(`Unsupported shoot AI family: ${spec.familyId}`);
 }

@@ -10,6 +10,7 @@ import { crossover, defaultParams, mutate, randomParams } from "./param-genetics
 type ModuleKind = "shoot" | "movement" | "target";
 type TrainScope = ModuleKind | "all";
 type ModuleSourceArg = "baseline" | "new" | `trained:${string}`;
+type ShootFamilyId = "dt-shoot" | "dt-shoot-atan";
 
 type Candidate = {
   params: Params;
@@ -66,8 +67,8 @@ function buildSeedList(seed0: number, count: number): number[] {
   return out;
 }
 
-function familyIdFor(kind: ModuleKind): string {
-  if (kind === "shoot") return "dt-shoot";
+function familyIdFor(kind: ModuleKind, shootFamily: ShootFamilyId): string {
+  if (kind === "shoot") return shootFamily;
   if (kind === "movement") return "dt-movement";
   return "dt-target";
 }
@@ -214,6 +215,7 @@ function parseModuleSpecFile(path: string, moduleKind: ModuleKind): CompositeMod
 function resolveSource(
   moduleKind: ModuleKind,
   source: ModuleSourceArg,
+  shootFamily: ShootFamilyId,
 ): CompositeModuleSpec {
   if (source === "baseline") {
     return baselineCompositeConfig()[moduleKind];
@@ -221,7 +223,7 @@ function resolveSource(
   if (source === "new") {
     const schema = getModuleSchema(moduleKind);
     return {
-      familyId: familyIdFor(moduleKind),
+      familyId: familyIdFor(moduleKind, shootFamily),
       params: defaultParams(schema),
     };
   }
@@ -355,14 +357,14 @@ function applyEloStep(ra: number, rb: number, outcomeA: 0 | 0.5 | 1, pairRounds:
   return ra + k * (outcomeA - ea);
 }
 
-function withCandidate(base: CompositeSnapshot, kind: ModuleKind, params: Params): CompositeSnapshot {
+function withCandidate(base: CompositeSnapshot, kind: ModuleKind, params: Params, shootFamily: ShootFamilyId): CompositeSnapshot {
   if (kind === "shoot") {
-    return { ...base, shoot: { familyId: familyIdFor(kind), params } };
+    return { ...base, shoot: { familyId: familyIdFor(kind, shootFamily), params } };
   }
   if (kind === "movement") {
-    return { ...base, movement: { familyId: familyIdFor(kind), params } };
+    return { ...base, movement: { familyId: familyIdFor(kind, shootFamily), params } };
   }
-  return { ...base, target: { familyId: familyIdFor(kind), params } };
+  return { ...base, target: { familyId: familyIdFor(kind, shootFamily), params } };
 }
 
 export async function runCompositeTraining(opts: {
@@ -385,8 +387,10 @@ export async function runCompositeTraining(opts: {
   targetSource?: ModuleSourceArg;
   movementSource?: ModuleSourceArg;
   shootSource?: ModuleSourceArg;
+  shootFamily?: ShootFamilyId;
   quiet?: boolean;
 }): Promise<void> {
+  const shootFamily: ShootFamilyId = opts.shootFamily === "dt-shoot-atan" ? "dt-shoot-atan" : "dt-shoot";
   const scope: TrainScope = opts.scope ?? "all";
   const order: ModuleKind[] = scope === "all" ? ["shoot", "movement", "target"] : [scope];
 
@@ -397,9 +401,9 @@ export async function runCompositeTraining(opts: {
     best.shoot = parseModuleSpecFile(resolve(process.cwd(), opts.seedCompositePath), "shoot");
   }
 
-  best.target = resolveSource("target", opts.targetSource ?? "baseline");
-  best.movement = resolveSource("movement", opts.movementSource ?? "baseline");
-  best.shoot = resolveSource("shoot", opts.shootSource ?? "baseline");
+  best.target = resolveSource("target", opts.targetSource ?? "baseline", shootFamily);
+  best.movement = resolveSource("movement", opts.movementSource ?? "baseline", shootFamily);
+  best.shoot = resolveSource("shoot", opts.shootSource ?? "baseline", shootFamily);
 
   const normalizeName = (familyId: string): string => {
     const normalized = familyId.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
@@ -416,7 +420,7 @@ export async function runCompositeTraining(opts: {
   try {
     for (const moduleKind of order) {
       const schema = getModuleSchema(moduleKind);
-      let currentBestParams = best[moduleKind].familyId === familyIdFor(moduleKind)
+      let currentBestParams = best[moduleKind].familyId === familyIdFor(moduleKind, shootFamily)
         ? best[moduleKind].params
         : defaultParams(schema);
 
@@ -454,7 +458,7 @@ export async function runCompositeTraining(opts: {
             .sort((a, b) => Math.abs(a.score - referenceScore) - Math.abs(b.score - referenceScore));
           const nearbyOpponents = sortedOpponents.slice(0, Math.max(1, phase.leaderboard?.opponentCount ?? 6));
           for (const params of pop) {
-            const candidateModules = withCandidate(best, moduleKind, params);
+            const candidateModules = withCandidate(best, moduleKind, params, shootFamily);
             let agg;
             let eloScore = referenceScore;
             if (phase.opponentMode === "leaderboard-nearby" && nearbyOpponents.length > 0) {
@@ -539,10 +543,10 @@ export async function runCompositeTraining(opts: {
           );
         }
 
-        best = withCandidate(best, moduleKind, currentBestParams);
+        best = withCandidate(best, moduleKind, currentBestParams, shootFamily);
         writeFileSync(
           resolve(phaseDir, "best-module.json"),
-          JSON.stringify({ familyId: familyIdFor(moduleKind), params: currentBestParams }, null, 2),
+          JSON.stringify({ familyId: familyIdFor(moduleKind, shootFamily), params: currentBestParams }, null, 2),
           "utf8",
         );
       }

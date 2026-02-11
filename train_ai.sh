@@ -28,6 +28,7 @@ quiet="false"
 target_source="baseline"
 movement_source="baseline"
 shoot_source="baseline"
+shoot_family="dt-shoot"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -50,6 +51,7 @@ while [[ $# -gt 0 ]]; do
     --target-source) target_source="$2"; shift 2 ;;
     --movement-source) movement_source="$2"; shift 2 ;;
     --shoot-source) shoot_source="$2"; shift 2 ;;
+    --shoot-family) shoot_family="$2"; shift 2 ;;
     *)
       echo "Unknown option: $1"
       exit 1
@@ -70,6 +72,7 @@ if [[ "$command" == "help" ]]; then
   echo "  --target-source <source>    baseline | new | trained:<path>"
   echo "  --movement-source <source>  baseline | new | trained:<path>"
   echo "  --shoot-source <source>     baseline | new | trained:<path>"
+  echo "  --shoot-family <id>         dt-shoot | dt-shoot-atan"
   echo "  --phase-seeds <n> --generations <n> --population <n> --parallel <n> --n-units <n>"
   exit 0
 fi
@@ -83,7 +86,7 @@ if [[ "$command" != "shoot" && "$command" != "movement" && "$command" != "target
   exit 1
 fi
 
-cmd=(npm --prefix "${ROOT_DIR}/arena" run train:composite -- --scope "$scope" --phaseSeeds "$phase_seeds" --generations "$generations" --population "$population" --parallel "$parallel" --maxSimSeconds "$max_sim_seconds" --nodeDefense "$node_defense" --baseHp "$base_hp" --playerGas "$player_gas" --enemyGas "$enemy_gas" --spawnBurst "$spawn_burst" --spawnMaxActive "$spawn_max_active" --nUnits "$n_units" --targetSource "$target_source" --movementSource "$movement_source" --shootSource "$shoot_source")
+cmd=(npm --prefix "${ROOT_DIR}/arena" run train:composite -- --scope "$scope" --phaseSeeds "$phase_seeds" --generations "$generations" --population "$population" --parallel "$parallel" --maxSimSeconds "$max_sim_seconds" --nodeDefense "$node_defense" --baseHp "$base_hp" --playerGas "$player_gas" --enemyGas "$enemy_gas" --spawnBurst "$spawn_burst" --spawnMaxActive "$spawn_max_active" --nUnits "$n_units" --targetSource "$target_source" --movementSource "$movement_source" --shootSource "$shoot_source" --shootFamily "$shoot_family")
 
 if [[ -n "$seed_composite" ]]; then cmd+=(--seedComposite "$seed_composite"); fi
 if [[ -n "$phase_config" ]]; then cmd+=(--phaseConfig "$phase_config"); fi
