@@ -31,6 +31,7 @@ import {
   fetchDefaultPartsFromStore,
   fetchUserPartsFromStore,
   getPartFootprintOffsets,
+  isPartCompatibleWithUnitType,
   mergePartCatalogs,
   normalizePartAttachmentRotate,
   resolvePartDefinitionForAttachment,
@@ -2383,9 +2384,6 @@ export function bootstrap(options: BootstrapOptions = {}): void {
   const updateSelectedInfo = (): void => {
     if (isEditorScreen()) {
       if (isPartEditorScreen()) {
-        const validation = validatePartDefinitionDetailed(partDesignerDraft);
-        const errorSummary = validation.errors.length > 0 ? validation.errors.join(" | ") : "none";
-        const warningSummary = validation.warnings.length > 0 ? validation.warnings.join(" | ") : "none";
         const selectedSlot = partDesignerSelectedSlot;
         const selectedCoord = selectedSlot !== null ? slotToCoord(selectedSlot) : null;
         const selectedEntry = selectedSlot !== null ? partDesignerSlots[selectedSlot] : null;
@@ -2433,8 +2431,6 @@ export function bootstrap(options: BootstrapOptions = {}): void {
             <label class="small"><input id="partBoxAnchor" type="checkbox" ${selectedSlot !== null && partDesignerAnchorSlot === selectedSlot ? "checked" : ""} ${selectedSlot === null ? "disabled" : ""} /> Anchor point</label>
             <label class="small"><input id="partBoxShootingPoint" type="checkbox" ${resolvedEntry.isShootingPoint ? "checked" : ""} ${selectedSlot === null ? "disabled" : ""} /> Shooting point</label>
           </div>
-          <div class="small bad">Errors (${validation.errors.length}): ${errorSummary}</div>
-          <div class="small warn">Warnings (${validation.warnings.length}): ${warningSummary}</div>
         `;
         return;
       }
@@ -2931,7 +2927,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       return items;
     }
     if (editorLayer === "functional") {
-      const functionalParts = parts.filter((part) => part.layer === "functional");
+      const functionalParts = parts.filter((part) => part.layer === "functional" && isPartCompatibleWithUnitType(part, editorDraft.type));
       const hasExplicitByBase = new Set<ComponentId>();
       for (const part of functionalParts) {
         const isImplicitFallback = (part.tags ?? []).includes("implicit") && part.id === part.baseComponent;
@@ -3354,6 +3350,32 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     context.fillText("Left-click: apply tool | Right-click: erase | Right-drag: pan | Mouse wheel: zoom.", 18, 66);
     context.fillStyle = validation.errors.length > 0 ? "#ffd1c1" : "#bde6c6";
     context.fillText(`Errors ${validation.errors.length} | Warnings ${validation.warnings.length}`, 18, 86);
+
+    const lineCount = validation.errors.length + validation.warnings.length + 2;
+    const issuesHeight = Math.max(34, 16 + Math.min(10, lineCount) * 14);
+    const issuesWidth = 420;
+    const issuesX = drawCanvas.width - issuesWidth - 16;
+    const issuesY = drawCanvas.height - issuesHeight - 14;
+    context.fillStyle = "rgba(21, 31, 45, 0.94)";
+    context.fillRect(issuesX, issuesY, issuesWidth, issuesHeight);
+    context.strokeStyle = validation.errors.length > 0 ? "rgba(224, 145, 111, 0.96)" : "rgba(151, 214, 165, 0.92)";
+    context.lineWidth = 1;
+    context.strokeRect(issuesX, issuesY, issuesWidth, issuesHeight);
+    context.fillStyle = validation.errors.length > 0 ? "#ffd1c1" : "#bde6c6";
+    context.font = "12px Trebuchet MS";
+    context.fillText(`Errors (${validation.errors.length})`, issuesX + 8, issuesY + 16);
+    const shownErrors = validation.errors.slice(0, 4);
+    for (let i = 0; i < shownErrors.length; i += 1) {
+      context.fillText(`- ${shownErrors[i]}`, issuesX + 8, issuesY + 30 + i * 14);
+    }
+    const warningHeaderY = issuesY + 30 + shownErrors.length * 14;
+    context.fillStyle = "#ffd58c";
+    context.fillText(`Warnings (${validation.warnings.length})`, issuesX + 8, warningHeaderY);
+    context.fillStyle = "#ffe7b8";
+    const shownWarnings = validation.warnings.slice(0, Math.max(0, 8 - shownErrors.length));
+    for (let i = 0; i < shownWarnings.length; i += 1) {
+      context.fillText(`- ${shownWarnings[i]}`, issuesX + 8, warningHeaderY + 14 + i * 14);
+    }
 
     for (let row = 0; row < editorGridRows; row += 1) {
       for (let col = 0; col < editorGridCols; col += 1) {

@@ -2,10 +2,37 @@ import { COMPONENTS } from "../config/balance/weapons.ts";
 import { MATERIALS } from "../config/balance/materials.ts";
 import { normalizeRotateQuarter, getPartFootprintCells } from "./part-geometry.ts";
 import { validatePartDefinitionDetailed } from "./part-validation.ts";
-import type { ComponentId, MaterialId, PartDefinition } from "../types.ts";
+import type { ComponentId, MaterialId, PartDefinition, UnitType } from "../types.ts";
 
 export { normalizeRotateQuarter, rotateOffsetByQuarter, getPartFootprintCells } from "./part-geometry.ts";
 export { validatePartDefinitionDetailed, validatePartDefinition } from "./part-validation.ts";
+
+function collectPartTags(part: PartDefinition): Set<string> {
+  const tags = part.tags ?? [];
+  const normalized = tags
+    .map((entry) => entry.trim().toLowerCase())
+    .filter((entry) => entry.length > 0);
+  return new Set(normalized);
+}
+
+export function isPartCompatibleWithUnitType(part: PartDefinition, unitType: UnitType): boolean {
+  const tags = collectPartTags(part);
+  const hasGroundTag = tags.has("ground");
+  const hasAirTag = tags.has("air");
+  if (hasGroundTag || hasAirTag) {
+    return unitType === "ground" ? hasGroundTag : hasAirTag;
+  }
+
+  const isEngine = part.properties?.isEngine === true || COMPONENTS[part.baseComponent].type === "engine";
+  if (!isEngine) {
+    return true;
+  }
+  const engineType = part.properties?.engineType ?? COMPONENTS[part.baseComponent].propulsion?.platform;
+  if (engineType === "ground" || engineType === "air") {
+    return engineType === unitType;
+  }
+  return true;
+}
 
 function isComponentId(value: unknown): value is ComponentId {
   return typeof value === "string" && value in COMPONENTS;
@@ -233,6 +260,9 @@ export function createImplicitPartDefinition(component: ComponentId): PartDefini
     takesDamage: true,
     takesFunctionalDamage: true,
   }));
+  const platformTag = stats.type === "engine" && (stats.propulsion?.platform === "ground" || stats.propulsion?.platform === "air")
+    ? [stats.propulsion.platform]
+    : [];
   return {
     id: component,
     name: component,
@@ -270,7 +300,7 @@ export function createImplicitPartDefinition(component: ComponentId): PartDefini
       loaderCooldownMultiplier: stats.type === "loader" ? stats.loader?.loadMultiplier : undefined,
       hasCoreTuning: false,
     },
-    tags: ["implicit"],
+    tags: ["implicit", ...platformTag],
   };
 }
 

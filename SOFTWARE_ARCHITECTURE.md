@@ -414,6 +414,7 @@ Editor UX implementation details:
 - Right-side palette renders component cards (placeholder thumbnail + label + type) in a scrollable list with hover detail text.
 - Active layer (`structure`, `functional`, `display`) is switched from right-panel controls above the part palette.
 - Template editor functional palette uses part catalog entries (not only hardcoded component IDs).
+- Template editor functional palette applies template-type compatibility filtering: `air`-tagged parts are hidden on ground templates, `ground`-tagged parts are hidden on air templates, and untagged parts remain shared.
 - Template editor structure palette is also part-catalog driven (file-backed structure-material parts mapped to selectable materials), not a direct `MATERIALS` enumeration.
 - Template gas cost is computed from part gas values by default (material structure parts + functional parts), with optional per-template explicit gas override.
 - Part Designer supports optional `stats.gasCost` override per part; deleting the field reverts to default gas calculation from base component/material defaults.

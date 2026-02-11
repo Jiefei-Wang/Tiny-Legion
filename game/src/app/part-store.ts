@@ -9,6 +9,7 @@ export {
   validatePartDefinition,
   validatePartDefinitionDetailed,
   getPartFootprintOffsets,
+  isPartCompatibleWithUnitType,
   normalizePartAttachmentRotate,
 } from "../../../packages/game-core/src/parts/part-schema.ts";
 

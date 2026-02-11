@@ -76,6 +76,7 @@ Current implementation includes dedicated in-app editor tabs where the player ca
 - Use a resizable editor grid (up to `10x10`) for placement/removal by cell.
 - Choose parts/components from a layer-specific side palette (placeholder image cards + hover info).
 - Template Editor structure palette is sourced from file-backed structure-material part definitions (via part catalog), not directly from raw material config enumeration.
+- Template Editor functional palette now applies unit-type compatibility filtering: parts tagged `air` only show for air templates, parts tagged `ground` only show for ground templates, and untagged parts remain available to both.
 - Toggle delete mode to remove items on the active layer.
 - Open any existing template from an `Open` window, create a template copy using one-click `Copy` (`-copy` postfix), or `Delete` file-backed entries from the same list.
 - Template IDs are auto-generated and hidden from editor UI (not user-editable).
@@ -120,7 +121,7 @@ Current implementation includes dedicated in-app editor tabs where the player ca
 - UI split:
   - left panel edits part-level properties grouped as:
     - `Editor Meta`: category (dropdown) + subcategory (free text),
-    - `Part Properties`: tags + checkbox-enabled property groups with conditional parameter inputs (instead of always showing all parameters),
+    - `Part Properties`: tags + checkbox-enabled property groups with conditional parameter inputs (instead of always showing all parameters; `air`/`ground` tags mark template-type-specific palette visibility),
   - right panel edits per-box properties of the currently selected grid cell.
 - Part Designer box editing keeps a persistent box-property brush: right-click erase does not reset the next created box to defaults, so repeated left-click placements reuse the current box property profile.
 - Part Designer per-cell box creation/deletion is driven by canvas clicks (left apply / right erase); the old `Create Box` and `Delete Box` buttons are removed from the right panel.
