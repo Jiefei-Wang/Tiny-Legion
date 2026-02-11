@@ -4076,9 +4076,15 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         const losses = Number.isFinite(entry.losses) ? Number(entry.losses) : 0;
         const ties = Number.isFinite(entry.ties) ? Number(entry.ties) : 0;
         const rankTag = entry.isUnranked ? `<span class="small warn">unranked</span>` : "";
+        const spec = entry.spec?.composite;
+        const targetName = spec?.target?.familyId ?? "-";
+        const movementName = spec?.movement?.familyId ?? "-";
+        const shootName = spec?.shoot?.familyId ?? "-";
+        const components = `${targetName} / ${movementName} / ${shootName}`;
         return `<tr>
           <td>${index + 1}</td>
           <td>${escapeHtml(entry.runId)} ${rankTag}</td>
+          <td>${escapeHtml(components)}</td>
           <td>${score}</td>
           <td>${winRate}</td>
           <td>${wins}/${losses}/${ties}</td>
@@ -4137,6 +4143,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
             <tr>
               <th style="text-align:left;">#</th>
               <th style="text-align:left;">Run</th>
+              <th style="text-align:left;">Components (Target / Move / Shoot)</th>
               <th style="text-align:left;">Score</th>
               <th style="text-align:left;">Win Rate</th>
               <th style="text-align:left;">W/L/T</th>
