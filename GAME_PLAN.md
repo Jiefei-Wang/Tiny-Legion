@@ -615,6 +615,8 @@ The current playable implementation already includes:
 - Grid changes apply immediately (no manual apply step).
 - Left-side mode menu includes a dedicated `Leaderboard` screen (new row in the mode grid) that shows ranked composite run scores.
 - Leaderboard rating is match-based: each composite run starts at score `100`, then head-to-head results adjust both models using an Elo-style expected-outcome update (larger score gaps produce larger swing factors).
+- Leaderboard competition runtime uses `p4-leaderboard` scenario settings from `arena/composite-training.phases.json` (template filters + battlefield size/ground-height), so rank battles align with training phase-4 conditions.
+- Elo uses pairwise diminishing-K updates (same two models -> progressively smaller K), which naturally converges under repeated head-to-head loops without hard score caps.
 - Leaderboard panel includes quick competition controls: `random pair`, `unranked vs random`, and `manual pair` modes plus configurable run count.
 - Leaderboard model pool includes a built-in `baseline-game-ai` entry representing the game's default baseline AI, so trained runs are ranked directly against current in-game baseline behavior.
 - Leaderboard competition updates are now incremental in UI: after each completed round, the table/model list refresh immediately so ranking changes are visible in real time.

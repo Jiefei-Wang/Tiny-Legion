@@ -310,6 +310,7 @@ function loadLeaderboardOpponents(dataRoot: string): LeaderboardOpponent[] {
 
 type EvalJob = {
   spec: MatchSpec;
+  opponentId: string;
   opponentScore: number;
   candidateSide: "player" | "enemy";
 };
@@ -327,11 +328,13 @@ function makeEvalJobsVsOpponents(
       const opponentAi = aiSpecFromModules(opponent.modules);
       jobs.push({
         spec: { ...base, seed, aiPlayer: candidateAi, aiEnemy: opponentAi },
+        opponentId: opponent.runId,
         opponentScore: opponent.score,
         candidateSide: "player",
       });
       jobs.push({
         spec: { ...base, seed, aiPlayer: opponentAi, aiEnemy: candidateAi },
+        opponentId: opponent.runId,
         opponentScore: opponent.score,
         candidateSide: "enemy",
       });
@@ -345,9 +348,9 @@ function expectedScore(ra: number, rb: number): number {
   return 1 / (1 + 10 ** ((rb - ra) / scale));
 }
 
-function applyEloStep(ra: number, rb: number, outcomeA: 0 | 0.5 | 1): number {
-  const gap = Math.abs(ra - rb);
-  const k = 14 + Math.min(48, gap * 0.2);
+function applyEloStep(ra: number, rb: number, outcomeA: 0 | 0.5 | 1, pairRounds: number): number {
+  const kBase = 24;
+  const k = kBase / Math.pow(1 + Math.max(0, pairRounds), 1.15);
   const ea = expectedScore(ra, rb);
   return ra + k * (outcomeA - ea);
 }
@@ -458,15 +461,19 @@ export async function runCompositeTraining(opts: {
               const jobs = makeEvalJobsVsOpponents(baseMatch, candidateModules, nearbyOpponents, seeds);
               const results = (await Promise.all(jobs.map((j) => pool.run(j.spec)))) as MatchResult[];
               agg = aggregateResults(results, (_r, i) => jobs[i]?.candidateSide ?? "player");
+              const pairRoundsByOpponent = new Map<string, number>();
               for (let i = 0; i < results.length; i += 1) {
                 const side = jobs[i]?.candidateSide ?? "player";
+                const opponentId = jobs[i]?.opponentId ?? "unknown";
+                const pairRounds = pairRoundsByOpponent.get(opponentId) ?? 0;
                 const opponentScore = Number.isFinite(jobs[i]?.opponentScore) ? Number(jobs[i]?.opponentScore) : 100;
                 const outcomeSide = results[i]?.sides?.[side];
                 if (!outcomeSide) {
                   continue;
                 }
                 const outcomeA: 0 | 0.5 | 1 = outcomeSide.tie ? 0.5 : (outcomeSide.win ? 1 : 0);
-                eloScore = applyEloStep(eloScore, opponentScore, outcomeA);
+                eloScore = applyEloStep(eloScore, opponentScore, outcomeA, pairRounds);
+                pairRoundsByOpponent.set(opponentId, pairRounds + 1);
               }
             } else {
               const baselineModules = best;

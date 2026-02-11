@@ -618,6 +618,7 @@ function arenaModelPlugin() {
   const runsDir = resolve(arenaDataDir, "runs");
   const leaderboardDir = resolve(arenaDataDir, "leaderboard");
   const leaderboardFile = resolve(leaderboardDir, "composite-elo.json");
+  const phaseConfigFile = resolve(process.cwd(), "..", "arena", "composite-training.phases.json");
   const BASELINE_MODEL_ID = "baseline-game-ai";
   let leaderboardCompeteBusy = false;
 
@@ -646,6 +647,7 @@ function arenaModelPlugin() {
     version: 1;
     updatedAt: string;
     ratings: Record<string, RatingEntry>;
+    matchupRounds: Record<string, number>;
   };
   type LeaderboardEntry = {
     runId: string;
@@ -659,6 +661,16 @@ function arenaModelPlugin() {
     mtimeMs: number;
     spec: MatchAiSpec;
   };
+  type LeaderboardPhaseScenario = {
+    withBase: boolean;
+    initialUnitsPerSide: number;
+    templateNames: string[];
+    battlefield?: {
+      width?: number;
+      height?: number;
+      groundHeight?: number;
+    };
+  };
 
   const round2 = (value: number): number => Math.round(value * 100) / 100;
   const clampInt = (value: unknown, min: number, max: number, fallback: number): number => {
@@ -666,6 +678,7 @@ function arenaModelPlugin() {
     return Math.max(min, Math.min(max, n));
   };
   const randomIndex = (length: number): number => Math.max(0, Math.min(length - 1, Math.floor(Math.random() * length)));
+  const matchupKey = (a: string, b: string): string => (a < b ? `${a}__${b}` : `${b}__${a}`);
   const defaultRatingEntry = (): RatingEntry => ({
     score: 100,
     rounds: 0,
@@ -743,19 +756,75 @@ function arenaModelPlugin() {
     return models;
   };
 
+  const loadLeaderboardPhaseScenario = (): LeaderboardPhaseScenario => {
+    const fallback: LeaderboardPhaseScenario = {
+      withBase: true,
+      initialUnitsPerSide: 4,
+      templateNames: ["*"],
+      battlefield: { width: 2000, height: 1000 },
+    };
+    if (!existsSync(phaseConfigFile)) {
+      return fallback;
+    }
+    try {
+      const raw = readFileSync(phaseConfigFile, "utf8");
+      const parsed = JSON.parse(raw) as {
+        phases?: Array<Record<string, unknown>>;
+        byComponent?: Record<string, Array<Record<string, unknown>>>;
+      };
+      const fromGlobal = Array.isArray(parsed?.phases)
+        ? parsed.phases.find((phase) => phase && phase.id === "p4-leaderboard")
+        : null;
+      const fromByComponent = parsed?.byComponent && typeof parsed.byComponent === "object"
+        ? (["shoot", "movement", "target"] as const)
+          .flatMap((kind) => Array.isArray(parsed.byComponent?.[kind]) ? parsed.byComponent[kind] : [])
+          .find((phase) => phase && phase.id === "p4-leaderboard")
+        : null;
+      const source = (fromGlobal ?? fromByComponent) as Record<string, unknown> | null;
+      if (!source) {
+        return fallback;
+      }
+      const withBase = Boolean(source.withBase);
+      const initialUnitsPerSide = Math.max(1, Math.floor(typeof source.initialUnitsPerSide === "number" ? source.initialUnitsPerSide : fallback.initialUnitsPerSide));
+      const templateNames = Array.isArray(source.templateNames) && source.templateNames.length > 0
+        ? source.templateNames.map((v) => String(v)).filter((v) => v.trim().length > 0)
+        : fallback.templateNames;
+      const bf = source.battlefield && typeof source.battlefield === "object" ? source.battlefield as Record<string, unknown> : null;
+      const battlefield = bf
+        ? {
+          ...(typeof bf.width === "number" ? { width: Math.max(640, Math.min(4096, Math.floor(bf.width))) } : {}),
+          ...(typeof bf.height === "number" ? { height: Math.max(360, Math.min(2160, Math.floor(bf.height))) } : {}),
+          ...(typeof bf.groundHeight === "number" ? { groundHeight: Math.max(80, Math.floor(bf.groundHeight)) } : {}),
+        }
+        : fallback.battlefield;
+      return {
+        withBase,
+        initialUnitsPerSide,
+        templateNames,
+        ...(battlefield ? { battlefield } : {}),
+      };
+    } catch {
+      return fallback;
+    }
+  };
+
   const loadRatingStore = (): RatingStore => {
     if (!existsSync(leaderboardFile)) {
-      return { version: 1, updatedAt: new Date().toISOString(), ratings: {} };
+      return { version: 1, updatedAt: new Date().toISOString(), ratings: {}, matchupRounds: {} };
     }
     try {
       const raw = readFileSync(leaderboardFile, "utf8");
       const parsed = JSON.parse(raw) as unknown;
       if (!parsed || typeof parsed !== "object") {
-        return { version: 1, updatedAt: new Date().toISOString(), ratings: {} };
+        return { version: 1, updatedAt: new Date().toISOString(), ratings: {}, matchupRounds: {} };
       }
       const obj = parsed as Record<string, unknown>;
       const ratingsRaw = (obj.ratings && typeof obj.ratings === "object") ? obj.ratings as Record<string, unknown> : {};
+      const matchupRaw = (obj.matchupRounds && typeof obj.matchupRounds === "object")
+        ? obj.matchupRounds as Record<string, unknown>
+        : {};
       const ratings: Record<string, RatingEntry> = {};
+      const matchupRounds: Record<string, number> = {};
       for (const [runId, entryRaw] of Object.entries(ratingsRaw)) {
         if (!entryRaw || typeof entryRaw !== "object") {
           continue;
@@ -771,13 +840,17 @@ function arenaModelPlugin() {
           updatedAtMs: Number.isFinite(e.updatedAtMs) ? Number(e.updatedAtMs) : Date.now(),
         };
       }
+      for (const [key, value] of Object.entries(matchupRaw)) {
+        matchupRounds[key] = clampInt(value, 0, 1_000_000_000, 0);
+      }
       return {
         version: 1,
         updatedAt: typeof obj.updatedAt === "string" ? obj.updatedAt : new Date().toISOString(),
         ratings,
+        matchupRounds,
       };
     } catch {
-      return { version: 1, updatedAt: new Date().toISOString(), ratings: {} };
+      return { version: 1, updatedAt: new Date().toISOString(), ratings: {}, matchupRounds: {} };
     }
   };
 
@@ -845,13 +918,16 @@ function arenaModelPlugin() {
   ): { deltaA: number; deltaB: number } => {
     const a = store.ratings[runA] ?? (store.ratings[runA] = defaultRatingEntry());
     const b = store.ratings[runB] ?? (store.ratings[runB] = defaultRatingEntry());
-    const gap = Math.abs(a.score - b.score);
-    const k = 14 + Math.min(48, gap * 0.2);
+    const pairKey = matchupKey(runA, runB);
+    const pairRounds = Math.max(0, Math.floor(store.matchupRounds[pairKey] ?? 0));
+    const kBase = 24;
+    const k = kBase / Math.pow(1 + pairRounds, 1.15);
     const ea = expectedScore(a.score, b.score);
     const deltaA = k * (outcomeA - ea);
     const deltaB = -deltaA;
-    a.score = round2(Math.max(1, a.score + deltaA));
-    b.score = round2(Math.max(1, b.score + deltaB));
+    a.score = round2(a.score + deltaA);
+    b.score = round2(b.score + deltaB);
+    store.matchupRounds[pairKey] = pairRounds + 1;
     a.rounds += 1;
     b.rounds += 1;
     a.games += 1;
@@ -1024,6 +1100,7 @@ function arenaModelPlugin() {
 
           leaderboardCompeteBusy = true;
           try {
+            const phaseScenario = loadLeaderboardPhaseScenario();
             const updates: Array<{
               runA: string;
               runB: string;
@@ -1058,9 +1135,11 @@ function arenaModelPlugin() {
                 aiPlayer: modelA.spec,
                 aiEnemy: modelB.spec,
                 scenario: {
-                  withBase: true,
-                  initialUnitsPerSide: 4,
+                  withBase: phaseScenario.withBase,
+                  initialUnitsPerSide: phaseScenario.initialUnitsPerSide,
                 },
+                templateNames: phaseScenario.templateNames,
+                ...(phaseScenario.battlefield ? { battlefield: phaseScenario.battlefield } : {}),
               };
               const result = await runMatch(spec);
               const outcomeA: 0 | 0.5 | 1 = result.sides.player.tie ? 0.5 : (result.sides.player.win ? 1 : 0);

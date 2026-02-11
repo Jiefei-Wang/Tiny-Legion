@@ -234,6 +234,8 @@ Arena-specific architecture notes:
 - Game dev server exposes `/__arena/composite/latest` for Test Arena to load latest trained composite spec from `arena/.arena-data/runs/*/best-composite.json`.
 - Game dev server exposes `/__arena/composite/leaderboard` for in-game ranking entries backed by persistent match-based rating storage (`arena/.arena-data/leaderboard/composite-elo.json`).
 - Game dev server exposes `/__arena/composite/models` (saved composed-model inventory with score/rounds/spec, including built-in `baseline-game-ai`) and `/__arena/composite/leaderboard/compete` (run head-to-head leaderboard matches from UI controls).
+- Leaderboard compete endpoint loads `p4-leaderboard` scenario from `arena/composite-training.phases.json` (global `phases` first, then optional `byComponent` fallback) and applies those template/battlefield settings to ranking matches.
+- Elo ratings use pairwise diminishing-K updates (tracked by per-pair match count in leaderboard store) so repeated battles between the same two models converge without hard rating caps.
 
 Map node metadata supports test-only battle tuning via optional fields on `MapNode`:
 
