@@ -254,6 +254,7 @@ Template/editor architecture notes:
 - Loader injection remains configurable in parse options; current dev/headless normalization persists the injected-loader result to template JSON.
 - Editor save does not block on warnings/errors; categories are surfaced in UI/logs for developer feedback.
 - Battle deploy/spawn paths validate templates and block creation when `errors` are present.
+- Template editor includes optional template-level gas override input; empty value keeps gas derived from part totals.
 - Editor `Open` workflow supports direct editing of existing templates and one-click copy creation (`-copy` suffix).
 - Template IDs are internal and auto-generated for new/copy templates; ID editing is removed from UI.
 
@@ -411,7 +412,8 @@ Editor UX implementation details:
 - Right-side palette renders component cards (placeholder thumbnail + label + type) in a scrollable list with hover detail text.
 - Active layer (`structure`, `functional`, `display`) is switched from right-panel controls above the part palette.
 - Template editor functional palette uses part catalog entries (not only hardcoded component IDs).
-- Per-part gas contribution is not used in current editor stage; part cards and placement logic focus on gameplay stats/constraints.
+- Template gas cost is computed from part gas values by default (material structure parts + functional parts), with optional per-template explicit gas override.
+- Part Designer supports optional `stats.gasCost` override per part; deleting the field reverts to default gas calculation from base component/material defaults.
 - Editor `Open` window lists all templates; clicking a template row opens it directly, and right-aligned `Copy` / `Delete` actions clone (`-copy` suffix) or remove file-backed entries.
 - Editor has `Save` (persist to user templates) and `Save to Default` (persist to default templates); both paths run the same template normalization before writing JSON.
 - Template ID is internal/auto-managed for new and copied templates (no manual ID field in editor UI).

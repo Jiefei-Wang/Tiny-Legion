@@ -164,6 +164,9 @@ export function validatePartDefinitionDetailed(part: PartDefinition): PartValida
   if (part.properties?.loaderCooldownMultiplier !== undefined && (!Number.isFinite(part.properties.loaderCooldownMultiplier) || part.properties.loaderCooldownMultiplier <= 0)) {
     errors.push("part properties.loaderCooldownMultiplier must be > 0.");
   }
+  if (part.stats?.gasCost !== undefined && (!Number.isFinite(part.stats.gasCost) || part.stats.gasCost < 0)) {
+    errors.push("part stats.gasCost must be >= 0.");
+  }
   if (part.stats?.loaderLoadMultiplier !== undefined && (!Number.isFinite(part.stats.loaderLoadMultiplier) || part.stats.loaderLoadMultiplier <= 0)) {
     errors.push("part stats.loaderLoadMultiplier must be > 0.");
   }

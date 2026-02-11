@@ -91,8 +91,11 @@ Current implementation includes dedicated in-app editor tabs where the player ca
 - Template Editor and Part Editor now keep independent pan/view memory; switching tabs restores each editor's last view.
 - Editor view defaults to centered origin (`0,0`) on first load and recenters only when loading a different template/part.
 - Battle rendering and hitboxes now honor stored structure/display/functional coordinates instead of compacting to a fixed index grid.
-- Part composition focuses on physical/functional stats; per-part gas contribution is not used in current editor stage.
+- Template gas cost defaults to the sum of part gas values (structure material parts + functional parts).
+- Templates can still override gas cost explicitly; when override is absent, gas auto-recomputes from current part composition.
+- Part Designer includes editable part gas override (`stats.gasCost`); clearing the value resets to default computed gas for that part family.
 - Save templates from editor to user storage (`Save`) or to default storage (`Save to Default`) and deploy them in battle.
+- Template Editor exposes optional gas override input; leaving it empty keeps gas auto-computed from part gas totals.
 - Save is allowed even with validation issues.
 - Validation is split into `Error` and `Warning` categories:
   - `Error`: severe issues (for example missing control module, air unit cannot hold altitude).
@@ -142,7 +145,7 @@ Current implementation includes dedicated in-app editor tabs where the player ca
     - require empty structure offsets,
     - require empty functional offsets,
     - whether functional/structure-occupied boxes require structure support,
-  - optional runtime parameter overrides (`mass`, `hpMul`, `power`, `maxSpeed`, `damage`, `range`, `cooldown`, `shootAngleDeg`, `spreadDeg`).
+  - optional runtime parameter overrides (`gasCost`, `mass`, `hpMul`, `power`, `maxSpeed`, `damage`, `range`, `cooldown`, `shootAngleDeg`, `spreadDeg`).
 - Template editor consumes this part catalog for placement/validation; battle runtime consumes the same catalog for instancing, damage semantics, and shooting-origin offsets.
 - Enemy auto-spawn selection samples from the current loaded template set (default + user overrides), not a fixed hardcoded shortlist.
 

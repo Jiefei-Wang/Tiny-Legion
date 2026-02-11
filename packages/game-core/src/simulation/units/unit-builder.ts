@@ -27,6 +27,7 @@ export function createInitialTemplates(): UnitTemplate[] {
       name: "Scout Buggy",
       type: "ground",
       gasCost: 22,
+      gasCostOverride: 22,
       structure: [{ material: "basic" }, { material: "basic" }, { material: "basic" }],
       attachments: [
         { component: "control", cell: 1 },
@@ -39,6 +40,7 @@ export function createInitialTemplates(): UnitTemplate[] {
       name: "Line Tank",
       type: "ground",
       gasCost: 38,
+      gasCostOverride: 38,
       structure: [
         { material: "basic" },
         { material: "basic" },
@@ -59,6 +61,7 @@ export function createInitialTemplates(): UnitTemplate[] {
       name: "Skylance Jet",
       type: "air",
       gasCost: 48,
+      gasCostOverride: 48,
       structure: [
         { material: "basic", x: -1, y: 0 },
         { material: "basic", x: 0, y: 0 },
@@ -77,6 +80,7 @@ export function createInitialTemplates(): UnitTemplate[] {
       name: "Rotor Pike",
       type: "air",
       gasCost: 54,
+      gasCostOverride: 54,
       structure: [
         { material: "basic", x: -1, y: 0 },
         { material: "basic", x: 0, y: 0 },

@@ -2,6 +2,7 @@ import type { PartDefinition, UnitTemplate } from "../types.ts";
 
 export {
   cloneTemplate,
+  computeTemplateGasCost,
   getTemplateValidationIssues,
   mergeTemplates,
   parseTemplate,
@@ -10,6 +11,26 @@ export {
 } from "../../../packages/game-core/src/templates/template-schema.ts";
 
 import { parseTemplate } from "../../../packages/game-core/src/templates/template-schema.ts";
+
+function serializeTemplateForStore(template: UnitTemplate): Record<string, unknown> {
+  return {
+    id: template.id,
+    name: template.name,
+    type: template.type,
+    ...(typeof template.gasCostOverride === "number" ? { gasCost: Math.max(0, Math.floor(template.gasCostOverride)) } : {}),
+    structure: template.structure.map((cell) => ({ material: cell.material, x: cell.x, y: cell.y })),
+    attachments: template.attachments.map((attachment) => ({
+      component: attachment.component,
+      partId: attachment.partId,
+      cell: attachment.cell,
+      x: attachment.x,
+      y: attachment.y,
+      rotateQuarter: attachment.rotateQuarter,
+      rotate90: attachment.rotate90,
+    })),
+    display: template.display?.map((item) => ({ kind: item.kind, cell: item.cell, x: item.x, y: item.y })) ?? [],
+  };
+}
 
 async function fetchTemplateCollection(path: string, partCatalog?: ReadonlyArray<PartDefinition>): Promise<UnitTemplate[]> {
   try {
@@ -42,7 +63,7 @@ export async function saveUserTemplateToStore(template: UnitTemplate): Promise<b
     const response = await fetch(`/__templates/user/${template.id}`, {
       method: "PUT",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify(template),
+      body: JSON.stringify(serializeTemplateForStore(template)),
     });
     return response.ok;
   } catch {
@@ -55,7 +76,7 @@ export async function saveDefaultTemplateToStore(template: UnitTemplate): Promis
     const response = await fetch(`/__templates/default/${template.id}`, {
       method: "PUT",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify(template),
+      body: JSON.stringify(serializeTemplateForStore(template)),
     });
     return response.ok;
   } catch {

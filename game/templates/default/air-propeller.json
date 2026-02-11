@@ -3,6 +3,7 @@
   "name": "Rotor Pike",
   "type": "air",
   "gasCost": 54,
+  "gasCostOverride": 54,
   "structure": [
     {
       "material": "basic",

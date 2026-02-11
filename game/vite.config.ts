@@ -1174,6 +1174,26 @@ function arenaModelPlugin() {
         });
       });
 
+      server.middlewares.use("/__arena/composite/leaderboard/reset", (req, res) => {
+        if (req.method !== "POST") {
+          res.statusCode = 405;
+          res.end("method not allowed");
+          return;
+        }
+        try {
+          const store: RatingStore = { version: 1, updatedAt: new Date().toISOString(), ratings: {}, matchupRounds: {} };
+          saveRatingStore(store);
+          res.setHeader("content-type", "application/json");
+          res.end(JSON.stringify({ ok: true, message: "Leaderboard scores reset" }));
+        } catch (error) {
+          json(res, 500, {
+            ok: false,
+            reason: "reset_failed",
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      });
+
       server.middlewares.use("/__arena/composite/latest", (req, res) => {
         if (req.method !== "GET") {
           res.statusCode = 405;

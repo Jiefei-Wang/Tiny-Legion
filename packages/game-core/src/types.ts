@@ -44,6 +44,7 @@ export interface ComponentStats {
   readonly type: "control" | "engine" | "weapon" | "loader" | "ammo";
   readonly mass: number;
   readonly hpMul: number;
+  readonly gasCost?: number;
   readonly directional?: boolean;
   readonly propulsion?: {
     readonly platform: "ground" | "air";
@@ -118,6 +119,7 @@ export interface PartPlacementTemplate {
 }
 
 export interface PartStats {
+  gasCost?: number;
   mass?: number;
   hpMul?: number;
   power?: number;
@@ -209,6 +211,7 @@ export interface UnitTemplate {
   name: string;
   type: UnitType;
   gasCost: number;
+  gasCostOverride?: number;
   structure: StructureCellTemplate[];
   attachments: AttachmentTemplate[];
   display?: DisplayAttachmentTemplate[];

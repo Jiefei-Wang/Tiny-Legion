@@ -3,6 +3,7 @@
   "name": "Skylance Jet",
   "type": "air",
   "gasCost": 48,
+  "gasCostOverride": 48,
   "structure": [
     {
       "material": "basic",

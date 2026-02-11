@@ -2,10 +2,11 @@ import type { ComponentId, ComponentStats } from "../../types.ts";
 import { PROJECTILE_GRAVITY } from "./range.ts";
 
 export const COMPONENTS: Record<ComponentId, ComponentStats> = {
-  control: { mass: 8, hpMul: 0.9, type: "control" },
+  control: { mass: 8, hpMul: 0.9, gasCost: 2, type: "control" },
   engineS: {
     mass: 10,
     hpMul: 1.0,
+    gasCost: 6,
     type: "engine",
     power: 92,
     maxSpeed: 96,
@@ -14,6 +15,7 @@ export const COMPONENTS: Record<ComponentId, ComponentStats> = {
   engineM: {
     mass: 16,
     hpMul: 1.0,
+    gasCost: 9,
     type: "engine",
     power: 142,
     maxSpeed: 122,
@@ -22,6 +24,7 @@ export const COMPONENTS: Record<ComponentId, ComponentStats> = {
   jetEngine: {
     mass: 14,
     hpMul: 0.8,
+    gasCost: 10,
     type: "engine",
     power: 154,
     maxSpeed: 150,
@@ -30,6 +33,7 @@ export const COMPONENTS: Record<ComponentId, ComponentStats> = {
   propeller: {
     mass: 9,
     hpMul: 0.45,
+    gasCost: 10,
     type: "engine",
     power: 260,
     maxSpeed: 180,
@@ -50,6 +54,7 @@ export const COMPONENTS: Record<ComponentId, ComponentStats> = {
   cannonLoader: {
     mass: 8,
     hpMul: 0.85,
+    gasCost: 3,
     type: "loader",
     loader: {
       supports: ["heavy-shot", "explosive"],
@@ -63,6 +68,7 @@ export const COMPONENTS: Record<ComponentId, ComponentStats> = {
   missileLoader: {
     mass: 7,
     hpMul: 0.85,
+    gasCost: 3,
     type: "loader",
     loader: {
       supports: ["tracking"],
@@ -76,6 +82,7 @@ export const COMPONENTS: Record<ComponentId, ComponentStats> = {
   rapidGun: {
     mass: 6,
     hpMul: 0.9,
+    gasCost: 4,
     type: "weapon",
     directional: true,
     weaponClass: "rapid-fire",
@@ -92,6 +99,7 @@ export const COMPONENTS: Record<ComponentId, ComponentStats> = {
   heavyCannon: {
     mass: 12,
     hpMul: 0.9,
+    gasCost: 9,
     type: "weapon",
     directional: true,
     weaponClass: "heavy-shot",
@@ -108,6 +116,7 @@ export const COMPONENTS: Record<ComponentId, ComponentStats> = {
   explosiveShell: {
     mass: 18,
     hpMul: 0.9,
+    gasCost: 12,
     type: "weapon",
     directional: true,
     weaponClass: "explosive",
@@ -130,6 +139,7 @@ export const COMPONENTS: Record<ComponentId, ComponentStats> = {
   trackingMissile: {
     mass: 14,
     hpMul: 0.85,
+    gasCost: 11,
     type: "weapon",
     directional: true,
     weaponClass: "tracking",
@@ -148,6 +158,7 @@ export const COMPONENTS: Record<ComponentId, ComponentStats> = {
   precisionBeam: {
     mass: 11,
     hpMul: 0.85,
+    gasCost: 8,
     type: "weapon",
     directional: true,
     weaponClass: "beam-precision",
@@ -161,6 +172,7 @@ export const COMPONENTS: Record<ComponentId, ComponentStats> = {
   empEmitter: {
     mass: 9,
     hpMul: 0.9,
+    gasCost: 7,
     type: "weapon",
     directional: true,
     weaponClass: "control-utility",
@@ -177,5 +189,5 @@ export const COMPONENTS: Record<ComponentId, ComponentStats> = {
       duration: 1.8,
     },
   },
-  ammo: { mass: 7, hpMul: 0.8, type: "ammo" },
+  ammo: { mass: 7, hpMul: 0.8, gasCost: 3, type: "ammo" },
 };

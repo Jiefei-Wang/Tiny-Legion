@@ -3,6 +3,7 @@
   "name": "Line Tank",
   "type": "ground",
   "gasCost": 38,
+  "gasCostOverride": 38,
   "structure": [
     {
       "material": "basic"

@@ -5,7 +5,9 @@ import {
   getPartFootprintOffsets,
   mergePartCatalogs,
   normalizePartAttachmentRotate,
+  resolvePartGasCost,
   rotateOffsetByQuarter,
+  resolveStructureMaterialGasCost,
   resolvePartDefinitionForAttachment,
 } from "../parts/part-schema.ts";
 import { validateTemplateDetailed } from "./template-validation.ts";
@@ -64,6 +66,31 @@ function readOptionalInt(value: unknown): number | undefined {
     return undefined;
   }
   return Math.floor(value);
+}
+
+export function computeTemplateGasCost(
+  template: Pick<UnitTemplate, "structure" | "attachments">,
+  partCatalog?: ReadonlyArray<PartDefinition>,
+): number {
+  const catalog = resolveCatalog(partCatalog);
+  let total = 0;
+  for (const cell of template.structure) {
+    if (!isMaterialId(cell.material)) {
+      continue;
+    }
+    total += resolveStructureMaterialGasCost(cell.material, catalog);
+  }
+  for (const attachment of template.attachments) {
+    const part = resolvePartDefinitionForAttachment(
+      { partId: attachment.partId, component: attachment.component },
+      catalog,
+    );
+    if (!part) {
+      continue;
+    }
+    total += resolvePartGasCost(part);
+  }
+  return Math.max(0, Math.floor(total));
 }
 
 export function sanitizeTemplatePlacement(
@@ -394,6 +421,7 @@ export function cloneTemplate(template: UnitTemplate): UnitTemplate {
     name: template.name,
     type: template.type,
     gasCost: template.gasCost,
+    gasCostOverride: template.gasCostOverride,
     structure: template.structure.map((cell) => ({ material: cell.material, x: cell.x, y: cell.y })),
     attachments: template.attachments.map((attachment) => ({
       component: attachment.component,
@@ -529,11 +557,13 @@ export function parseTemplate(input: unknown, options: ParseTemplateOptions = {}
   const injectLoaders = options.injectLoaders ?? true;
   const sanitizePlacement = options.sanitizePlacement ?? true;
 
+  const gasCostOverride = typeof data.gasCost === "number" ? Math.max(0, Math.floor(data.gasCost)) : undefined;
   const template: UnitTemplate = {
     id: data.id.trim(),
     name: data.name.trim(),
     type: data.type,
-    gasCost: typeof data.gasCost === "number" ? Math.max(0, Math.floor(data.gasCost)) : 0,
+    gasCost: gasCostOverride ?? 0,
+    gasCostOverride,
     structure,
     attachments,
     display,
@@ -546,6 +576,7 @@ export function parseTemplate(input: unknown, options: ParseTemplateOptions = {}
   const loaderNormalized = injectLoaders
     ? { ...placementNormalized, attachments: ensureLoaderCoverage(placementNormalized, partCatalog) }
     : placementNormalized;
+  loaderNormalized.gasCost = loaderNormalized.gasCostOverride ?? computeTemplateGasCost(loaderNormalized, partCatalog);
   return loaderNormalized;
 }
 

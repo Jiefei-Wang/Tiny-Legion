@@ -25,6 +25,22 @@ function readOptionalNumber(value: unknown): number | undefined {
   return value;
 }
 
+function getDefaultMaterialGasCost(materialId: MaterialId): number {
+  if (materialId === "basic") {
+    return 4;
+  }
+  if (materialId === "reinforced") {
+    return 5;
+  }
+  if (materialId === "ceramic") {
+    return 6;
+  }
+  if (materialId === "reactive") {
+    return 7;
+  }
+  return 8;
+}
+
 function readOptionalBoolean(value: unknown): boolean | undefined {
   if (typeof value !== "boolean") {
     return undefined;
@@ -178,6 +194,7 @@ function createImplicitStructureMaterialPartDefinition(materialId: MaterialId): 
     },
     stats: {
       mass: material.mass,
+      gasCost: getDefaultMaterialGasCost(materialId),
     },
     properties: {
       category: "structure",
@@ -232,6 +249,9 @@ export function createImplicitPartDefinition(component: ComponentId): PartDefini
       requireEmptyStructureOffsets: (stats.placement?.requireEmptyOffsets ?? []).map((offset) => ({ x: offset.x, y: offset.y })),
       requireEmptyFunctionalOffsets: [],
     },
+    stats: {
+      gasCost: stats.gasCost,
+    },
     properties: {
       category: stats.type,
       subcategory: stats.type === "weapon"
@@ -269,6 +289,36 @@ export function createDefaultPartDefinitions(): PartDefinition[] {
   const parts = [...componentParts, ...materialParts].sort((a, b) => a.id.localeCompare(b.id));
   defaultCatalogCache = parts;
   return parts.map((part) => clonePartDefinition(part));
+}
+
+export function resolvePartGasCost(part: PartDefinition): number {
+  if (typeof part.stats?.gasCost === "number" && Number.isFinite(part.stats.gasCost)) {
+    return Math.max(0, Math.floor(part.stats.gasCost));
+  }
+  if (part.layer === "structure") {
+    const materialId = part.properties?.materialId;
+    if (materialId) {
+      return getDefaultMaterialGasCost(materialId);
+    }
+  }
+  return Math.max(0, Math.floor(COMPONENTS[part.baseComponent].gasCost ?? 0));
+}
+
+export function resolveStructureMaterialGasCost(
+  materialId: MaterialId,
+  partCatalog?: ReadonlyArray<PartDefinition>,
+): number {
+  const defaults = createDefaultPartDefinitions();
+  const catalog = partCatalog && partCatalog.length > 0 ? mergePartCatalogs(defaults, partCatalog) : defaults;
+  const byMaterial = catalog.find((part) => part.layer === "structure" && part.properties?.materialId === materialId);
+  if (byMaterial) {
+    return resolvePartGasCost(byMaterial);
+  }
+  const byId = catalog.find((part) => part.id === `material-${materialId}`);
+  if (byId) {
+    return resolvePartGasCost(byId);
+  }
+  return getDefaultMaterialGasCost(materialId);
 }
 
 export function buildPartCatalogMap(parts: ReadonlyArray<PartDefinition>): Map<string, PartDefinition> {
@@ -342,6 +392,7 @@ export function clonePartDefinition(part: PartDefinition): PartDefinition {
       : undefined,
     stats: part.stats
       ? {
+          gasCost: part.stats.gasCost,
           mass: part.stats.mass,
           hpMul: part.stats.hpMul,
           power: part.stats.power,
@@ -506,6 +557,7 @@ export function parsePartDefinition(input: unknown): PartDefinition | null {
       requireEmptyFunctionalOffsets: normalizeOffsets(placementRecord.requireEmptyFunctionalOffsets),
     },
     stats: {
+      gasCost: readOptionalNumber(runtimeRecord.gasCost),
       mass: readOptionalNumber(runtimeRecord.mass),
       hpMul: readOptionalNumber(runtimeRecord.hpMul),
       power: readOptionalNumber(runtimeRecord.power),

@@ -14,6 +14,7 @@ import type { BattleAiController } from "../gameplay/battle/battle-session.ts";
 import { createBaselineCompositeAiController } from "../ai/composite/baseline-modules.ts";
 import {
   cloneTemplate,
+  computeTemplateGasCost,
   deleteDefaultTemplateFromStore,
   deleteUserTemplateFromStore,
   fetchDefaultTemplatesFromStore,
@@ -3016,6 +3017,12 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     }
   };
 
+  const recomputeEditorDraftGasCost = (): number => {
+    const computed = computeTemplateGasCost(editorDraft, parts);
+    editorDraft.gasCost = typeof editorDraft.gasCostOverride === "number" ? editorDraft.gasCostOverride : computed;
+    return computed;
+  };
+
   const recalcEditorDraftFromSlots = (): void => {
     const slotToCell = new Map<number, number>();
     const structure = editorStructureSlots
@@ -3054,7 +3061,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         y: slotToCoord(entry.slotIndex).y,
       }));
 
-    // Gas is currently not derived from parts in editor mode.
+    recomputeEditorDraftGasCost();
   };
 
   const createDefaultPartDesignerSlot = (layer: PartDefinition["layer"]): NonNullable<PartDesignerSlot> => ({
@@ -4127,6 +4134,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         <div class="row">
           <button id="btnLeaderboardCompete" ${testArenaLeaderboardCompeteBusy ? "disabled" : ""}>${testArenaLeaderboardCompeteBusy ? "Running..." : "Run Competition"}</button>
           <button id="btnRefreshLeaderboard">Refresh</button>
+          <button id="btnResetLeaderboard" class="warn">Reset Scores</button>
         </div>
         <div class="small">${escapeHtml(testArenaLeaderboardCompeteStatus || " ")}</div>
       </div>
@@ -4157,6 +4165,9 @@ export function bootstrap(options: BootstrapOptions = {}): void {
 
     ensureEditorSelectionForLayer();
     if (isTemplateEditorScreen()) {
+      const computedTemplateGas = computeTemplateGasCost(editorDraft, parts);
+      const effectiveTemplateGas = typeof editorDraft.gasCostOverride === "number" ? editorDraft.gasCostOverride : computedTemplateGas;
+      editorDraft.gasCost = effectiveTemplateGas;
       if (editorTemplateDialogSelectedId === null || !templates.some((template) => template.id === editorTemplateDialogSelectedId)) {
         editorTemplateDialogSelectedId = templates[0]?.id ?? null;
       }
@@ -4201,8 +4212,11 @@ export function bootstrap(options: BootstrapOptions = {}): void {
               <option value="air" ${editorDraft.type === "air" ? "selected" : ""}>Air</option>
             </select>
           </label>
-          <span class="small">Template cost is configured outside part composition.</span>
+          <label class="small">Gas Override
+            <input id="editorGasOverride" type="number" min="0" step="1" value="${editorDraft.gasCostOverride ?? ""}" placeholder="${computedTemplateGas}" />
+          </label>
         </div>
+        <div class="small">Gas cost = ${effectiveTemplateGas} (${typeof editorDraft.gasCostOverride === "number" ? "template override" : "sum of part gas values"}).</div>
         <div class="row">
           <label class="small"><input id="editorDeleteMode" type="checkbox" ${editorDeleteMode ? "checked" : ""} /> Delete mode</label>
           <label class="small"><input id="editorPlaceByCenter" type="checkbox" ${editorPlaceByCenter ? "checked" : ""} /> Center place on click</label>
@@ -4267,6 +4281,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       ].join("");
       const baseStats = COMPONENTS[partDesignerDraft.baseComponent];
       const runtimePlaceholders = {
+        gasCost: baseStats.gasCost !== undefined ? String(baseStats.gasCost) : "0",
         mass: String(baseStats.mass),
         hpMul: String(baseStats.hpMul),
         power: baseStats.power !== undefined ? String(baseStats.power) : "none",
@@ -4363,6 +4378,10 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         <div><strong>Part Properties</strong></div>
         <div class="row">
           <label class="small" style="flex:1;">Tags (comma separated) <input id="partTags" value="${(partDesignerDraft.tags ?? []).join(", ")}" /></label>
+        </div>
+        <div class="row">
+          <label class="small">Gas Cost <input id="partGasCost" type="number" min="0" step="1" value="${partDesignerDraft.stats?.gasCost ?? ""}" placeholder="${runtimePlaceholders.gasCost}" /></label>
+          <span class="small">Delete value to reset to default gas calculation.</span>
         </div>
         ${isStructureLayerMode ? `<div class="row">
           <label class="small">Material
@@ -4501,7 +4520,12 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       for (const cell of template.structure) {
         cell.material = material;
       }
-      template.gasCost += material === "combined" ? 8 : 4;
+      if (typeof template.gasCostOverride === "number") {
+        template.gasCostOverride += material === "combined" ? 8 : 4;
+        template.gasCost = template.gasCostOverride;
+      } else {
+        template.gasCost = computeTemplateGasCost(template, parts);
+      }
     }
   };
 
@@ -4619,7 +4643,12 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       const weapon = tankTemplate?.attachments.find((attachment) => attachment.component === "heavyCannon");
       if (weapon && tankTemplate) {
         weapon.component = "explosiveShell";
-        tankTemplate.gasCost += 9;
+        if (typeof tankTemplate.gasCostOverride === "number") {
+          tankTemplate.gasCostOverride += 9;
+          tankTemplate.gasCost = tankTemplate.gasCostOverride;
+        } else {
+          tankTemplate.gasCost = computeTemplateGasCost(tankTemplate, parts);
+        }
       }
       addLog("Unlocked explosive cannon option", "good");
       renderPanels();
@@ -4740,6 +4769,24 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         testArenaLeaderboardManualPairA,
         testArenaLeaderboardManualPairB,
       );
+    });
+
+    getOptionalElement<HTMLButtonElement>("#btnResetLeaderboard")?.addEventListener("click", async () => {
+      if (!window.confirm("Reset all leaderboard scores, win rates, and rounds? This cannot be undone.")) {
+        return;
+      }
+      try {
+        const res = await fetch("/__arena/composite/leaderboard/reset", { method: "POST" });
+        if (!res.ok) {
+          addLog("Failed to reset leaderboard scores.", "bad");
+          return;
+        }
+        addLog("Leaderboard scores reset successfully.", "good");
+        await refreshTestArenaLeaderboard();
+        renderPanels();
+      } catch {
+        addLog("Failed to reset leaderboard scores due to network error.", "bad");
+      }
     });
 
     getOptionalElement<HTMLButtonElement>("#btnEndTestArena")?.addEventListener("click", () => {
@@ -5122,6 +5169,18 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     getOptionalElement<HTMLSelectElement>("#editorType")?.addEventListener("change", (event) => {
       const value = (event.currentTarget as HTMLSelectElement).value;
       editorDraft.type = value === "air" ? "air" : "ground";
+      recomputeEditorDraftGasCost();
+      updateSelectedInfo();
+    });
+    getOptionalElement<HTMLInputElement>("#editorGasOverride")?.addEventListener("input", (event) => {
+      const raw = (event.currentTarget as HTMLInputElement).value.trim();
+      if (raw.length <= 0) {
+        editorDraft.gasCostOverride = undefined;
+      } else {
+        const parsed = Number(raw);
+        editorDraft.gasCostOverride = Number.isFinite(parsed) ? Math.max(0, Math.floor(parsed)) : undefined;
+      }
+      recomputeEditorDraftGasCost();
       updateSelectedInfo();
     });
 
@@ -5140,6 +5199,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         name: newName,
         type: "ground",
         gasCost: 0,
+        gasCostOverride: undefined,
         structure: [],
         attachments: [],
         display: [],
@@ -5743,6 +5803,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     bindRuntimeInput("#partLoaderMinLoadTime", "loaderMinLoadTime");
     bindRuntimeInput("#partLoaderStoreCapacity", "loaderStoreCapacity");
     bindRuntimeInput("#partLoaderMinBurstInterval", "loaderMinBurstInterval");
+    bindRuntimeInput("#partGasCost", "gasCost");
 
     getOptionalElement<HTMLButtonElement>("#btnNewPartDraft")?.addEventListener("click", () => {
       const newName = "Custom Part";
