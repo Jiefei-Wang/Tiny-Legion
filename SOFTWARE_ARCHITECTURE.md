@@ -221,7 +221,8 @@ Arena-specific architecture notes:
 - Replay UI (`arena-ui/src/main.ts`) still uses game interface bootstrap (`game/src/app/bootstrap.ts`) while consuming AI/simulation primitives from `packages/game-core`.
 - Game dev server exposes `/__arena/composite/latest` for Test Arena to load latest trained composite spec from `arena/.arena-data/runs/*/best-composite.json`.
 - Game dev server exposes `/__arena/composite/leaderboard` for in-game ranking entries backed by persistent match-based rating storage (`arena/.arena-data/leaderboard/composite-elo.json`).
-- Game dev server exposes `/__arena/composite/models` (saved composed-model inventory with score/rounds/spec, including built-in `baseline-game-ai`) and `/__arena/composite/leaderboard/compete` (run head-to-head leaderboard matches from UI controls).
+- Game dev server exposes `/__arena/composite/models` (saved composed-model inventory with score/rounds/spec, including built-in `baseline-game-ai` wired as baseline composite modules) and `/__arena/composite/leaderboard/compete` (run head-to-head leaderboard matches from UI controls).
+- Leaderboard compete endpoint executes batched rounds in parallel using arena worker threads (`arena/.dist/.../worker-pool.js`) with all detected CPU cores when available, and falls back to single-thread execution if worker runtime is unavailable.
 - Leaderboard compete endpoint loads `p4-leaderboard` scenario from `arena/composite-training.phases.json` (global `phases` first, then optional `byComponent` fallback) and applies those template/battlefield settings to ranking matches.
 - Elo ratings use pairwise diminishing-K updates (tracked by per-pair match count in leaderboard store) so repeated battles between the same two models converge without hard rating caps.
 
@@ -249,8 +250,9 @@ Template/editor architecture notes:
 - `template-validation.ts` is an isolated validation module with severity output (`errors` + `warnings`).
 - `template-schema.ts` parse pipeline supports placement sanitization plus loader coverage normalization, and middleware/headless flows persist the normalized JSON so editor/headless/runtime stay aligned.
 - Functional placement and validation now resolve through part catalog definitions (`partId` + `baseComponent`) rather than component-only hardcoding.
-- `parts/part-schema.ts` + `parts/part-validation.ts` define part parsing, default implicit part generation, and validation severity output.
-- Part catalog merge order is built-in defaults -> file-backed defaults -> user overrides.
+- `parts/part-schema.ts` + `parts/part-validation.ts` define part parsing and validation severity output.
+- Runtime/editor part catalog merge order is file-backed defaults -> user overrides (no implicit built-in part entries in `/__parts/*` payloads).
+- Part Designer uses dedicated default-config helpers (`game/src/app/part-default-config.ts`) to seed values when creating a new part or switching base component.
 - Loader injection remains configurable in parse options; current dev/headless normalization persists the injected-loader result to template JSON.
 - Editor save does not block on warnings/errors; categories are surfaced in UI/logs for developer feedback.
 - Battle deploy/spawn paths validate templates and block creation when `errors` are present.
@@ -398,7 +400,7 @@ Template persistence middleware (dev server via `vite.config.ts`):
 
 Part persistence middleware (dev server via `vite.config.ts`):
 
-- `GET /__parts/default` -> read merged default part catalog (built-in + `game/parts/default`)
+- `GET /__parts/default` -> read file-backed default part catalog from `game/parts/default`
 - `PUT /__parts/default/:id` -> save/overwrite one default part definition JSON
 - `GET /__parts/user` -> read user part definitions from `game/parts/user`
 - `PUT /__parts/user/:id` -> save/overwrite one user part definition JSON
@@ -412,6 +414,7 @@ Editor UX implementation details:
 - Right-side palette renders component cards (placeholder thumbnail + label + type) in a scrollable list with hover detail text.
 - Active layer (`structure`, `functional`, `display`) is switched from right-panel controls above the part palette.
 - Template editor functional palette uses part catalog entries (not only hardcoded component IDs).
+- Template editor structure palette is also part-catalog driven (file-backed structure-material parts mapped to selectable materials), not a direct `MATERIALS` enumeration.
 - Template gas cost is computed from part gas values by default (material structure parts + functional parts), with optional per-template explicit gas override.
 - Part Designer supports optional `stats.gasCost` override per part; deleting the field reverts to default gas calculation from base component/material defaults.
 - Editor `Open` window lists all templates; clicking a template row opens it directly, and right-aligned `Copy` / `Delete` actions clone (`-copy` suffix) or remove file-backed entries.
@@ -460,11 +463,11 @@ Developer Part Designer UX:
 - Top-bar `Debug Options` -> `Part Designer` is a shortcut into the same `Part Editor` screen.
 - Dedicated editor workspace for authoring a single reusable part definition.
 - Part Designer layer mode is integrated into `Base Component` selection using a `structure-layer` pseudo-option instead of a separate layer selector.
-- `Open Part` rows include explicit layer labels and default catalog includes `structure-box` so structure authoring is immediately discoverable.
+- `Open Part` rows include explicit layer labels and structure defaults are provided as explicit file-backed material parts (`material-basic`, `material-reinforced`, `material-ceramic`, `material-reactive`, `material-combined`).
 - `Open Part` modal includes tab-style filtering by part kind (`all`, `structure`, and functional component types).
 - In `structure-layer` mode, functional-only part-property and placement controls are hidden.
 - Category/subcategory auto-sync to base defaults only while those fields remain unmodified by the user.
-- `createDefaultPartDefinitions()` now ships implicit structure-material part entries (`material-basic`, `material-reinforced`, `material-ceramic`, `material-reactive`, `material-combined`) and `bootstrap.ts` applies their overrides into runtime `MATERIALS`.
+- Material runtime defaults are sourced from balance config and can still be overridden by file-backed structure-material part definitions when present.
 - Part `Open` window mirrors template open-row actions with right-aligned `Copy` / `Delete` controls.
 - UI split:
   - left panel edits part-level fields (`name`, `id`, `baseComponent`, `directional`) plus grouped controls:

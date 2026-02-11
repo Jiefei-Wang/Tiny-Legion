@@ -100,6 +100,7 @@ body {
   gap: 12px;
   min-height: 0;
   overflow-y: auto;
+  overflow-x: hidden;
 }
 
 /* Hide scrollbars but keep functionality */
@@ -488,7 +489,15 @@ button.active {
   margin-top: 8px;
   max-height: 300px;
   overflow-y: auto;
+  overflow-x: hidden;
   padding-right: 2px;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.editor-comp-scroll::-webkit-scrollbar {
+  width: 0;
+  height: 0;
 }
 
 .editor-comp-card {
@@ -534,6 +543,9 @@ button.active {
   font-size: 11px;
   line-height: 1.1;
   text-align: center;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .editor-comp-sub {

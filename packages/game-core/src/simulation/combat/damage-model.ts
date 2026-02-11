@@ -1,6 +1,5 @@
 import { MATERIALS } from "../../config/balance/materials.ts";
 import { COMPONENTS } from "../../config/balance/weapons.ts";
-import { IMPULSE_DAMAGE_STRESS_FACTOR } from "../../config/balance/battlefield.ts";
 import { canOperate } from "../units/control-unit-rules.ts";
 import { aliveStructureCells, destroyCell } from "../units/structure-grid.ts";
 import { clamp, impulseToDeltaV } from "../physics/impulse-model.ts";
@@ -35,9 +34,9 @@ export function applyHitToUnit(
     ? ordered.find((cell) => cell.id === impactedCellId) ?? (impactSide >= 0 ? ordered[ordered.length - 1] : ordered[0])
     : (impactSide >= 0 ? ordered[ordered.length - 1] : ordered[0]);
   const material = MATERIALS[targetCell.material];
-  const stress = incomingDamage / Math.max(0.7, material.armor);
-  const impulseStress = incomingImpulse * IMPULSE_DAMAGE_STRESS_FACTOR;
-  targetCell.strain += stress + impulseStress;
+  const damageAfterArmor = incomingDamage - Math.max(0, material.armor);
+  const effectiveDamage = damageAfterArmor <= 0 ? 1 : damageAfterArmor;
+  targetCell.strain += effectiveDamage;
 
   const deltaV = impulseToDeltaV(incomingImpulse, unit.mass);
   unit.vx += impactSide * deltaV;
@@ -62,7 +61,7 @@ export function applyHitToUnit(
     return attachment.cell === targetCell.id;
   });
   if (localAttachments.length > 0) {
-    const attachmentStressChance = Math.min(0.75, 0.22 + incomingDamage / 180);
+    const attachmentStressChance = Math.min(0.75, effectiveDamage / 180);
     if (Math.random() < attachmentStressChance) {
       const localIndex = Math.floor(Math.random() * localAttachments.length);
       const pick = localAttachments[localIndex];

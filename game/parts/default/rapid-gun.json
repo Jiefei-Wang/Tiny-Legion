@@ -31,7 +31,8 @@
     "requireEmptyFunctionalOffsets": []
   },
   "stats": {
-    "shootAngleDeg": 360
+    "shootAngleDeg": 360,
+    "projectileSpeed": 500
   },
   "properties": {
     "category": "weapon",

@@ -26,10 +26,10 @@ import {
 } from "./template-store.ts";
 import {
   clonePartDefinition,
-  createDefaultPartDefinitions,
   deleteDefaultPartFromStore,
   deleteUserPartFromStore,
   fetchDefaultPartsFromStore,
+  fetchUserPartsFromStore,
   getPartFootprintOffsets,
   mergePartCatalogs,
   normalizePartAttachmentRotate,
@@ -37,6 +37,12 @@ import {
   saveDefaultPartToStore,
   validatePartDefinitionDetailed,
 } from "./part-store.ts";
+import {
+  createDefaultPartDraft,
+  getPartMetadataDefaultsForLayer as getConfiguredPartMetadataDefaultsForLayer,
+  getPartPropertyDefaults,
+  getStructureMaterialDefaults,
+} from "./part-default-config.ts";
 import { makeCompositeAiController, type CompositeModuleSpec } from "../../../arena/src/ai/composite-controller.ts";
 import type { MatchAiSpec } from "../../../arena/src/match/match-types.ts";
 import type {
@@ -269,7 +275,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
   };
 
   const templates: UnitTemplate[] = createInitialTemplates();
-  const parts: PartDefinition[] = createDefaultPartDefinitions();
+  const parts: PartDefinition[] = [];
   const keys: KeyState = { a: false, d: false, w: false, s: false, space: false };
   const base: GameBase = { areaLevel: 1, refineries: 1, workshops: 1, labs: 0 };
   const tech: TechState = {
@@ -526,15 +532,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
   let partDesignerOpenFilter: PartOpenFilter = "all";
   let partDesignerTool: PartDesignerTool = "select";
   const STRUCTURE_LAYER_BASE_OPTION = "__structure_layer__";
-  let partDesignerDraft: PartDefinition = clonePartDefinition(parts[0] ?? {
-    id: "control",
-    name: "control",
-    layer: "functional",
-    baseComponent: "control",
-    anchor: { x: 0, y: 0 },
-    boxes: [{ x: 0, y: 0, occupiesFunctionalSpace: true, occupiesStructureSpace: false, needsStructureBehind: true, takesDamage: true, isAnchorPoint: true }],
-    directional: false,
-  });
+  let partDesignerDraft: PartDefinition = clonePartDefinition(createDefaultPartDraft("custom-part", "Custom Part"));
   let partDesignerAnchorSlot: number | null = null;
   let partDesignerSelectedSlot: number | null = null;
   let partDesignerSlots: PartDesignerSlot[] = new Array<PartDesignerSlot>(EDITOR_GRID_MAX_SIZE).fill(null);
@@ -1220,36 +1218,27 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     }
     testArenaLeaderboardCompeteBusy = true;
     const totalRuns = Math.max(1, Math.min(200, Math.floor(runs)));
-    let completedTotal = 0;
     testArenaLeaderboardCompeteStatus = `Running leaderboard matches... 0/${totalRuns}`;
     renderPanels();
     try {
-      for (let i = 0; i < totalRuns; i += 1) {
-        const res = await fetch("/__arena/composite/leaderboard/compete", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            mode,
-            runs: 1,
-            runAId: runAId ?? null,
-            runBId: runBId ?? null,
-          }),
-        });
-        const parsed = await res.json().catch(() => null) as { completed?: number; reason?: string } | null;
-        if (!res.ok) {
-          testArenaLeaderboardCompeteStatus = `Competition stopped at ${completedTotal}/${totalRuns}: ${parsed?.reason ?? "request failed"}`;
-          break;
-        }
-        const completedThisRound = Math.max(0, Number(parsed?.completed ?? 0));
-        completedTotal += completedThisRound;
-        await refreshTestArenaLeaderboard();
-        await refreshTestArenaCompositeModelOptions();
-        testArenaLeaderboardCompeteStatus = `Running leaderboard matches... ${completedTotal}/${totalRuns}`;
-        renderPanels();
-        if (completedThisRound <= 0) {
-          break;
-        }
+      const res = await fetch("/__arena/composite/leaderboard/compete", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          mode,
+          runs: totalRuns,
+          runAId: runAId ?? null,
+          runBId: runBId ?? null,
+        }),
+      });
+      const parsed = await res.json().catch(() => null) as { completed?: number; reason?: string } | null;
+      const completedTotal = Math.max(0, Number(parsed?.completed ?? 0));
+      if (!res.ok) {
+        testArenaLeaderboardCompeteStatus = `Competition stopped at ${completedTotal}/${totalRuns}: ${parsed?.reason ?? "request failed"}`;
+        return;
       }
+      await refreshTestArenaLeaderboard();
+      await refreshTestArenaCompositeModelOptions();
       if (completedTotal >= totalRuns) {
         testArenaLeaderboardCompeteStatus = `Competition completed: ${completedTotal}/${totalRuns} rounds.`;
       } else if (completedTotal > 0) {
@@ -1968,8 +1957,9 @@ export function bootstrap(options: BootstrapOptions = {}): void {
 
   const refreshPartsFromStore = async (): Promise<void> => {
     const defaultParts = await fetchDefaultPartsFromStore();
-    const explicitDefaults = defaultParts.filter((part) => !((part.tags ?? []).includes("implicit")));
-    parts.splice(0, parts.length, ...explicitDefaults);
+    const userParts = await fetchUserPartsFromStore();
+    const mergedParts = mergePartCatalogs(defaultParts, userParts);
+    parts.splice(0, parts.length, ...mergedParts);
     const applyMaterialOverridesFromParts = (): void => {
       const materialIds: MaterialId[] = ["basic", "reinforced", "ceramic", "reactive", "combined"];
       for (const materialId of materialIds) {
@@ -2305,32 +2295,29 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     return result;
   };
 
-  const getPartMetadataDefaults = (baseComponent: ComponentId): NonNullable<PartDefinition["properties"]> => {
-    const stats = COMPONENTS[baseComponent];
-    return {
-      category: stats.type === "weapon"
-        ? "weapon"
-        : stats.type === "engine"
-          ? "mobility"
-          : stats.type === "loader"
-            ? "support"
-            : "functional",
-      subcategory: stats.type === "weapon"
-        ? (stats.weaponClass ?? "weapon")
-        : stats.type === "engine"
-          ? (stats.propulsion?.platform ?? "engine")
-          : stats.type,
-      hp: undefined,
-      isEngine: stats.type === "engine",
-      isWeapon: stats.type === "weapon",
-      isLoader: stats.type === "loader",
-      isArmor: false,
-      engineType: stats.type === "engine" ? stats.propulsion?.platform : undefined,
-      weaponType: stats.type === "weapon" ? stats.weaponClass : undefined,
-      loaderServesTags: stats.type === "loader" ? stats.loader?.supports.map((entry) => String(entry)) : undefined,
-      loaderCooldownMultiplier: stats.type === "loader" ? stats.loader?.loadMultiplier : undefined,
-      hasCoreTuning: false,
-    };
+  const resolveMaterialIdFromStructurePart = (part: PartDefinition): MaterialId | null => {
+    if (part.layer !== "structure") {
+      return null;
+    }
+    if (part.properties?.materialId) {
+      return part.properties.materialId;
+    }
+    if (part.id === "material-basic" || part.id === "basic") {
+      return "basic";
+    }
+    if (part.id === "material-reinforced" || part.id === "reinforced") {
+      return "reinforced";
+    }
+    if (part.id === "material-ceramic" || part.id === "ceramic") {
+      return "ceramic";
+    }
+    if (part.id === "material-reactive" || part.id === "reactive") {
+      return "reactive";
+    }
+    if (part.id === "material-combined" || part.id === "combined") {
+      return "combined";
+    }
+    return null;
   };
 
   const getMaterialDefaultsForPart = (part: PartDefinition): {
@@ -2341,49 +2328,12 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     hp: number;
     mass: number;
   } => {
-    const explicit = part.properties?.materialId;
-    const inferred = part.id === "material-basic" || part.id === "basic"
-      ? "basic"
-      : part.id === "material-reinforced" || part.id === "reinforced"
-        ? "reinforced"
-        : part.id === "material-ceramic" || part.id === "ceramic"
-          ? "ceramic"
-          : part.id === "material-reactive" || part.id === "reactive"
-            ? "reactive"
-            : part.id === "material-combined" || part.id === "combined"
-              ? "combined"
-              : "basic";
-    const materialId: MaterialId = explicit ?? inferred;
-    const material = MATERIALS[materialId];
-    return {
-      materialId,
-      materialArmor: material.armor,
-      materialRecoverPerSecond: material.recoverPerSecond,
-      materialColor: material.color,
-      hp: material.hp,
-      mass: material.mass,
-    };
-  };
-
-  const getPartMetadataDefaultsForLayer = (
-    layer: PartDefinition["layer"],
-    baseComponent: ComponentId,
-  ): Pick<NonNullable<PartDefinition["properties"]>, "category" | "subcategory"> => {
-    if (layer === "structure") {
-      return {
-        category: "structure",
-        subcategory: "armor",
-      };
-    }
-    const defaults = getPartMetadataDefaults(baseComponent);
-    return {
-      category: defaults.category,
-      subcategory: defaults.subcategory,
-    };
+    const materialId: MaterialId = resolveMaterialIdFromStructurePart(part) ?? "basic";
+    return getStructureMaterialDefaults(materialId);
   };
 
   const syncPartMetaDefaultsIfNotEdited = (): void => {
-    const suggested = getPartMetadataDefaultsForLayer(partDesignerDraft.layer, partDesignerDraft.baseComponent);
+    const suggested = getConfiguredPartMetadataDefaultsForLayer(partDesignerDraft.layer, partDesignerDraft.baseComponent);
     const current = partDesignerDraft.properties ?? {};
     partDesignerDraft.properties = {
       ...current,
@@ -2393,8 +2343,8 @@ export function bootstrap(options: BootstrapOptions = {}): void {
   };
 
   const applyPartMetadataDefaults = (part: PartDefinition): PartDefinition => {
-    const defaults = getPartMetadataDefaults(part.baseComponent);
-    const metaDefaults = getPartMetadataDefaultsForLayer(part.layer, part.baseComponent);
+    const defaults = getPartPropertyDefaults(part.baseComponent);
+    const metaDefaults = getConfiguredPartMetadataDefaultsForLayer(part.layer, part.baseComponent);
     const materialDefaults = part.layer === "structure" ? getMaterialDefaultsForPart(part) : null;
     const hasCoreTuningOverrides = part.stats?.mass !== undefined || part.stats?.hpMul !== undefined;
     return {
@@ -2504,7 +2454,6 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         return `<button class="editor-comp-card ${selectedClass}" data-comp-value="${item.value}" data-comp-detail="${item.detail}" data-comp-title="${item.title}" title="${item.title}">
           <span class="editor-thumb">${item.thumb}</span>
           <span class="editor-comp-name">${item.title}</span>
-          <span class="editor-comp-sub">${item.subtitle}</span>
         </button>`;
       }).join("");
       selectedInfo.innerHTML = `
@@ -2960,16 +2909,24 @@ export function bootstrap(options: BootstrapOptions = {}): void {
 
   const getEditorCatalogItems = (): EditorCatalogItem[] => {
     if (editorLayer === "structure") {
-      return Object.entries(MATERIALS).map(([id, stats]) => {
-        const materialId = id as MaterialId;
-        return {
+      const seenMaterial = new Set<MaterialId>();
+      const items: EditorCatalogItem[] = [];
+      for (const part of parts) {
+        const materialId = resolveMaterialIdFromStructurePart(part);
+        if (!materialId || seenMaterial.has(materialId)) {
+          continue;
+        }
+        seenMaterial.add(materialId);
+        const stats = MATERIALS[materialId];
+        items.push({
           value: materialId,
-          title: stats.label,
-          subtitle: materialId,
+          title: part.name,
+          subtitle: `${materialId}/${part.id}`,
           detail: `Mass ${stats.mass.toFixed(2)} | Armor ${stats.armor.toFixed(2)} | HP ${stats.hp.toFixed(0)} | Recover ${stats.recoverPerSecond.toFixed(1)}/s`,
           thumb: materialId.slice(0, 2).toUpperCase(),
-        };
-      });
+        });
+      }
+      return items;
     }
     if (editorLayer === "functional") {
       const functionalParts = parts.filter((part) => part.layer === "functional");
@@ -3207,7 +3164,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     if (partDesignerDraft.layer === "functional") {
       partDesignerLastFunctionalBaseComponent = partDesignerDraft.baseComponent;
     }
-    const suggestedMeta = getPartMetadataDefaultsForLayer(partDesignerDraft.layer, partDesignerDraft.baseComponent);
+    const suggestedMeta = getConfiguredPartMetadataDefaultsForLayer(partDesignerDraft.layer, partDesignerDraft.baseComponent);
     partDesignerCategoryEdited = (partDesignerDraft.properties?.category ?? "") !== (suggestedMeta.category ?? "");
     partDesignerSubcategoryEdited = (partDesignerDraft.properties?.subcategory ?? "") !== (suggestedMeta.subcategory ?? "");
     partDesignerSlots = new Array<PartDesignerSlot>(EDITOR_GRID_MAX_SIZE).fill(null);
@@ -5458,7 +5415,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       if (partDesignerDraft.directional === undefined) {
         partDesignerDraft.directional = COMPONENTS[partDesignerDraft.baseComponent].directional === true;
       }
-      const defaults = getPartMetadataDefaults(partDesignerDraft.baseComponent);
+      const defaults = getPartPropertyDefaults(partDesignerDraft.baseComponent);
       partDesignerDraft.properties = {
         ...(partDesignerDraft.properties ?? {}),
         isEngine: partDesignerDraft.layer === "structure" ? false : defaults.isEngine,
@@ -5808,40 +5765,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     getOptionalElement<HTMLButtonElement>("#btnNewPartDraft")?.addEventListener("click", () => {
       const newName = "Custom Part";
       const nextId = makeUniquePartId(slugifyPartId(newName));
-      partDesignerDraft = {
-        id: nextId,
-        name: newName,
-        layer: "functional",
-        baseComponent: "control",
-        directional: false,
-        anchor: { x: 0, y: 0 },
-        boxes: [{
-          x: 0,
-          y: 0,
-          occupiesFunctionalSpace: true,
-          occupiesStructureSpace: false,
-          needsStructureBehind: true,
-          isAttachPoint: false,
-          isAnchorPoint: true,
-          isShootingPoint: false,
-          takesDamage: true,
-          takesFunctionalDamage: true,
-        }],
-        properties: {
-          category: "functional",
-          subcategory: "custom",
-          hp: undefined,
-          isEngine: false,
-          isWeapon: false,
-          isLoader: false,
-          isArmor: false,
-          engineType: undefined,
-          weaponType: undefined,
-          loaderServesTags: undefined,
-          loaderCooldownMultiplier: undefined,
-          hasCoreTuning: false,
-        },
-      };
+      partDesignerDraft = createDefaultPartDraft(nextId, newName);
       partDesignerLastFunctionalBaseComponent = partDesignerDraft.baseComponent;
       partDesignerCategoryEdited = false;
       partDesignerSubcategoryEdited = false;

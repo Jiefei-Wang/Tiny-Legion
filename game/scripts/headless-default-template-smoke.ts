@@ -4,7 +4,7 @@ import { BATTLEFIELD_HEIGHT, BATTLEFIELD_WIDTH } from "../src/config/balance/bat
 import { COMPONENTS } from "../src/config/balance/weapons.ts";
 import { createInitialTemplates } from "../src/simulation/units/unit-builder.ts";
 import { mergeTemplates, parseTemplate, validateTemplateDetailed } from "../src/app/template-store.ts";
-import { createDefaultPartDefinitions, mergePartCatalogs, parsePartDefinition } from "../src/app/part-store.ts";
+import { mergePartCatalogs, parsePartDefinition } from "../src/app/part-store.ts";
 import type { BattleHooks } from "../src/gameplay/battle/battle-session.ts";
 import type { KeyState, MapNode, PartDefinition, UnitInstance, UnitTemplate } from "../src/types.ts";
 
@@ -91,11 +91,10 @@ function readPartDir(dirPath: string): PartDefinition[] {
 }
 
 function loadRuntimeMergedParts(): PartDefinition[] {
-  const baseParts = createDefaultPartDefinitions();
   const root = process.cwd().replace(/\\/g, "/");
   const defaults = readPartDir(`${root}/parts/default`);
   const users = readPartDir(`${root}/parts/user`);
-  return mergePartCatalogs(baseParts, mergePartCatalogs(defaults, users));
+  return mergePartCatalogs(defaults, users);
 }
 
 function readTemplateDir(dirPath: string, partCatalog: ReadonlyArray<PartDefinition>): UnitTemplate[] {

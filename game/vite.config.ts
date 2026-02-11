@@ -1,14 +1,15 @@
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { availableParallelism, cpus } from "node:os";
 import { resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import { defineConfig } from "vite";
 import { parseTemplate } from "../packages/game-core/src/templates/template-schema.ts";
 import {
-  createDefaultPartDefinitions,
   mergePartCatalogs,
   parsePartDefinition,
 } from "../packages/game-core/src/parts/part-schema.ts";
 import { runMatch } from "../arena/src/match/run-match.ts";
-import type { MatchAiSpec, MatchSpec } from "../arena/src/match/match-types.ts";
+import type { MatchAiSpec, MatchResult, MatchSpec } from "../arena/src/match/match-types.ts";
 
 function debugLogPlugin() {
   const logDir = resolve(process.cwd(), ".debug");
@@ -260,10 +261,10 @@ function templateStorePlugin() {
     return /^[a-z0-9-]+$/.test(id) ? id : null;
   };
 
-  const readPartsInDir = (dirPath: string): ReturnType<typeof createDefaultPartDefinitions> => {
+  const readPartsInDir = (dirPath: string): Array<NonNullable<ReturnType<typeof parsePartDefinition>>> => {
     ensureDir(dirPath);
     const files = readdirSync(dirPath).filter((name) => name.endsWith(".json"));
-    const results = createDefaultPartDefinitions().slice(0, 0);
+    const results: Array<NonNullable<ReturnType<typeof parsePartDefinition>>> = [];
     for (const fileName of files) {
       const filePath = resolve(dirPath, fileName);
       try {
@@ -285,11 +286,10 @@ function templateStorePlugin() {
     return results;
   };
 
-  const loadPartCatalog = (): ReturnType<typeof createDefaultPartDefinitions> => {
-    const builtIn = createDefaultPartDefinitions();
+  const loadPartCatalog = (): Array<NonNullable<ReturnType<typeof parsePartDefinition>>> => {
     const fromDefault = readPartsInDir(partDefaultDir);
     const fromUser = readPartsInDir(partUserDir);
-    return mergePartCatalogs(builtIn, mergePartCatalogs(fromDefault, fromUser));
+    return mergePartCatalogs(fromDefault, fromUser);
   };
 
   const readTemplatesInDir = (dirPath: string): unknown[] => {
@@ -464,10 +464,10 @@ function partStorePlugin() {
     return /^[a-z0-9-]+$/.test(id) ? id : null;
   };
 
-  const readPartsInDir = (dirPath: string): ReturnType<typeof createDefaultPartDefinitions> => {
+  const readPartsInDir = (dirPath: string): Array<NonNullable<ReturnType<typeof parsePartDefinition>>> => {
     ensureDir(dirPath);
     const files = readdirSync(dirPath).filter((name) => name.endsWith(".json"));
-    const results = createDefaultPartDefinitions().slice(0, 0);
+    const results: Array<NonNullable<ReturnType<typeof parsePartDefinition>>> = [];
     for (const fileName of files) {
       const filePath = resolve(dirPath, fileName);
       try {
@@ -489,10 +489,9 @@ function partStorePlugin() {
     return results;
   };
 
-  const readDefaultParts = (): ReturnType<typeof createDefaultPartDefinitions> => {
-    const builtIn = createDefaultPartDefinitions();
+  const readDefaultParts = (): Array<NonNullable<ReturnType<typeof parsePartDefinition>>> => {
     const fileBacked = readPartsInDir(defaultDir);
-    return mergePartCatalogs(builtIn, fileBacked);
+    return fileBacked;
   };
 
   return {
@@ -621,6 +620,12 @@ function arenaModelPlugin() {
   const phaseConfigFile = resolve(process.cwd(), "..", "arena", "composite-training.phases.json");
   const BASELINE_MODEL_ID = "baseline-game-ai";
   let leaderboardCompeteBusy = false;
+  const leaderboardParallelWorkers = Math.max(
+    1,
+    typeof availableParallelism === "function" ? availableParallelism() : cpus().length,
+  );
+  const workerPoolModuleFile = resolve(process.cwd(), "..", "arena", ".dist", "arena", "src", "lib", "worker-pool.js");
+  let workerPoolPromise: Promise<{ run: (payload: unknown) => Promise<unknown>; close: () => Promise<void> } | null> | null = null;
 
   type ModuleEntry = {
     id: string;
@@ -688,6 +693,43 @@ function arenaModelPlugin() {
     ties: 0,
     updatedAtMs: Date.now(),
   });
+  const baselineCompositeSpec = (): MatchAiSpec => ({
+    familyId: "composite",
+    params: {},
+    composite: {
+      target: { familyId: "baseline-target", params: {} },
+      movement: { familyId: "baseline-movement", params: {} },
+      shoot: { familyId: "baseline-shoot", params: {} },
+    },
+  });
+  const getWorkerPool = async (): Promise<{ run: (payload: unknown) => Promise<unknown>; close: () => Promise<void> } | null> => {
+    if (!workerPoolPromise) {
+      workerPoolPromise = (async () => {
+        if (!existsSync(workerPoolModuleFile)) {
+          return null;
+        }
+        try {
+          const workerPoolModule = await import(pathToFileURL(workerPoolModuleFile).href) as {
+            WorkerPool?: {
+              new (workerFileUrl: string, size: number): {
+                run: (payload: unknown) => Promise<unknown>;
+                close: () => Promise<void>;
+              };
+              matchWorkerUrl: () => string;
+            };
+          };
+          const WorkerPoolCtor = workerPoolModule.WorkerPool;
+          if (!WorkerPoolCtor) {
+            return null;
+          }
+          return new WorkerPoolCtor(WorkerPoolCtor.matchWorkerUrl(), leaderboardParallelWorkers);
+        } catch {
+          return null;
+        }
+      })();
+    }
+    return workerPoolPromise;
+  };
 
   const isCompositeSpec = (value: unknown): value is MatchAiSpec => {
     if (!value || typeof value !== "object") {
@@ -747,10 +789,7 @@ function arenaModelPlugin() {
     const models = collectCompositeRuns();
     models.push({
       runId: BASELINE_MODEL_ID,
-      spec: {
-        familyId: "baseline",
-        params: {},
-      },
+      spec: baselineCompositeSpec(),
       mtimeMs: 0,
     });
     return models;
@@ -957,6 +996,14 @@ function arenaModelPlugin() {
   return {
     name: "arena-models",
     configureServer(server: import("vite").ViteDevServer) {
+      const onClose = (): void => {
+        if (!workerPoolPromise) {
+          return;
+        }
+        void workerPoolPromise.then((pool) => pool?.close()).catch(() => undefined);
+      };
+      server.httpServer?.once("close", onClose);
+
       server.middlewares.use("/__arena/composite/modules", (req, res) => {
         if (req.method !== "GET") {
           res.statusCode = 405;
@@ -1101,6 +1148,11 @@ function arenaModelPlugin() {
           leaderboardCompeteBusy = true;
           try {
             const phaseScenario = loadLeaderboardPhaseScenario();
+            const jobs: Array<{
+              modelA: CompositeRun;
+              modelB: CompositeRun;
+              spec: MatchSpec;
+            }> = [];
             const updates: Array<{
               runA: string;
               runB: string;
@@ -1108,7 +1160,6 @@ function arenaModelPlugin() {
               deltaA: number;
               deltaB: number;
             }> = [];
-            let completed = 0;
             for (let i = 0; i < runsRequested; i += 1) {
               const pair = choosePair();
               if (!pair) {
@@ -1123,7 +1174,10 @@ function arenaModelPlugin() {
               if (!modelA || !modelB) {
                 continue;
               }
-              const spec: MatchSpec = {
+              jobs.push({
+                modelA,
+                modelB,
+                spec: {
                 seed: Date.now() + i * 9973 + Math.floor(Math.random() * 1000),
                 maxSimSeconds: 180,
                 nodeDefense: 1,
@@ -1140,18 +1194,42 @@ function arenaModelPlugin() {
                 },
                 templateNames: phaseScenario.templateNames,
                 ...(phaseScenario.battlefield ? { battlefield: phaseScenario.battlefield } : {}),
-              };
-              const result = await runMatch(spec);
+                },
+              });
+            }
+
+            const pool = await getWorkerPool();
+            const settledResults = await Promise.allSettled(
+              jobs.map((job) => (
+                pool
+                  ? pool.run(job.spec).then((result) => result as MatchResult)
+                  : runMatch(job.spec)
+              )),
+            );
+            let completed = 0;
+            for (let i = 0; i < settledResults.length; i += 1) {
+              const settled = settledResults[i];
+              if (settled.status !== "fulfilled") {
+                continue;
+              }
+              const result = settled.value;
+              const job = jobs[i];
+              if (!job) {
+                continue;
+              }
               const outcomeA: 0 | 0.5 | 1 = result.sides.player.tie ? 0.5 : (result.sides.player.win ? 1 : 0);
-              const ratingDelta = applyLeaderboardMatch(store, modelA.runId, modelB.runId, outcomeA);
+              const ratingDelta = applyLeaderboardMatch(store, job.modelA.runId, job.modelB.runId, outcomeA);
               updates.push({
-                runA: modelA.runId,
-                runB: modelB.runId,
+                runA: job.modelA.runId,
+                runB: job.modelB.runId,
                 outcome: outcomeA >= 0.99 ? "A" : outcomeA <= 0.01 ? "B" : "T",
                 deltaA: ratingDelta.deltaA,
                 deltaB: ratingDelta.deltaB,
               });
               completed += 1;
+            }
+            if (completed <= 0 && jobs.length > 0) {
+              throw new Error("No competition rounds completed.");
             }
             saveRatingStore(store);
             json(res, 200, {
@@ -1159,6 +1237,8 @@ function arenaModelPlugin() {
               mode,
               runsRequested,
               completed,
+              parallelWorkers: pool ? leaderboardParallelWorkers : 1,
+              parallelMode: pool ? "worker-threads" : "single-thread-fallback",
               updates: updates.slice(-30),
               leaderboard: buildLeaderboardEntries(),
             });

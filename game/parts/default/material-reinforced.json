@@ -1,6 +1,6 @@
-﻿{
-  "id": "structure-box",
-  "name": "Structure Box",
+{
+  "id": "material-reinforced",
+  "name": "Reinforced",
   "layer": "structure",
   "baseComponent": "control",
   "directional": false,
@@ -30,9 +30,18 @@
     "requireEmptyStructureOffsets": [],
     "requireEmptyFunctionalOffsets": []
   },
+  "stats": {
+    "gasCost": 5,
+    "mass": 13
+  },
   "properties": {
     "category": "structure",
-    "subcategory": "armor",
+    "subcategory": "material",
+    "materialId": "reinforced",
+    "materialArmor": 1.3,
+    "materialRecoverPerSecond": 1.9,
+    "materialColor": "#8ca3bd",
+    "hp": 150,
     "isEngine": false,
     "isWeapon": false,
     "isLoader": false,
@@ -40,6 +49,8 @@
     "hasCoreTuning": false
   },
   "tags": [
-    "structure"
+    "default",
+    "structure",
+    "material"
   ]
 }

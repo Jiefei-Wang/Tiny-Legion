@@ -75,6 +75,7 @@ Current implementation includes dedicated in-app editor tabs where the player ca
 - Switch between `Structure`, `Functional`, and `Display` layers from the right-side panel.
 - Use a resizable editor grid (up to `10x10`) for placement/removal by cell.
 - Choose parts/components from a layer-specific side palette (placeholder image cards + hover info).
+- Template Editor structure palette is sourced from file-backed structure-material part definitions (via part catalog), not directly from raw material config enumeration.
 - Toggle delete mode to remove items on the active layer.
 - Open any existing template from an `Open` window, create a template copy using one-click `Copy` (`-copy` postfix), or `Delete` file-backed entries from the same list.
 - Template IDs are auto-generated and hidden from editor UI (not user-editable).
@@ -109,7 +110,7 @@ Current implementation includes dedicated in-app editor tabs where the player ca
 - Part `Open` window supports direct open, one-click `Copy`, and `Delete` for file-backed entries.
 - Part Designer edits a **single reusable part definition** (not a full unit template).
 - Part Designer integrates layer mode into the `Base Component` selector via a `structure-layer` option (no separate layer control).
-- `Open Part` now shows each row with explicit `[layer]` and includes a canonical default `Structure Box` entry.
+- `Open Part` now shows each row with explicit `[layer]`; structure defaults are explicit file-backed material parts (`material-basic`, `material-reinforced`, `material-ceramic`, `material-reactive`, `material-combined`).
 - `Open Part` includes top filter tabs for `All`, `Structure`, and functional base-component types (`control`/`engine`/`weapon`/`loader`/`ammo`).
 - In `structure-layer` mode, functional-only metadata/constraints are hidden (for example engine/weapon/loader toggles, category/subcategory, and require-structure placement flags).
 - When base component changes in functional mode, category/subcategory auto-follow defaults unless the user has manually edited those fields.
@@ -259,9 +260,9 @@ Display layer provides optional visual mesh/sprite styling and silhouette polish
 - Canonical default part definitions are now explicitly authored in `game/parts/default/*.json` (one per current component family).
 - Default templates reference these explicit part IDs in `partId` so runtime/editor behavior matches configured part semantics.
 - Runtime part catalog merge order:
-  1. built-in implicit defaults from component stats,
-  2. file-backed defaults (`game/parts/default`),
-  3. user part overrides (`game/parts/user`).
+  1. file-backed defaults (`game/parts/default`),
+  2. user part overrides (`game/parts/user`).
+- Part Designer default values for `new part` and `base component switch` come from dedicated config defaults (component/material balance config), not from implicit built-in catalog entries.
 
 ---
 
@@ -369,6 +370,8 @@ No simple fixed hitpoint exchange for whole units. Damage emerges from impacts, 
 6. If structure is detached, all attached modules are removed with it.
 7. Module damage creates performance penalties or critical failure.
 8. Connectivity rule: any structure cluster disconnected from the single control unit is destroyed immediately.
+9. Armor is applied as flat damage deduction per impacted cell: `damageAfterArmor = incomingDamage - cellArmor`, `effectiveDamage = damageAfterArmor <= 0 ? 1 : damageAfterArmor`.
+10. Hit impulse still applies physical response (knockback/vibration) even on low/fully mitigated hits.
 
 Structure durability recovery:
 
@@ -380,7 +383,7 @@ Structure durability recovery:
 - `ImpactEnergy E = 0.5 * m_eff * v_rel^2`
 - `Stress = E / contactArea`
 - `Penetration if Stress > MaterialPenThreshold`
-- `ResidualDamage = max(0, Stress - Resistance) * tuningFactor`
+- `ResidualDamage = max(1, IncomingDamage - ArmorFlatReduction)` (minimum `1` when armor fully negates or exactly matches incoming damage)
 
 Velocity/knockback and recoil formulas:
 
@@ -390,7 +393,7 @@ Velocity/knockback and recoil formulas:
 
 Where:
 
-- `J_hit` = incoming impact impulse from enemy hit
+- `J_hit` = incoming impact impulse from enemy hit (motion response only; not additional structural damage by itself)
 - `J_recoil` = impulse generated when firing
 - `M_total` = current unit mass (structure + all surviving functional components)
 
@@ -622,8 +625,8 @@ The current playable implementation already includes:
 - Leaderboard competition runtime uses `p4-leaderboard` scenario settings from `arena/composite-training.phases.json` (template filters + battlefield size/ground-height), so rank battles align with training phase-4 conditions.
 - Elo uses pairwise diminishing-K updates (same two models -> progressively smaller K), which naturally converges under repeated head-to-head loops without hard score caps.
 - Leaderboard panel includes quick competition controls: `random pair`, `unranked vs random`, and `manual pair` modes plus configurable run count.
-- Leaderboard model pool includes a built-in `baseline-game-ai` entry representing the game's default baseline AI, so trained runs are ranked directly against current in-game baseline behavior.
-- Leaderboard competition updates are now incremental in UI: after each completed round, the table/model list refresh immediately so ranking changes are visible in real time.
+- Leaderboard model pool includes a built-in `baseline-game-ai` composed model (`baseline-target` + `baseline-movement` + `baseline-shoot`) so trained runs are ranked directly against current in-game baseline behavior.
+- Leaderboard `Run Competition` submits a batched request and executes rounds in parallel across CPU worker threads (all detected cores when worker runtime is available), then refreshes leaderboard/model lists after completion.
 - Test Arena module-selection contract is documented in `game/AI_COMPONENT_CONFIG.md`.
 - Training automation script `train_ai.sh` provides module-specific optimization (`shoot`/`movement`/`target`) and full compose optimization (`compose`) with per-module source selection (`baseline|new|trained:<path>`).
 

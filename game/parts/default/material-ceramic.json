@@ -1,0 +1,56 @@
+{
+  "id": "material-ceramic",
+  "name": "Ceramic",
+  "layer": "structure",
+  "baseComponent": "control",
+  "directional": false,
+  "anchor": {
+    "x": 0,
+    "y": 0
+  },
+  "boxes": [
+    {
+      "x": 0,
+      "y": 0,
+      "occupiesStructureSpace": true,
+      "occupiesFunctionalSpace": false,
+      "needsStructureBehind": false,
+      "isAttachPoint": false,
+      "isAnchorPoint": true,
+      "isShootingPoint": false,
+      "takesDamage": true,
+      "takesFunctionalDamage": true
+    }
+  ],
+  "placement": {
+    "requireStructureOffsets": [],
+    "requireStructureBelowAnchor": false,
+    "requireStructureOnFunctionalOccupiedBoxes": false,
+    "requireStructureOnStructureOccupiedBoxes": false,
+    "requireEmptyStructureOffsets": [],
+    "requireEmptyFunctionalOffsets": []
+  },
+  "stats": {
+    "gasCost": 6,
+    "mass": 9
+  },
+  "properties": {
+    "category": "structure",
+    "subcategory": "material",
+    "materialId": "ceramic",
+    "materialArmor": 1.2,
+    "materialRecoverPerSecond": 2,
+    "materialColor": "#a8d1e6",
+    "hp": 120,
+    "isEngine": false,
+    "isWeapon": false,
+    "isLoader": false,
+    "isArmor": true,
+    "hasCoreTuning": false
+  },
+  "tags": [
+    "default",
+    "structure",
+    "material"
+  ]
+}
