@@ -167,7 +167,6 @@ export function createBaselineShootAi(): ShootAiModule {
           bestScore = score;
           best = {
             preferredSlot: slot,
-            aim,
             intendedTargetId: target.rankedTargets[0]?.targetId ?? null,
             intendedTargetY: solved?.y ?? (target.rankedTargets[0] ? target.attackPoint.y : null),
             angleRad,

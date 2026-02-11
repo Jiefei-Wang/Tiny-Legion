@@ -7,6 +7,8 @@ import {
   mergePartCatalogs,
   parsePartDefinition,
 } from "../packages/game-core/src/parts/part-schema.ts";
+import { runMatch } from "../arena/src/match/run-match.ts";
+import type { MatchAiSpec, MatchSpec } from "../arena/src/match/match-types.ts";
 
 function debugLogPlugin() {
   const logDir = resolve(process.cwd(), ".debug");
@@ -612,9 +614,13 @@ function partStorePlugin() {
 }
 
 function arenaModelPlugin() {
-  const runsDir = resolve(process.cwd(), "..", "arena", ".arena-data", "runs");
-  const pythonModelsDir = resolve(process.cwd(), "..", "arena", ".arena-data", "python-models");
-  const ortDistDir = resolve(process.cwd(), "node_modules", "onnxruntime-web", "dist");
+  const arenaDataDir = resolve(process.cwd(), "..", "arena", ".arena-data");
+  const runsDir = resolve(arenaDataDir, "runs");
+  const leaderboardDir = resolve(arenaDataDir, "leaderboard");
+  const leaderboardFile = resolve(leaderboardDir, "composite-elo.json");
+  const BASELINE_MODEL_ID = "baseline-game-ai";
+  let leaderboardCompeteBusy = false;
+
   type ModuleEntry = {
     id: string;
     label: string;
@@ -622,76 +628,259 @@ function arenaModelPlugin() {
     compatible?: boolean;
     reason?: string;
   };
+  type CompositeRun = {
+    runId: string;
+    spec: MatchAiSpec;
+    mtimeMs: number;
+  };
+  type RatingEntry = {
+    score: number;
+    rounds: number;
+    games: number;
+    wins: number;
+    losses: number;
+    ties: number;
+    updatedAtMs: number;
+  };
+  type RatingStore = {
+    version: 1;
+    updatedAt: string;
+    ratings: Record<string, RatingEntry>;
+  };
+  type LeaderboardEntry = {
+    runId: string;
+    score: number;
+    rounds: number;
+    games: number;
+    wins: number;
+    losses: number;
+    ties: number;
+    isUnranked: boolean;
+    mtimeMs: number;
+    spec: MatchAiSpec;
+  };
+
+  const round2 = (value: number): number => Math.round(value * 100) / 100;
+  const clampInt = (value: unknown, min: number, max: number, fallback: number): number => {
+    const n = typeof value === "number" && Number.isFinite(value) ? Math.floor(value) : fallback;
+    return Math.max(min, Math.min(max, n));
+  };
+  const randomIndex = (length: number): number => Math.max(0, Math.min(length - 1, Math.floor(Math.random() * length)));
+  const defaultRatingEntry = (): RatingEntry => ({
+    score: 100,
+    rounds: 0,
+    games: 0,
+    wins: 0,
+    losses: 0,
+    ties: 0,
+    updatedAtMs: Date.now(),
+  });
+
+  const isCompositeSpec = (value: unknown): value is MatchAiSpec => {
+    if (!value || typeof value !== "object") {
+      return false;
+    }
+    const obj = value as Record<string, unknown>;
+    if (obj.familyId !== "composite") {
+      return false;
+    }
+    const composite = obj.composite;
+    if (!composite || typeof composite !== "object") {
+      return false;
+    }
+    const c = composite as Record<string, unknown>;
+    const hasModule = (kind: "target" | "movement" | "shoot"): boolean => {
+      const module = c[kind];
+      if (!module || typeof module !== "object") {
+        return false;
+      }
+      const mod = module as Record<string, unknown>;
+      return typeof mod.familyId === "string";
+    };
+    return hasModule("target") && hasModule("movement") && hasModule("shoot");
+  };
+
+  const collectCompositeRuns = (): CompositeRun[] => {
+    const out: CompositeRun[] = [];
+    if (!existsSync(runsDir)) {
+      return out;
+    }
+    const runIds = readdirSync(runsDir);
+    for (const runId of runIds) {
+      const filePath = resolve(runsDir, runId, "best-composite.json");
+      if (!existsSync(filePath)) {
+        continue;
+      }
+      try {
+        const raw = readFileSync(filePath, "utf8");
+        const parsed = JSON.parse(raw) as unknown;
+        if (!isCompositeSpec(parsed)) {
+          continue;
+        }
+        const stat = statSync(filePath);
+        out.push({
+          runId,
+          spec: parsed,
+          mtimeMs: stat.mtimeMs,
+        });
+      } catch {
+        continue;
+      }
+    }
+    return out;
+  };
+
+  const collectLeaderboardModels = (): CompositeRun[] => {
+    const models = collectCompositeRuns();
+    models.push({
+      runId: BASELINE_MODEL_ID,
+      spec: {
+        familyId: "baseline",
+        params: {},
+      },
+      mtimeMs: 0,
+    });
+    return models;
+  };
+
+  const loadRatingStore = (): RatingStore => {
+    if (!existsSync(leaderboardFile)) {
+      return { version: 1, updatedAt: new Date().toISOString(), ratings: {} };
+    }
+    try {
+      const raw = readFileSync(leaderboardFile, "utf8");
+      const parsed = JSON.parse(raw) as unknown;
+      if (!parsed || typeof parsed !== "object") {
+        return { version: 1, updatedAt: new Date().toISOString(), ratings: {} };
+      }
+      const obj = parsed as Record<string, unknown>;
+      const ratingsRaw = (obj.ratings && typeof obj.ratings === "object") ? obj.ratings as Record<string, unknown> : {};
+      const ratings: Record<string, RatingEntry> = {};
+      for (const [runId, entryRaw] of Object.entries(ratingsRaw)) {
+        if (!entryRaw || typeof entryRaw !== "object") {
+          continue;
+        }
+        const e = entryRaw as Record<string, unknown>;
+        ratings[runId] = {
+          score: Number.isFinite(e.score) ? Number(e.score) : 100,
+          rounds: clampInt((Number.isFinite(e.rounds) ? e.rounds : e.games), 0, 1_000_000, 0),
+          games: clampInt(e.games, 0, 1_000_000, 0),
+          wins: clampInt(e.wins, 0, 1_000_000, 0),
+          losses: clampInt(e.losses, 0, 1_000_000, 0),
+          ties: clampInt(e.ties, 0, 1_000_000, 0),
+          updatedAtMs: Number.isFinite(e.updatedAtMs) ? Number(e.updatedAtMs) : Date.now(),
+        };
+      }
+      return {
+        version: 1,
+        updatedAt: typeof obj.updatedAt === "string" ? obj.updatedAt : new Date().toISOString(),
+        ratings,
+      };
+    } catch {
+      return { version: 1, updatedAt: new Date().toISOString(), ratings: {} };
+    }
+  };
+
+  const saveRatingStore = (store: RatingStore): void => {
+    mkdirSync(leaderboardDir, { recursive: true });
+    store.updatedAt = new Date().toISOString();
+    writeFileSync(leaderboardFile, `${JSON.stringify(store, null, 2)}\n`, "utf8");
+  };
+
+  const ensureRatingsForRuns = (store: RatingStore, runs: CompositeRun[]): boolean => {
+    let changed = false;
+    for (const run of runs) {
+      if (!store.ratings[run.runId]) {
+        store.ratings[run.runId] = defaultRatingEntry();
+        changed = true;
+      }
+    }
+    return changed;
+  };
+
+  const buildLeaderboardEntries = (): LeaderboardEntry[] => {
+    const runs = collectLeaderboardModels();
+    const store = loadRatingStore();
+    const changed = ensureRatingsForRuns(store, runs);
+    if (changed) {
+      saveRatingStore(store);
+    }
+    const entries = runs.map((run) => {
+      const rating = store.ratings[run.runId] ?? defaultRatingEntry();
+      return {
+        runId: run.runId,
+        score: round2(Math.max(1, rating.score)),
+        rounds: rating.rounds,
+        games: rating.games,
+        wins: rating.wins,
+        losses: rating.losses,
+        ties: rating.ties,
+        isUnranked: rating.rounds <= 0,
+        mtimeMs: run.mtimeMs,
+        spec: run.spec,
+      };
+    });
+    entries.sort((a, b) => {
+      if (b.score !== a.score) {
+        return b.score - a.score;
+      }
+      if (b.rounds !== a.rounds) {
+        return b.rounds - a.rounds;
+      }
+      return b.mtimeMs - a.mtimeMs;
+    });
+    return entries;
+  };
+
+  const expectedScore = (scoreA: number, scoreB: number): number => {
+    const scale = 80;
+    return 1 / (1 + 10 ** ((scoreB - scoreA) / scale));
+  };
+
+  const applyLeaderboardMatch = (
+    store: RatingStore,
+    runA: string,
+    runB: string,
+    outcomeA: 0 | 0.5 | 1,
+  ): { deltaA: number; deltaB: number } => {
+    const a = store.ratings[runA] ?? (store.ratings[runA] = defaultRatingEntry());
+    const b = store.ratings[runB] ?? (store.ratings[runB] = defaultRatingEntry());
+    const gap = Math.abs(a.score - b.score);
+    const k = 14 + Math.min(48, gap * 0.2);
+    const ea = expectedScore(a.score, b.score);
+    const deltaA = k * (outcomeA - ea);
+    const deltaB = -deltaA;
+    a.score = round2(Math.max(1, a.score + deltaA));
+    b.score = round2(Math.max(1, b.score + deltaB));
+    a.rounds += 1;
+    b.rounds += 1;
+    a.games += 1;
+    b.games += 1;
+    if (outcomeA >= 0.99) {
+      a.wins += 1;
+      b.losses += 1;
+    } else if (outcomeA <= 0.01) {
+      a.losses += 1;
+      b.wins += 1;
+    } else {
+      a.ties += 1;
+      b.ties += 1;
+    }
+    const now = Date.now();
+    a.updatedAtMs = now;
+    b.updatedAtMs = now;
+    return { deltaA: round2(deltaA), deltaB: round2(deltaB) };
+  };
+
+  const json = (res: any, statusCode: number, payload: unknown): void => {
+    res.statusCode = statusCode;
+    res.setHeader("content-type", "application/json");
+    res.end(JSON.stringify(payload));
+  };
 
   return {
     name: "arena-models",
     configureServer(server: import("vite").ViteDevServer) {
-      server.middlewares.use("/__arena/ort", (req, res) => {
-        if (req.method !== "GET") {
-          res.statusCode = 405;
-          res.end("method not allowed");
-          return;
-        }
-        const rawUrl = req.url ?? "";
-        const path = rawUrl.split("?")[0] ?? "";
-        const fileName = decodeURIComponent(path.split("/").filter(Boolean).at(-1) ?? "");
-        if (!/^ort-wasm[-a-zA-Z0-9._]*\.(wasm|mjs|js)$/.test(fileName)) {
-          res.statusCode = 400;
-          res.end("invalid file name");
-          return;
-        }
-        const filePath = resolve(ortDistDir, fileName);
-        if (!existsSync(filePath)) {
-          res.statusCode = 404;
-          res.end("not found");
-          return;
-        }
-        try {
-          const buffer = readFileSync(filePath);
-          if (fileName.endsWith(".wasm")) {
-            res.setHeader("content-type", "application/wasm");
-          } else if (fileName.endsWith(".mjs") || fileName.endsWith(".js")) {
-            res.setHeader("content-type", "text/javascript; charset=utf-8");
-          } else {
-            res.setHeader("content-type", "application/octet-stream");
-          }
-          res.end(buffer);
-        } catch {
-          res.statusCode = 500;
-          res.end("failed to read onnxruntime-web asset");
-        }
-      });
-
-      server.middlewares.use("/__arena/python-models", (req, res) => {
-        if (req.method !== "GET") {
-          res.statusCode = 405;
-          res.end("method not allowed");
-          return;
-        }
-        const rawUrl = req.url ?? "";
-        const path = rawUrl.split("?")[0] ?? "";
-        const fileName = decodeURIComponent(path.split("/").filter(Boolean).at(-1) ?? "");
-        if (!/^[a-zA-Z0-9._-]+\.onnx$/.test(fileName)) {
-          res.statusCode = 400;
-          res.end("invalid file name");
-          return;
-        }
-        const filePath = resolve(pythonModelsDir, fileName);
-        if (!existsSync(filePath)) {
-          res.statusCode = 404;
-          res.end("not found");
-          return;
-        }
-        try {
-          const buffer = readFileSync(filePath);
-          res.setHeader("content-type", "application/octet-stream");
-          res.end(buffer);
-        } catch {
-          res.statusCode = 500;
-          res.end("failed to read model file");
-        }
-      });
-
       server.middlewares.use("/__arena/composite/modules", (req, res) => {
         if (req.method !== "GET") {
           res.statusCode = 405;
@@ -703,92 +892,207 @@ function arenaModelPlugin() {
           movement: [],
           shoot: [],
         };
-        if (existsSync(runsDir)) {
-          const runIds = readdirSync(runsDir);
-          for (const runId of runIds) {
-            const filePath = resolve(runsDir, runId, "best-composite.json");
-            if (!existsSync(filePath)) {
-              continue;
+        const runs = collectCompositeRuns();
+        for (const run of runs) {
+          const parsed = run.spec;
+          const pushModule = (kind: "target" | "movement" | "shoot"): void => {
+            const module = parsed.composite?.[kind];
+            const familyId = typeof module?.familyId === "string" ? module.familyId : "";
+            if (!familyId) {
+              return;
             }
-            try {
-              const raw = readFileSync(filePath, "utf8");
-              const parsed = JSON.parse(raw) as {
-                familyId?: string;
-                composite?: {
-                  target?: { familyId?: string; params?: Record<string, number | boolean> };
-                  movement?: { familyId?: string; params?: Record<string, number | boolean> };
-                  shoot?: { familyId?: string; params?: Record<string, number | boolean> };
-                };
-              };
-              if (parsed?.familyId !== "composite" || !parsed.composite) {
-                continue;
-              }
-              const pushModule = (kind: "target" | "movement" | "shoot"): void => {
-                const module = parsed.composite?.[kind];
-                const familyId = typeof module?.familyId === "string" ? module.familyId : "";
-                if (!familyId) {
-                  return;
-                }
-                modules[kind].push({
-                  id: `${runId}:${kind}:${familyId}`,
-                  label: `saved:${runId}:${kind}:${familyId}`,
-                  spec: {
-                    familyId,
-                    params: module?.params ?? {},
-                  },
-                });
-              };
-              pushModule("target");
-              pushModule("movement");
-              pushModule("shoot");
-            } catch {
-              continue;
-            }
-          }
-        }
-        if (existsSync(pythonModelsDir)) {
-          const fileNames = readdirSync(pythonModelsDir).filter((name) => name.endsWith(".component.json"));
-          for (const fileName of fileNames) {
-            const filePath = resolve(pythonModelsDir, fileName);
-            try {
-              const raw = readFileSync(filePath, "utf8");
-              const parsed = JSON.parse(raw) as {
-                moduleKind?: string;
-                aiType?: string;
-                modelPath?: string;
-              };
-              const moduleKind = parsed.moduleKind;
-              if (moduleKind !== "target" && moduleKind !== "movement" && moduleKind !== "shoot") {
-                continue;
-              }
-              const onnxFileName = fileName.replace(/\.component\.json$/, ".onnx");
-              const onnxPath = resolve(pythonModelsDir, onnxFileName);
-              const hasOnnx = existsSync(onnxPath);
-              modules[moduleKind].push({
-                id: `python:${fileName}`,
-                label: `python:${fileName}`,
-                ...(moduleKind === "shoot" && hasOnnx
-                  ? {
-                    compatible: true,
-                    spec: {
-                      familyId: `python-onnx-shoot:${onnxFileName}`,
-                      params: {},
-                    },
-                  }
-                  : {
-                    compatible: false,
-                    reason: hasOnnx
-                      ? "Only shoot ONNX modules are currently executable in browser."
-                      : "Missing ONNX file for this component metadata.",
-                  }),
-              });
-            } catch {
-              continue;
-            }
-          }
+            modules[kind].push({
+              id: `${run.runId}:${kind}:${familyId}`,
+              label: `saved:${run.runId}:${kind}:${familyId}`,
+              spec: {
+                familyId,
+                params: module?.params ?? {},
+              },
+            });
+          };
+          pushModule("target");
+          pushModule("movement");
+          pushModule("shoot");
         }
         res.setHeader("content-type", "application/json");
         res.end(JSON.stringify({ ok: true, modules }));
+      });
+
+      server.middlewares.use("/__arena/composite/models", (req, res) => {
+        if (req.method !== "GET") {
+          res.statusCode = 405;
+          res.end("method not allowed");
+          return;
+        }
+        const entries = buildLeaderboardEntries().map((entry) => ({
+          runId: entry.runId,
+          label: `${entry.runId}${entry.runId === BASELINE_MODEL_ID ? " (default baseline AI)" : ""} (score ${entry.score.toFixed(2)}, rounds ${entry.rounds})`,
+          score: entry.score,
+          rounds: entry.rounds,
+          games: entry.games,
+          wins: entry.wins,
+          losses: entry.losses,
+          ties: entry.ties,
+          isUnranked: entry.isUnranked,
+          mtimeMs: entry.mtimeMs,
+          spec: entry.spec,
+        }));
+        res.setHeader("content-type", "application/json");
+        res.end(JSON.stringify({ ok: true, entries }));
+      });
+
+      server.middlewares.use("/__arena/composite/leaderboard/compete", (req, res) => {
+        if (req.method !== "POST") {
+          res.statusCode = 405;
+          res.end("method not allowed");
+          return;
+        }
+        if (leaderboardCompeteBusy) {
+          json(res, 409, { ok: false, reason: "busy" });
+          return;
+        }
+        let body = "";
+        req.on("data", (chunk) => {
+          body += chunk;
+        });
+        req.on("end", async () => {
+          let payload: { mode?: string; runs?: number; runAId?: string; runBId?: string } = {};
+          try {
+            payload = JSON.parse(body || "{}") as { mode?: string; runs?: number; runAId?: string; runBId?: string };
+          } catch {
+            json(res, 400, { ok: false, reason: "bad_json" });
+            return;
+          }
+          const mode = payload.mode === "unranked-vs-random"
+            ? "unranked-vs-random"
+            : payload.mode === "manual-pair"
+              ? "manual-pair"
+              : "random-pair";
+          const runsRequested = clampInt(payload.runs, 1, 200, 10);
+          const runAId = typeof payload.runAId === "string" ? payload.runAId.trim() : "";
+          const runBId = typeof payload.runBId === "string" ? payload.runBId.trim() : "";
+
+          const allRuns = collectLeaderboardModels();
+          if (allRuns.length < 2) {
+            json(res, 400, { ok: false, reason: "need_at_least_two_models" });
+            return;
+          }
+          const runById = new Map<string, CompositeRun>(allRuns.map((run) => [run.runId, run] as const));
+          const store = loadRatingStore();
+          ensureRatingsForRuns(store, allRuns);
+
+          const choosePair = (): { a: LeaderboardEntry; b: LeaderboardEntry } | null => {
+            const entries = buildLeaderboardEntries();
+            if (entries.length < 2) {
+              return null;
+            }
+            if (mode === "manual-pair") {
+              const a = entries.find((entry) => entry.runId === runAId) ?? null;
+              const b = entries.find((entry) => entry.runId === runBId) ?? null;
+              if (!a || !b || a.runId === b.runId) {
+                return null;
+              }
+              return { a, b };
+            }
+            if (mode === "unranked-vs-random") {
+              const unranked = entries.filter((entry) => entry.isUnranked);
+              if (unranked.length <= 0) {
+                return null;
+              }
+              const a = unranked[randomIndex(unranked.length)] ?? null;
+              if (!a) {
+                return null;
+              }
+              const opponents = entries.filter((entry) => entry.runId !== a.runId);
+              if (opponents.length <= 0) {
+                return null;
+              }
+              const b = opponents[randomIndex(opponents.length)] ?? null;
+              return b ? { a, b } : null;
+            }
+            const aIdx = randomIndex(entries.length);
+            let bIdx = randomIndex(entries.length);
+            if (entries.length > 1) {
+              while (bIdx === aIdx) {
+                bIdx = randomIndex(entries.length);
+              }
+            }
+            const a = entries[aIdx];
+            const b = entries[bIdx];
+            return a && b && a.runId !== b.runId ? { a, b } : null;
+          };
+
+          leaderboardCompeteBusy = true;
+          try {
+            const updates: Array<{
+              runA: string;
+              runB: string;
+              outcome: "A" | "B" | "T";
+              deltaA: number;
+              deltaB: number;
+            }> = [];
+            let completed = 0;
+            for (let i = 0; i < runsRequested; i += 1) {
+              const pair = choosePair();
+              if (!pair) {
+                if (mode === "manual-pair") {
+                  json(res, 400, { ok: false, reason: "invalid_manual_pair" });
+                  return;
+                }
+                break;
+              }
+              const modelA = runById.get(pair.a.runId);
+              const modelB = runById.get(pair.b.runId);
+              if (!modelA || !modelB) {
+                continue;
+              }
+              const spec: MatchSpec = {
+                seed: Date.now() + i * 9973 + Math.floor(Math.random() * 1000),
+                maxSimSeconds: 180,
+                nodeDefense: 1,
+                baseHp: 1200,
+                playerGas: 10000,
+                enemyGas: 10000,
+                spawnBurst: 1,
+                spawnMaxActive: 5,
+                aiPlayer: modelA.spec,
+                aiEnemy: modelB.spec,
+                scenario: {
+                  withBase: true,
+                  initialUnitsPerSide: 4,
+                },
+              };
+              const result = await runMatch(spec);
+              const outcomeA: 0 | 0.5 | 1 = result.sides.player.tie ? 0.5 : (result.sides.player.win ? 1 : 0);
+              const ratingDelta = applyLeaderboardMatch(store, modelA.runId, modelB.runId, outcomeA);
+              updates.push({
+                runA: modelA.runId,
+                runB: modelB.runId,
+                outcome: outcomeA >= 0.99 ? "A" : outcomeA <= 0.01 ? "B" : "T",
+                deltaA: ratingDelta.deltaA,
+                deltaB: ratingDelta.deltaB,
+              });
+              completed += 1;
+            }
+            saveRatingStore(store);
+            json(res, 200, {
+              ok: true,
+              mode,
+              runsRequested,
+              completed,
+              updates: updates.slice(-30),
+              leaderboard: buildLeaderboardEntries(),
+            });
+          } catch (error) {
+            json(res, 500, {
+              ok: false,
+              reason: "compete_failed",
+              error: error instanceof Error ? error.message : String(error),
+            });
+          } finally {
+            leaderboardCompeteBusy = false;
+          }
+        });
       });
 
       server.middlewares.use("/__arena/composite/latest", (req, res) => {
@@ -797,250 +1101,45 @@ function arenaModelPlugin() {
           res.end("method not allowed");
           return;
         }
-        if (!existsSync(runsDir)) {
+        const runs = collectCompositeRuns();
+        if (runs.length <= 0) {
           res.setHeader("content-type", "application/json");
           res.end(JSON.stringify({ ok: true, found: false }));
           return;
         }
-        const runIds = readdirSync(runsDir);
-        let bestPath: string | null = null;
-        let bestMtime = 0;
-        for (const runId of runIds) {
-          const filePath = resolve(runsDir, runId, "best-composite.json");
-          if (!existsSync(filePath)) {
-            continue;
-          }
-          const stat = statSync(filePath);
-          const mtime = stat.mtimeMs;
-          if (mtime > bestMtime) {
-            bestMtime = mtime;
-            bestPath = filePath;
-          }
-        }
-        if (!bestPath) {
-          res.setHeader("content-type", "application/json");
-          res.end(JSON.stringify({ ok: true, found: false }));
+        runs.sort((a, b) => b.mtimeMs - a.mtimeMs);
+        const latest = runs[0];
+        res.setHeader("content-type", "application/json");
+        res.end(JSON.stringify({ ok: true, found: true, runId: latest.runId, spec: latest.spec }));
+      });
+
+      server.middlewares.use("/__arena/composite/leaderboard", (req, res) => {
+        if (req.method !== "GET") {
+          res.statusCode = 405;
+          res.end("method not allowed");
           return;
         }
-        try {
-          const raw = readFileSync(bestPath, "utf8");
-          const spec = JSON.parse(raw);
-          res.setHeader("content-type", "application/json");
-          res.end(JSON.stringify({ ok: true, found: true, path: bestPath, spec }));
-        } catch {
-          res.statusCode = 500;
-          res.end("failed to read latest model");
-        }
-      });
-    },
-  };
-}
-
-function pythonAiBridgePlugin() {
-  type BridgeRequest = {
-    id: string;
-    createdAtMs: number;
-    payload: unknown;
-  };
-  type BridgeResult = {
-    completedAtMs: number;
-    commands: unknown[];
-    errors: string[];
-  };
-
-  const pending: BridgeRequest[] = [];
-  const resultsById = new Map<string, BridgeResult>();
-  let connectedClientId: string | null = null;
-  let lastSeenMs = 0;
-  let seq = 1;
-
-  const json = (res: any, status: number, payload: unknown): void => {
-    res.statusCode = status;
-    res.setHeader("content-type", "application/json");
-    res.end(JSON.stringify(payload));
-  };
-
-  const parseJsonBody = (req: any, res: any, cb: (parsed: any) => void): void => {
-    let body = "";
-    req.on("data", (chunk: any) => {
-      body += String(chunk);
-    });
-    req.on("end", () => {
-      try {
-        cb(JSON.parse(body || "{}"));
-      } catch {
-        json(res, 400, { ok: false, reason: "bad_json" });
-      }
-    });
-  };
-
-  const nextId = (): string => {
-    const id = `pyai_${Date.now().toString(36)}_${(seq++).toString(36)}`;
-    return id;
-  };
-
-  const trimOldResults = (): void => {
-    const now = Date.now();
-    for (const [id, result] of resultsById.entries()) {
-      if (now - result.completedAtMs > 5 * 60 * 1000) {
-        resultsById.delete(id);
-      }
-    }
-  };
-
-  return {
-    name: "python-ai-bridge",
-    configureServer(server: import("vite").ViteDevServer) {
-      server.middlewares.use("/__pyai/connect", (req, res) => {
-        if (req.method !== "POST") {
-          return json(res, 405, { ok: false, reason: "method_not_allowed" });
-        }
-        return parseJsonBody(req, res, (parsed) => {
-          const clientId = typeof parsed.clientId === "string" ? parsed.clientId.trim() : "";
-          if (!clientId) {
-            return json(res, 400, { ok: false, reason: "missing_client_id" });
-          }
-          connectedClientId = clientId;
-          lastSeenMs = Date.now();
-          return json(res, 200, { ok: true, connected: true, clientId: connectedClientId });
-        });
-      });
-
-      server.middlewares.use("/__pyai/heartbeat", (req, res) => {
-        if (req.method !== "POST") {
-          return json(res, 405, { ok: false, reason: "method_not_allowed" });
-        }
-        return parseJsonBody(req, res, (parsed) => {
-          const clientId = typeof parsed.clientId === "string" ? parsed.clientId.trim() : "";
-          if (!clientId || !connectedClientId || clientId !== connectedClientId) {
-            return json(res, 403, { ok: false, reason: "not_connected" });
-          }
-          lastSeenMs = Date.now();
-          return json(res, 200, { ok: true, connected: true, clientId: connectedClientId });
-        });
-      });
-
-      server.middlewares.use("/__pyai/disconnect", (req, res) => {
-        if (req.method !== "POST") {
-          return json(res, 405, { ok: false, reason: "method_not_allowed" });
-        }
-        return parseJsonBody(req, res, (parsed) => {
-          const clientId = typeof parsed.clientId === "string" ? parsed.clientId.trim() : "";
-          if (connectedClientId && (!clientId || clientId === connectedClientId)) {
-            connectedClientId = null;
-            lastSeenMs = 0;
-          }
-          return json(res, 200, { ok: true, connected: false });
-        });
-      });
-
-      server.middlewares.use("/__pyai/status", (req, res) => {
-        if (req.method !== "GET") {
-          return json(res, 405, { ok: false, reason: "method_not_allowed" });
-        }
-        trimOldResults();
-        const connected = Boolean(connectedClientId) && (Date.now() - lastSeenMs <= 15_000);
-        if (!connected) {
-          connectedClientId = null;
-        }
-        return json(res, 200, {
-          ok: true,
-          connected,
-          clientId: connectedClientId,
-          lastSeenMs,
-          pendingCount: pending.length,
-        });
-      });
-
-      server.middlewares.use("/__pyai/request", (req, res) => {
-        if (req.method !== "POST") {
-          return json(res, 405, { ok: false, reason: "method_not_allowed" });
-        }
-        return parseJsonBody(req, res, (parsed) => {
-          const connected = Boolean(connectedClientId) && (Date.now() - lastSeenMs <= 15_000);
-          if (!connected) {
-            connectedClientId = null;
-            return json(res, 200, { ok: false, connected: false, reason: "python_not_connected" });
-          }
-          const id = nextId();
-          pending.push({
-            id,
-            createdAtMs: Date.now(),
-            payload: parsed,
-          });
-          return json(res, 200, { ok: true, connected: true, requestId: id });
-        });
-      });
-
-      server.middlewares.use("/__pyai/next", (req, res) => {
-        if (req.method !== "GET") {
-          return json(res, 405, { ok: false, reason: "method_not_allowed" });
-        }
-        const url = new URL(req.url ?? "", "http://localhost");
-        const clientId = url.searchParams.get("clientId")?.trim() ?? "";
-        if (!connectedClientId || clientId !== connectedClientId) {
-          return json(res, 403, { ok: false, reason: "not_connected" });
-        }
-        lastSeenMs = Date.now();
-        const request = pending.shift() ?? null;
-        return json(res, 200, { ok: true, request });
-      });
-
-      server.middlewares.use("/__pyai/respond", (req, res) => {
-        const path = req.url ?? "";
-        const segments = path.split("/").filter(Boolean);
-        const requestId = segments[segments.length - 1] ?? "";
-        if (!requestId) {
-          return json(res, 400, { ok: false, reason: "missing_request_id" });
-        }
-        if (req.method !== "POST") {
-          return json(res, 405, { ok: false, reason: "method_not_allowed" });
-        }
-        return parseJsonBody(req, res, (parsed) => {
-          const clientId = typeof parsed.clientId === "string" ? parsed.clientId.trim() : "";
-          if (!connectedClientId || clientId !== connectedClientId) {
-            return json(res, 403, { ok: false, reason: "not_connected" });
-          }
-          lastSeenMs = Date.now();
-          const commands = Array.isArray(parsed.commands) ? parsed.commands : [];
-          const errors = Array.isArray(parsed.errors) ? parsed.errors.map((e: unknown) => String(e)) : [];
-          resultsById.set(requestId, {
-            completedAtMs: Date.now(),
-            commands,
-            errors,
-          });
-          return json(res, 200, { ok: true });
-        });
-      });
-
-      server.middlewares.use("/__pyai/result", (req, res) => {
-        const path = req.url ?? "";
-        const segments = path.split("/").filter(Boolean);
-        const requestId = segments[segments.length - 1] ?? "";
-        if (!requestId) {
-          return json(res, 400, { ok: false, reason: "missing_request_id" });
-        }
-        if (req.method !== "GET") {
-          return json(res, 405, { ok: false, reason: "method_not_allowed" });
-        }
-        trimOldResults();
-        const result = resultsById.get(requestId);
-        if (!result) {
-          return json(res, 200, { ok: true, status: "pending" });
-        }
-        return json(res, 200, {
-          ok: true,
-          status: "done",
-          result: {
-            commands: result.commands,
-            errors: result.errors,
-          },
-        });
+        const entries = buildLeaderboardEntries().map((entry) => ({
+          runId: entry.runId,
+          score: entry.score,
+          rounds: entry.rounds,
+          games: entry.games,
+          wins: entry.wins,
+          losses: entry.losses,
+          ties: entry.ties,
+          winRate: entry.games > 0 ? entry.wins / entry.games : 0,
+          leaderboardScore: entry.score,
+          isUnranked: entry.isUnranked,
+          mtimeMs: entry.mtimeMs,
+          spec: entry.spec,
+        }));
+        res.setHeader("content-type", "application/json");
+        res.end(JSON.stringify({ ok: true, entries }));
       });
     },
   };
 }
 
 export default defineConfig({
-  plugins: [debugLogPlugin(), templateStorePlugin(), partStorePlugin(), debugProbePlugin(), arenaModelPlugin(), pythonAiBridgePlugin()],
+  plugins: [debugLogPlugin(), templateStorePlugin(), partStorePlugin(), debugProbePlugin(), arenaModelPlugin()],
 });

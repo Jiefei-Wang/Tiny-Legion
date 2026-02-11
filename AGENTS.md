@@ -15,7 +15,7 @@ If you are a new coding agent/session, read this file first, then read:
 - Legacy prototype: `webgame/` (reference only)
 - Command reference: `game_command.md`
 - Composite AI arena training command: `npm --prefix arena run train:composite -- --phaseSeeds 16 --nUnits 4`
-- Unified training wrapper script: `./train_ai.sh help` (module-only and full composite training with per-module network size/depth and source selection)
+- Unified training wrapper script: `./train_ai.sh help` (module-only and full composite compare/optimization with per-module source selection)
 
 ## Current Runtime/Feature Reality
 
@@ -28,6 +28,7 @@ If you are a new coding agent/session, read this file first, then read:
   - `src/ai/shooting/ballistic-aim.ts`
   - `src/ai/movement/threat-movement.ts`
   - `src/ai/shooting/weapon-ai-policy.ts`
+- Arena workflow is JS/TS-only (no Python bridge, no gRPC battlefield service).
 - Multi-weapon units with independent cooldown timers
 - Player weapon controls:
   - `1..9`: toggle manual control for slot

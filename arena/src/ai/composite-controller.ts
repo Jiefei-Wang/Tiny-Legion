@@ -1,112 +1,22 @@
 import {
-  BATTLEFIELD_HEIGHT,
-  BATTLEFIELD_WIDTH,
-} from "../../../packages/game-core/src/config/balance/battlefield.ts";
-import { GROUND_FIRE_Y_TOLERANCE, PROJECTILE_SPEED } from "../../../packages/game-core/src/config/balance/range.ts";
-import { COMPONENTS } from "../../../packages/game-core/src/config/balance/weapons.ts";
+  GROUND_FIRE_Y_TOLERANCE,
+} from "../../../packages/game-core/src/config/balance/range.ts";
+import { structureIntegrity } from "../../../packages/game-core/src/simulation/units/structure-grid.ts";
 import {
   createBaselineMovementAi,
   createBaselineShootAi,
   createBaselineTargetAi,
 } from "../../../packages/game-core/src/ai/composite/baseline-modules.ts";
-import { solveBallisticAim } from "../../../packages/game-core/src/ai/shooting/ballistic-aim.ts";
-import { adjustAimForWeaponPolicy } from "../../../packages/game-core/src/ai/shooting/weapon-ai-policy.ts";
-import { clamp } from "../../../packages/game-core/src/simulation/physics/impulse-model.ts";
-import { structureIntegrity } from "../../../packages/game-core/src/simulation/units/structure-grid.ts";
 import {
   createCompositeAiController,
   type BattleAiController,
-  type BattleAiInput,
   type MovementAiModule,
   type ShootAiModule,
   type TargetAiModule,
 } from "../../../packages/game-core/src/ai/composite/composite-ai.ts";
+import { clamp } from "../../../packages/game-core/src/simulation/physics/impulse-model.ts";
 import type { Params, ParamSchema } from "./ai-schema.ts";
 import type { MatchAiSpec } from "../match/match-types.ts";
-
-const MAX_HIDDEN = 24;
-
-type NeuralModuleKind = "target" | "movement" | "shoot";
-
-type FeatureVector = number[];
-
-type NeuralOutput = number[];
-
-type NeuralHyper = {
-  layers: number;
-  hidden: number;
-  featureMask: boolean[];
-};
-
-type OrtTensorLike = {
-  data: Float32Array | number[] | ArrayLike<number>;
-};
-
-type OrtSessionLike = {
-  run: (feeds: Record<string, unknown>) => Promise<Record<string, OrtTensorLike>>;
-};
-
-let ortModulePromise: Promise<any> | null = null;
-const onnxShootSessionCache = new Map<string, Promise<OrtSessionLike>>();
-
-function sigmoid(x: number): number {
-  if (x >= 0) {
-    const z = Math.exp(-x);
-    return 1 / (1 + z);
-  }
-  const z = Math.exp(x);
-  return z / (1 + z);
-}
-
-function parsePythonOnnxShootFileName(familyId: string): string | null {
-  const prefix = "python-onnx-shoot:";
-  if (!familyId.startsWith(prefix)) {
-    return null;
-  }
-  const fileName = familyId.slice(prefix.length).trim();
-  if (!/^[a-zA-Z0-9._-]+\.onnx$/.test(fileName)) {
-    return null;
-  }
-  return fileName;
-}
-
-async function loadOrtModule(): Promise<any> {
-  if (!ortModulePromise) {
-    ortModulePromise = (async () => {
-      const ort = await import("onnxruntime-web");
-      try {
-        if (ort?.env?.wasm) {
-          // Serve ORT wasm binaries from Vite middleware to avoid "no available backend found".
-          ort.env.wasm.wasmPaths = "/__arena/ort/";
-          // Keep runtime requirements low for browser test arena compatibility.
-          ort.env.wasm.numThreads = 1;
-          ort.env.wasm.proxy = false;
-        }
-      } catch {
-        // Keep defaults if env injection fails.
-      }
-      return ort;
-    })();
-  }
-  return ortModulePromise;
-}
-
-function getOnnxShootSession(fileName: string): Promise<OrtSessionLike> {
-  const cached = onnxShootSessionCache.get(fileName);
-  if (cached) {
-    return cached;
-  }
-  const modelUrl = `/__arena/python-models/${encodeURIComponent(fileName)}`;
-  const promise = (async () => {
-    const ort = await loadOrtModule();
-    const session = await ort.InferenceSession.create(modelUrl, {
-      executionProviders: ["wasm"],
-    });
-    return session as OrtSessionLike;
-  })();
-  onnxShootSessionCache.set(fileName, promise);
-  return promise;
-}
 
 export type CompositeModuleSpec = {
   familyId: string;
@@ -119,124 +29,95 @@ export type CompositeConfig = {
   shoot: CompositeModuleSpec;
 };
 
+type ModuleKind = "target" | "movement" | "shoot";
+
 function pickNumber(params: Params, key: string, fallback: number): number {
   const value = params[key];
   return typeof value === "number" && Number.isFinite(value) ? value : fallback;
 }
 
-function pickBoolean(params: Params, key: string, fallback: boolean): boolean {
-  const value = params[key];
-  return typeof value === "boolean" ? value : fallback;
+function pickInt(params: Params, key: string, fallback: number): number {
+  return Math.floor(pickNumber(params, key, fallback));
 }
 
-function decodeNeuralHyper(params: Params, prefix: string, featureCount: number): NeuralHyper {
-  const layers = Math.max(1, Math.min(2, Math.floor(pickNumber(params, `${prefix}layers`, 1))));
-  const hidden = Math.max(4, Math.min(MAX_HIDDEN, Math.floor(pickNumber(params, `${prefix}hidden`, 12))));
-  const featureMask: boolean[] = [];
-  for (let i = 0; i < featureCount; i += 1) {
-    featureMask.push(pickBoolean(params, `${prefix}useF${i}`, true));
-  }
-  return { layers, hidden, featureMask };
-}
-
-function tanh(x: number): number {
-  if (x > 7) return 0.999998;
-  if (x < -7) return -0.999998;
-  return Math.tanh(x);
-}
-
-function runNeural(params: Params, prefix: string, input: FeatureVector, outputSize: number): NeuralOutput {
-  const hyper = decodeNeuralHyper(params, prefix, input.length);
-  const masked: number[] = input.map((value, idx) => (hyper.featureMask[idx] ? value : 0));
-  const h1: number[] = new Array(hyper.hidden).fill(0);
-  for (let h = 0; h < hyper.hidden; h += 1) {
-    let sum = pickNumber(params, `${prefix}b1_${h}`, 0);
-    for (let i = 0; i < masked.length; i += 1) {
-      sum += masked[i] * pickNumber(params, `${prefix}w_ih_${i}_${h}`, 0);
-    }
-    h1[h] = tanh(sum);
-  }
-
-  const last = h1;
-  if (hyper.layers > 1) {
-    const h2: number[] = new Array(hyper.hidden).fill(0);
-    for (let h = 0; h < hyper.hidden; h += 1) {
-      let sum = pickNumber(params, `${prefix}b2_${h}`, 0);
-      for (let j = 0; j < hyper.hidden; j += 1) {
-        sum += h1[j] * pickNumber(params, `${prefix}w_hh_${j}_${h}`, 0);
-      }
-      h2[h] = tanh(sum);
-    }
-    return Array.from({ length: outputSize }, (_, o) => {
-      let sum = pickNumber(params, `${prefix}bo_${o}`, 0);
-      for (let h = 0; h < hyper.hidden; h += 1) {
-        sum += h2[h] * pickNumber(params, `${prefix}w_ho_${h}_${o}`, 0);
-      }
-      return sum;
-    });
-  }
-
-  return Array.from({ length: outputSize }, (_, o) => {
-    let sum = pickNumber(params, `${prefix}bo_${o}`, 0);
-    for (let h = 0; h < hyper.hidden; h += 1) {
-      sum += last[h] * pickNumber(params, `${prefix}w_ho_${h}_${o}`, 0);
-    }
-    return sum;
-  });
-}
-
-function canHitByAxis(unit: BattleAiInput["unit"], targetY: number, targetType: BattleAiInput["unit"]["type"]): boolean {
+function canHitByAxis(unit: { y: number; type: "ground" | "air" }, targetY: number, targetType: "ground" | "air"): boolean {
   if (unit.type === "air" || targetType === "air") {
     return true;
   }
   return Math.abs(targetY - unit.y) <= GROUND_FIRE_Y_TOLERANCE;
 }
 
-function nearestThreat(input: BattleAiInput): number {
-  let best = 0;
-  for (const projectile of input.state.projectiles) {
-    if (projectile.side === input.unit.side) continue;
-    const d = Math.hypot(projectile.x - input.unit.x, projectile.y - input.unit.y);
-    best = Math.max(best, 1 / Math.max(30, d));
-  }
-  return clamp(best * 220, 0, 1);
+export const DT_TARGET_SCHEMA: ParamSchema = {
+  "target.strategy": { kind: "int", min: 0, max: 3, def: 0, step: 1, mutateRate: 0.25 },
+  "target.distanceWeight": { kind: "number", min: 0.3, max: 2.0, def: 1.0, sigma: 0.2 },
+  "target.weakHpWeight": { kind: "number", min: 0.0, max: 3.0, def: 1.2, sigma: 0.25 },
+  "target.threatWeight": { kind: "number", min: 0.0, max: 3.0, def: 1.1, sigma: 0.25 },
+  "target.basePressureWeight": { kind: "number", min: 0.0, max: 3.0, def: 1.0, sigma: 0.25 },
+};
+
+export const DT_MOVEMENT_SCHEMA: ParamSchema = {
+  "movement.strategy": { kind: "int", min: 0, max: 3, def: 0, step: 1, mutateRate: 0.25 },
+  "movement.desiredRangeFactor": { kind: "number", min: 0.4, max: 1.6, def: 1.0, sigma: 0.15 },
+  "movement.evadeThreshold": { kind: "number", min: 0.08, max: 0.6, def: 0.24, sigma: 0.08 },
+  "movement.retreatBoost": { kind: "number", min: 0.0, max: 1.8, def: 0.75, sigma: 0.2 },
+  "movement.pushBoost": { kind: "number", min: 0.0, max: 1.8, def: 0.55, sigma: 0.2 },
+};
+
+export const DT_SHOOT_SCHEMA: ParamSchema = {
+  "shoot.strategy": { kind: "int", min: 0, max: 2, def: 0, step: 1, mutateRate: 0.25 },
+  "shoot.maxRangeRatio": { kind: "number", min: 0.25, max: 1.2, def: 1.0, sigma: 0.12 },
+  "shoot.minIntegrityToFire": { kind: "number", min: 0.0, max: 1.0, def: 0.15, sigma: 0.08 },
+  "shoot.weaponSpeed": { kind: "number", min: 80, max: 2400, def: 900, sigma: 120 },
+  "shoot.angleWeightStdX": { kind: "number", min: -1.8, max: 1.8, def: 0.0, sigma: 0.2 },
+  "shoot.angleWeightStdY": { kind: "number", min: -1.8, max: 1.8, def: 0.0, sigma: 0.2 },
+  "shoot.angleWeightYOverX": { kind: "number", min: -1.8, max: 1.8, def: 0.0, sigma: 0.2 },
+  "shoot.angleWeightYOverX2": { kind: "number", min: -1.8, max: 1.8, def: 0.0, sigma: 0.2 },
+};
+
+export function getModuleSchema(kind: ModuleKind): ParamSchema {
+  if (kind === "target") return DT_TARGET_SCHEMA;
+  if (kind === "movement") return DT_MOVEMENT_SCHEMA;
+  return DT_SHOOT_SCHEMA;
 }
 
-function buildTargetFeatures(input: BattleAiInput, enemy: BattleAiInput["state"]["units"][number]): FeatureVector {
-  const dx = enemy.x - input.unit.x;
-  const dy = enemy.y - input.unit.y;
-  const distance = Math.hypot(dx, dy);
-  const base = input.unit.side === "player" ? input.state.playerBase : input.state.enemyBase;
-  const baseCenterX = base.x + base.w * 0.5;
-  const baseCenterY = base.y + base.h * 0.5;
-  const pressure = 1 - clamp(Math.hypot(enemy.x - baseCenterX, enemy.y - baseCenterY) / 900, 0, 1);
-  const enemyWeapons = Math.max(0, enemy.weaponAttachmentIds.length / 8);
-  const speed = Math.hypot(enemy.vx, enemy.vy);
-  return [
-    1,
-    clamp(distance / 900, 0, 2),
-    clamp(Math.abs(dy) / 360, 0, 2),
-    clamp(speed / 300, 0, 2),
-    clamp(structureIntegrity(enemy), 0, 1),
-    enemyWeapons,
-    enemy.type === "air" ? 1 : 0,
-    clamp(structureIntegrity(input.unit), 0, 1),
-    pressure,
-    clamp((enemy.vx * Math.sign(dx)) / 180, -2, 2),
-  ];
-}
-
-function createNeuralTargetAi(params: Params): TargetAiModule {
+function createDecisionTreeTargetAi(params: Params): TargetAiModule {
   return {
     decideTarget: (input) => {
+      const strategy = Math.max(0, Math.min(3, pickInt(params, "target.strategy", 0)));
+      const distanceWeight = pickNumber(params, "target.distanceWeight", 1.0);
+      const weakHpWeight = pickNumber(params, "target.weakHpWeight", 1.2);
+      const threatWeight = pickNumber(params, "target.threatWeight", 1.1);
+      const basePressureWeight = pickNumber(params, "target.basePressureWeight", 1.0);
+
+      const base = input.unit.side === "player" ? input.state.playerBase : input.state.enemyBase;
+      const baseCenterX = base.x + base.w * 0.5;
+      const baseCenterY = base.y + base.h * 0.5;
+
       const rankedTargets = input.state.units
-        .filter((unit) => unit.alive && unit.side !== input.unit.side)
+        .filter((u) => u.alive && u.side !== input.unit.side)
         .map((enemy) => {
-          const features = buildTargetFeatures(input, enemy);
-          const [score] = runNeural(params, "target.", features, 1);
+          const dx = enemy.x - input.unit.x;
+          const dy = enemy.y - input.unit.y;
+          const distance = Math.hypot(dx, dy);
+          const hp = structureIntegrity(enemy);
+          const threat = enemy.weaponAttachmentIds.length;
+          const baseDist = Math.hypot(enemy.x - baseCenterX, enemy.y - baseCenterY);
+
+          let score = distance * distanceWeight;
+          if (strategy === 1) {
+            score += hp * 280 * weakHpWeight;
+            score += distance * 0.2;
+          } else if (strategy === 2) {
+            score += distance * 0.7;
+            score -= threat * 36 * threatWeight;
+          } else if (strategy === 3) {
+            score += distance * 0.4;
+            score += (baseDist / 6.0) * basePressureWeight;
+          }
+
           return {
             targetId: enemy.id,
-            score: -score,
+            score,
             x: enemy.x,
             y: enemy.y,
             vx: enemy.vx,
@@ -245,353 +126,175 @@ function createNeuralTargetAi(params: Params): TargetAiModule {
           };
         })
         .sort((a, b) => a.score - b.score);
+
       const top = rankedTargets[0];
       return {
         rankedTargets,
         attackPoint: top ? { x: top.x, y: top.y } : { x: input.baseTarget.x, y: input.baseTarget.y },
-        debugTag: top ? "target.neural-ranked" : "target.base-fallback",
+        debugTag: `target.dt.s${strategy}`,
       };
     },
   };
 }
 
-function createNeuralMovementAi(params: Params): MovementAiModule {
+function createDecisionTreeMovementAi(params: Params): MovementAiModule {
+  const baseline = createBaselineMovementAi();
   return {
     decideMovement: (input, target) => {
+      const strategy = Math.max(0, Math.min(3, pickInt(params, "movement.strategy", 0)));
+      const desiredRangeFactor = pickNumber(params, "movement.desiredRangeFactor", 1.0);
+      const evadeThreshold = pickNumber(params, "movement.evadeThreshold", 0.24);
+      const retreatBoost = pickNumber(params, "movement.retreatBoost", 0.75);
+      const pushBoost = pickNumber(params, "movement.pushBoost", 0.55);
+
+      const adjustedInput = {
+        ...input,
+        desiredRange: Math.max(40, input.desiredRange * desiredRangeFactor),
+      };
+      const baseDecision = baseline.decideMovement(adjustedInput, target);
+      let ax = baseDecision.ax;
+      let ay = baseDecision.ay;
+      let shouldEvade = baseDecision.shouldEvade;
+
       const dx = target.attackPoint.x - input.unit.x;
       const dy = target.attackPoint.y - input.unit.y;
-      const distance = Math.hypot(dx, dy);
-      const baseDx = input.baseTarget.x - input.unit.x;
-      const baseDy = input.baseTarget.y - input.unit.y;
-      const features: FeatureVector = [
-        1,
-        clamp(dx / BATTLEFIELD_WIDTH, -2, 2),
-        clamp(dy / BATTLEFIELD_HEIGHT, -2, 2),
-        clamp(distance / 850, 0, 2),
-        clamp(input.desiredRange / 600, 0, 2),
-        clamp(structureIntegrity(input.unit), 0, 1),
-        nearestThreat(input),
-        clamp(Math.hypot(input.unit.vx, input.unit.vy) / Math.max(1, input.unit.maxSpeed), 0, 2),
-        clamp(target.rankedTargets.length / 8, 0, 2),
-        input.unit.type === "air" ? 1 : 0,
-        clamp(baseDx / BATTLEFIELD_WIDTH, -2, 2),
-        clamp(baseDy / BATTLEFIELD_HEIGHT, -2, 2),
-      ];
-      const [axRaw, ayRaw, evadeRaw] = runNeural(params, "movement.", features, 3);
-      const ax = clamp(tanh(axRaw) * 1.4, -1.4, 1.4);
-      const ay = clamp(tanh(ayRaw) * 1.4, -1.4, 1.4);
-      const shouldEvade = evadeRaw > 0;
+      const len = Math.hypot(dx, dy) || 1;
+      const nx = dx / len;
+      const ny = dy / len;
+      const integrity = structureIntegrity(input.unit);
+
+      if (strategy === 1) {
+        if (integrity <= evadeThreshold) {
+          ax -= nx * retreatBoost;
+          ay -= ny * retreatBoost * 0.7;
+          shouldEvade = true;
+        }
+      } else if (strategy === 2) {
+        ax += nx * pushBoost;
+        ay += ny * pushBoost * 0.7;
+        shouldEvade = false;
+      } else if (strategy === 3) {
+        if (integrity <= 0.7) {
+          ax -= nx * (retreatBoost + 0.2);
+          ay -= ny * (retreatBoost + 0.2) * 0.7;
+          shouldEvade = true;
+        }
+      }
+
       return {
-        ax,
-        ay,
+        ax: clamp(ax, -1.4, 1.4),
+        ay: clamp(ay, -1.4, 1.4),
         shouldEvade,
         state: shouldEvade ? "evade" : "engage",
-        debugTag: "movement.neural",
+        debugTag: `movement.dt.s${strategy}`,
       };
     },
   };
 }
 
-function buildShootFeatures(
-  input: BattleAiInput,
-  target: ReturnType<TargetAiModule["decideTarget"]>,
-  slot: number,
-): { features: FeatureVector; plan: ReturnType<ShootAiModule["decideShoot"]>["firePlan"] } {
-  const unit = input.unit;
-  const attachmentId = unit.weaponAttachmentIds[slot];
-  const attachment = unit.attachments.find((entry) => entry.id === attachmentId && entry.alive) ?? null;
-  if (!attachment) {
-    return {
-      features: [1, 2, -1, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-      plan: null,
-    };
-  }
-  const stats = COMPONENTS[attachment.component];
-  if (stats.type !== "weapon" || stats.range === undefined || stats.damage === undefined) {
-    return {
-      features: [1, 2, -1, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-      plan: null,
-    };
-  }
-  const attack = target.rankedTargets[0];
-  const tx = attack?.x ?? target.attackPoint.x;
-  const ty = attack?.y ?? target.attackPoint.y;
-  const tvx = attack?.vx ?? 0;
-  const tvy = attack?.vy ?? 0;
-  const effectiveRange = input.getEffectiveWeaponRange(attachment.stats?.range ?? stats.range);
-  const distance = Math.hypot(tx - unit.x, ty - unit.y);
-  const solved = solveBallisticAim(unit.x, unit.y, tx, ty, tvx, tvy, effectiveRange);
-  const angleRad = solved?.firingAngleRad ?? Math.atan2(ty - unit.y, tx - unit.x);
-  const aimDistance = solved
-    ? Math.max(90, Math.min(effectiveRange, PROJECTILE_SPEED * solved.leadTimeS))
-    : Math.min(effectiveRange, Math.max(90, distance));
-  const baseAim = {
-    x: unit.x + Math.cos(angleRad) * aimDistance,
-    y: unit.y + Math.sin(angleRad) * aimDistance + unit.aiAimCorrectionY,
+function createDecisionTreeShootAi(params: Params): ShootAiModule {
+  const baseline = createBaselineShootAi();
+  const safeDivStd = (numerator: number, denominator: number): number => {
+    if (!Number.isFinite(numerator) || !Number.isFinite(denominator)) {
+      return 0;
+    }
+    if (Math.abs(denominator) < 1e-6) {
+      return 0;
+    }
+    return numerator / denominator;
   };
-  const aim = adjustAimForWeaponPolicy(attachment.component, baseAim);
-  const angleOk = input.canShootAtAngle(attachment.component, aim.x - unit.x, aim.y - unit.y, attachment.stats?.shootAngleDeg);
-  const axisOk = canHitByAxis(unit, ty, attack?.type ?? unit.type);
-  const features: FeatureVector = [
-    1,
-    clamp(distance / Math.max(1, effectiveRange), 0, 2),
-    clamp((effectiveRange - distance) / Math.max(1, effectiveRange), -2, 2),
-    clamp(Math.hypot(tvx, tvy) / 320, 0, 2),
-    clamp((ty - unit.y) / 300, -2, 2),
-    clamp(stats.damage / 85, 0, 2),
-    (unit.weaponFireTimers[slot] ?? 0) <= 0 ? 1 : 0,
-    angleOk ? 1 : 0,
-    clamp(structureIntegrity(unit), 0, 1),
-    solved ? 1 : 0,
-    axisOk ? 1 : 0,
-    input.unit.type === "air" ? 1 : 0,
-  ];
-  const plan = !angleOk || !axisOk
-    ? null
-    : {
-        preferredSlot: slot,
-        aim,
-        intendedTargetId: attack?.targetId ?? null,
-        intendedTargetY: solved?.y ?? (attack ? ty : null),
-        angleRad,
-        leadTimeS: solved?.leadTimeS ?? 0,
-        effectiveRange,
-      };
-  return { features, plan };
-}
-
-function createNeuralShootAi(params: Params): ShootAiModule {
   return {
     decideShoot: (input, target, movement) => {
-      let bestScore = Number.NEGATIVE_INFINITY;
-      let bestPlan: ReturnType<ShootAiModule["decideShoot"]>["firePlan"] = null;
-      for (let slot = 0; slot < input.unit.weaponAttachmentIds.length; slot += 1) {
-        const { features, plan } = buildShootFeatures(input, target, slot);
-        features[9] = movement.shouldEvade ? 1 : 0;
-        const [score] = runNeural(params, "shoot.", features, 1);
-        if (plan && score > bestScore) {
-          bestScore = score;
-          bestPlan = plan;
-        }
+      const strategy = Math.max(0, Math.min(2, pickInt(params, "shoot.strategy", 0)));
+      const maxRangeRatio = pickNumber(params, "shoot.maxRangeRatio", 1.0);
+      const minIntegrityToFire = pickNumber(params, "shoot.minIntegrityToFire", 0.15);
+      const weaponSpeed = Math.max(1, pickNumber(params, "shoot.weaponSpeed", 900));
+      const angleWeightStdX = pickNumber(params, "shoot.angleWeightStdX", 0.0);
+      const angleWeightStdY = pickNumber(params, "shoot.angleWeightStdY", 0.0);
+      const angleWeightYOverX = pickNumber(params, "shoot.angleWeightYOverX", 0.0);
+      const angleWeightYOverX2 = pickNumber(params, "shoot.angleWeightYOverX2", 0.0);
+
+      const decision = baseline.decideShoot(input, target, movement);
+      if (!decision.firePlan) {
+        return decision;
       }
-      if (!bestPlan) {
+
+      const stdX = (target.attackPoint.x - input.unit.x) / weaponSpeed;
+      const stdY = (target.attackPoint.y - input.unit.y) / weaponSpeed;
+      const yOverX = safeDivStd(stdY, stdX);
+      const yOverX2 = safeDivStd(stdY, stdX * stdX);
+      const angleDelta = (
+        stdX * angleWeightStdX
+        + stdY * angleWeightStdY
+        + yOverX * angleWeightYOverX
+        + yOverX2 * angleWeightYOverX2
+      );
+      const adjustedAngle = clamp(decision.firePlan.angleRad + angleDelta, -Math.PI, Math.PI);
+      const adjustedDecision = {
+        ...decision,
+        firePlan: {
+          ...decision.firePlan,
+          angleRad: adjustedAngle,
+        },
+      };
+
+      if (strategy === 0) {
+        return { ...adjustedDecision, debugTag: "shoot.dt.s0" };
+      }
+
+      const primary = target.rankedTargets[0] ?? null;
+      if (primary && !canHitByAxis(input.unit, primary.y, primary.type)) {
         return {
           firePlan: null,
-          fireBlockedReason: "no-shot-plan",
-          debugTag: "shoot.neural-no-plan",
+          fireBlockedReason: "axis-mismatch",
+          debugTag: `shoot.dt.s${strategy}.blocked-axis`,
+        };
+      }
+
+      const integrity = structureIntegrity(input.unit);
+      const distance = Math.hypot(target.attackPoint.x - input.unit.x, target.attackPoint.y - input.unit.y);
+      if (strategy === 1) {
+        if (integrity < minIntegrityToFire) {
+          return {
+            firePlan: null,
+            fireBlockedReason: "low-integrity",
+            debugTag: "shoot.dt.s1.blocked-integrity",
+          };
+        }
+        if (distance > decision.firePlan.effectiveRange * maxRangeRatio) {
+          return {
+            firePlan: null,
+            fireBlockedReason: "range-hold",
+            debugTag: "shoot.dt.s1.blocked-range",
+          };
+        }
+        return {
+          ...adjustedDecision,
+          debugTag: "shoot.dt.s1",
+        };
+      }
+
+      if (adjustedDecision.firePlan.leadTimeS > 0.9 && !movement.shouldEvade) {
+        return {
+          firePlan: null,
+          fireBlockedReason: "lead-too-long",
+          debugTag: "shoot.dt.s2.blocked-lead",
         };
       }
       return {
-        firePlan: bestPlan,
-        fireBlockedReason: null,
-        debugTag: "shoot.neural-plan",
+        ...adjustedDecision,
+        debugTag: "shoot.dt.s2",
       };
     },
   };
-}
-
-function createPythonOnnxShootAi(fileName: string): ShootAiModule {
-  const latestOutputBySlot = new Map<string, [number, number]>();
-  const pendingBySlot = new Map<string, Promise<void>>();
-  const errorBySlot = new Map<string, string>();
-  let hasLoggedOnnxError = false;
-
-  const computeProjectileThreat = (input: BattleAiInput): number => {
-    let threat = 0;
-    for (const projectile of input.state.projectiles) {
-      if (projectile.side === input.unit.side) {
-        continue;
-      }
-      const dx = projectile.x - input.unit.x;
-      const dy = projectile.y - input.unit.y;
-      const d2 = Math.max(1, dx * dx + dy * dy);
-      threat += 20000 / d2;
-    }
-    return clamp(threat, 0, 1);
-  };
-
-  const inferAsync = (slotKey: string, features: FeatureVector): void => {
-    if (pendingBySlot.has(slotKey)) {
-      return;
-    }
-    const job = (async () => {
-      try {
-        const ort = await loadOrtModule();
-        const session = await getOnnxShootSession(fileName);
-        const input = new ort.Tensor("float32", Float32Array.from(features), [1, features.length]);
-        const outputs = await session.run({ x: input });
-        const first = Object.values(outputs)[0] as OrtTensorLike | undefined;
-        const raw = first?.data;
-        const v0 = Number(raw && raw[0] !== undefined ? raw[0] : 0);
-        const v1 = Number(raw && raw[1] !== undefined ? raw[1] : 0);
-        latestOutputBySlot.set(slotKey, [v0, v1]);
-        errorBySlot.delete(slotKey);
-        if (latestOutputBySlot.size > 4096) {
-          latestOutputBySlot.clear();
-        }
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : "unknown onnx error";
-        errorBySlot.set(slotKey, msg);
-        if (!hasLoggedOnnxError) {
-          hasLoggedOnnxError = true;
-          // Surface once so test-arena debugging can spot runtime issues quickly.
-          console.warn(`[python-onnx-shoot] inference failed for ${fileName}: ${msg}`);
-        }
-      } finally {
-        pendingBySlot.delete(slotKey);
-      }
-    })();
-    pendingBySlot.set(slotKey, job);
-  };
-
-  return {
-    decideShoot: (input, target, movement) => {
-      let bestProb = -1;
-      let bestPlan: ReturnType<ShootAiModule["decideShoot"]>["firePlan"] = null;
-      const motionX = clamp(movement.ax, -1, 1);
-      const motionY = clamp(movement.ay, -1, 1);
-      const threat = computeProjectileThreat(input);
-      const width = Math.max(1, Number((input.state as { battlefieldW?: number }).battlefieldW ?? BATTLEFIELD_WIDTH));
-      const height = Math.max(1, Number((input.state as { battlefieldH?: number }).battlefieldH ?? BATTLEFIELD_HEIGHT));
-      const diag = Math.hypot(width, height);
-      const maxSpeed = Math.max(1, Number((input.unit as { max_speed?: number; maxSpeed?: number }).max_speed ?? input.unit.maxSpeed ?? 1));
-      const maxSlots = 8;
-      for (let slot = 0; slot < input.unit.weaponAttachmentIds.length; slot += 1) {
-        const base = buildShootFeatures(input, target, slot);
-        if (!base.plan) {
-          continue;
-        }
-        const fireTimers = input.unit.weaponFireTimers ?? [];
-        if ((fireTimers[slot] ?? 0) > 0) {
-          continue;
-        }
-        const attack = target.rankedTargets[0];
-        const tx = attack?.x ?? target.attackPoint.x;
-        const ty = attack?.y ?? target.attackPoint.y;
-        const dx = tx - input.unit.x;
-        const dy = ty - input.unit.y;
-        const distance = Math.hypot(dx, dy);
-        const cooldownReady = (input.unit.weaponFireTimers[slot] ?? 0) <= 0 ? 1 : 0;
-        const readyChargeNorm = clamp((input.unit.weaponReadyCharges[slot] ?? 0) / 3, 0, 4);
-        const targetDx = clamp(dx / width, -2, 2);
-        const targetDy = clamp(dy / height, -2, 2);
-        const targetDist = clamp(distance / Math.max(1, diag), 0, 2);
-        const targetVx = clamp((attack?.vx ?? 0) / maxSpeed, -3, 3);
-        const targetVy = clamp((attack?.vy ?? 0) / maxSpeed, -3, 3);
-        const features: FeatureVector = [
-          1,
-          clamp(slot / maxSlots, 0, 1),
-          cooldownReady,
-          readyChargeNorm,
-          targetDx,
-          targetDy,
-          targetDist,
-          targetVx,
-          targetVy,
-          motionX,
-          motionY,
-          clamp(threat, 0, 1),
-        ];
-        const slotKey = `${input.unit.id}:${slot}`;
-        inferAsync(slotKey, features);
-        const out = latestOutputBySlot.get(slotKey);
-        if (!out) {
-          if (errorBySlot.has(slotKey)) {
-            continue;
-          }
-          continue;
-        }
-        const fireProb = sigmoid(out[0]);
-        const shootSample = Math.random() < fireProb;
-        if (!shootSample) {
-          continue;
-        }
-        const angleDelta = tanh(out[1]) * 0.45;
-        const angle = Math.atan2(dy, dx) + angleDelta;
-        const aimDistance = Math.max(1, distance);
-        const adjustedAim = {
-          x: input.unit.x + Math.cos(angle) * aimDistance,
-          y: input.unit.y + Math.sin(angle) * aimDistance,
-        };
-        const plan = {
-          ...base.plan,
-          aim: adjustedAim,
-        };
-        if (fireProb > bestProb) {
-          bestProb = fireProb;
-          bestPlan = plan;
-        }
-      }
-      if (!bestPlan) {
-        let blockedReason = "onnx-pending-or-no-shot";
-        for (let slot = 0; slot < input.unit.weaponAttachmentIds.length; slot += 1) {
-          const slotKey = `${input.unit.id}:${slot}`;
-          const err = errorBySlot.get(slotKey);
-          if (err) {
-            blockedReason = `onnx-error:${err}`;
-            break;
-          }
-        }
-        return {
-          firePlan: null,
-          fireBlockedReason: blockedReason,
-          debugTag: "shoot.python-onnx-no-plan",
-        };
-      }
-      return {
-        firePlan: bestPlan,
-        fireBlockedReason: null,
-        debugTag: "shoot.python-onnx",
-      };
-    },
-  };
-}
-
-function makeNeuralSchema(prefix: string, featureCount: number, outputCount: number): ParamSchema {
-  const schema: ParamSchema = {
-    [`${prefix}layers`]: { kind: "int", min: 1, max: 2, def: 1, step: 1, mutateRate: 0.2 },
-    [`${prefix}hidden`]: { kind: "int", min: 4, max: MAX_HIDDEN, def: 12, step: 1, mutateRate: 0.35 },
-  };
-  for (let i = 0; i < featureCount; i += 1) {
-    schema[`${prefix}useF${i}`] = { kind: "boolean", def: true, mutateRate: 0.1 };
-  }
-  for (let i = 0; i < featureCount; i += 1) {
-    for (let h = 0; h < MAX_HIDDEN; h += 1) {
-      schema[`${prefix}w_ih_${i}_${h}`] = { kind: "number", min: -2, max: 2, def: 0, sigma: 0.22 };
-    }
-  }
-  for (let h = 0; h < MAX_HIDDEN; h += 1) {
-    schema[`${prefix}b1_${h}`] = { kind: "number", min: -2, max: 2, def: 0, sigma: 0.2 };
-    schema[`${prefix}b2_${h}`] = { kind: "number", min: -2, max: 2, def: 0, sigma: 0.2 };
-    for (let j = 0; j < MAX_HIDDEN; j += 1) {
-      schema[`${prefix}w_hh_${h}_${j}`] = { kind: "number", min: -2, max: 2, def: 0, sigma: 0.2 };
-    }
-    for (let o = 0; o < outputCount; o += 1) {
-      schema[`${prefix}w_ho_${h}_${o}`] = { kind: "number", min: -2, max: 2, def: 0, sigma: 0.22 };
-    }
-  }
-  for (let o = 0; o < outputCount; o += 1) {
-    schema[`${prefix}bo_${o}`] = { kind: "number", min: -2, max: 2, def: 0, sigma: 0.2 };
-  }
-  return schema;
-}
-
-export const NEURAL_SCHEMA_TARGET = makeNeuralSchema("target.", 10, 1);
-export const NEURAL_SCHEMA_MOVEMENT = makeNeuralSchema("movement.", 12, 3);
-export const NEURAL_SCHEMA_SHOOT = makeNeuralSchema("shoot.", 12, 1);
-
-export function getModuleSchema(kind: NeuralModuleKind): ParamSchema {
-  if (kind === "target") return NEURAL_SCHEMA_TARGET;
-  if (kind === "movement") return NEURAL_SCHEMA_MOVEMENT;
-  return NEURAL_SCHEMA_SHOOT;
 }
 
 function createTargetModule(spec: CompositeModuleSpec): TargetAiModule {
   if (spec.familyId === "baseline-target") {
     return createBaselineTargetAi();
   }
-  if (spec.familyId === "neural-target") {
-    return createNeuralTargetAi(spec.params);
+  if (spec.familyId === "dt-target") {
+    return createDecisionTreeTargetAi(spec.params ?? {});
   }
   throw new Error(`Unsupported target AI family: ${spec.familyId}`);
 }
@@ -600,8 +303,8 @@ function createMovementModule(spec: CompositeModuleSpec): MovementAiModule {
   if (spec.familyId === "baseline-movement") {
     return createBaselineMovementAi();
   }
-  if (spec.familyId === "neural-movement") {
-    return createNeuralMovementAi(spec.params);
+  if (spec.familyId === "dt-movement") {
+    return createDecisionTreeMovementAi(spec.params ?? {});
   }
   throw new Error(`Unsupported movement AI family: ${spec.familyId}`);
 }
@@ -610,12 +313,8 @@ function createShootModule(spec: CompositeModuleSpec): ShootAiModule {
   if (spec.familyId === "baseline-shoot") {
     return createBaselineShootAi();
   }
-  if (spec.familyId === "neural-shoot") {
-    return createNeuralShootAi(spec.params);
-  }
-  const onnxFile = parsePythonOnnxShootFileName(spec.familyId);
-  if (onnxFile) {
-    return createPythonOnnxShootAi(onnxFile);
+  if (spec.familyId === "dt-shoot") {
+    return createDecisionTreeShootAi(spec.params ?? {});
   }
   throw new Error(`Unsupported shoot AI family: ${spec.familyId}`);
 }

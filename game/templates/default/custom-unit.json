@@ -1,0 +1,182 @@
+{
+  "id": "custom-unit",
+  "name": "battle tank",
+  "type": "ground",
+  "gasCost": 0,
+  "structure": [
+    {
+      "material": "ceramic",
+      "x": -2,
+      "y": -2
+    },
+    {
+      "material": "ceramic",
+      "x": -1,
+      "y": -2
+    },
+    {
+      "material": "ceramic",
+      "x": 0,
+      "y": -2
+    },
+    {
+      "material": "basic",
+      "x": 1,
+      "y": -2
+    },
+    {
+      "material": "basic",
+      "x": -2,
+      "y": -1
+    },
+    {
+      "material": "basic",
+      "x": -1,
+      "y": -1
+    },
+    {
+      "material": "basic",
+      "x": 0,
+      "y": -1
+    },
+    {
+      "material": "reactive",
+      "x": 1,
+      "y": -1
+    },
+    {
+      "material": "basic",
+      "x": -2,
+      "y": 0
+    },
+    {
+      "material": "basic",
+      "x": -1,
+      "y": 0
+    },
+    {
+      "material": "basic",
+      "x": 0,
+      "y": 0
+    },
+    {
+      "material": "reactive",
+      "x": 1,
+      "y": 0
+    },
+    {
+      "material": "ceramic",
+      "x": -2,
+      "y": 1
+    },
+    {
+      "material": "ceramic",
+      "x": -1,
+      "y": 1
+    },
+    {
+      "material": "ceramic",
+      "x": 0,
+      "y": 1
+    }
+  ],
+  "attachments": [
+    {
+      "component": "engineM",
+      "partId": "engineM",
+      "cell": 0,
+      "x": -2,
+      "y": -2,
+      "rotateQuarter": 0
+    },
+    {
+      "component": "rapidGun",
+      "partId": "rapid-gun",
+      "cell": 1,
+      "x": -1,
+      "y": -2,
+      "rotateQuarter": 0
+    },
+    {
+      "component": "rapidGun",
+      "partId": "rapid-gun",
+      "cell": 2,
+      "x": 0,
+      "y": -2,
+      "rotateQuarter": 0
+    },
+    {
+      "component": "cannonLoader",
+      "partId": "cannon-loader",
+      "cell": 4,
+      "x": -2,
+      "y": -1,
+      "rotateQuarter": 0
+    },
+    {
+      "component": "control",
+      "partId": "control",
+      "cell": 5,
+      "x": -1,
+      "y": -1,
+      "rotateQuarter": 0
+    },
+    {
+      "component": "heavyCannon",
+      "partId": "heavy-cannon",
+      "cell": 6,
+      "x": 0,
+      "y": -1,
+      "rotateQuarter": 0
+    },
+    {
+      "component": "cannonLoader",
+      "partId": "cannon-loader",
+      "cell": 8,
+      "x": -2,
+      "y": 0,
+      "rotateQuarter": 0
+    },
+    {
+      "component": "engineS",
+      "partId": "engine-s",
+      "cell": 9,
+      "x": -1,
+      "y": 0,
+      "rotateQuarter": 0
+    },
+    {
+      "component": "heavyCannon",
+      "partId": "heavy-cannon",
+      "cell": 10,
+      "x": 0,
+      "y": 0,
+      "rotateQuarter": 0
+    },
+    {
+      "component": "engineM",
+      "partId": "engineM",
+      "cell": 12,
+      "x": -2,
+      "y": 1,
+      "rotateQuarter": 0
+    },
+    {
+      "component": "rapidGun",
+      "partId": "rapid-gun",
+      "cell": 13,
+      "x": -1,
+      "y": 1,
+      "rotateQuarter": 0
+    },
+    {
+      "component": "rapidGun",
+      "partId": "rapid-gun",
+      "cell": 14,
+      "x": 0,
+      "y": 1,
+      "rotateQuarter": 0
+    }
+  ],
+  "display": []
+}

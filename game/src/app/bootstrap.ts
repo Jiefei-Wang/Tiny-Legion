@@ -148,6 +148,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
               <button id="tabMap">Map</button>
               <button id="tabBattle">Battle</button>
               <button id="tabTestArena">Test Arena</button>
+              <button id="tabLeaderboard">Leaderboard</button>
               <button id="tabTemplateEditor">Template Editor</button>
               <button id="tabPartEditor">Part Editor</button>
             </div>
@@ -166,6 +167,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
             <canvas id="templateEditorCanvas" class="hidden"></canvas>
             <canvas id="partEditorCanvas" class="hidden"></canvas>
           </div>
+          <div id="leaderboardCenter" class="panel hidden"></div>
           <div id="weaponHud" class="weapon-hud small"></div>
         </section>
 
@@ -207,6 +209,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
   const mapPanel = getElement<HTMLDivElement>("#mapPanel");
   const battlePanel = getElement<HTMLDivElement>("#battlePanel");
   const testArenaPanel = getElement<HTMLDivElement>("#testArenaPanel");
+  const leaderboardCenter = getElement<HTMLDivElement>("#leaderboardCenter");
   const editorPanel = getElement<HTMLDivElement>("#editorPanel");
   const selectedInfo = getElement<HTMLDivElement>("#selectedInfo");
   const weaponHud = getElement<HTMLDivElement>("#weaponHud");
@@ -257,6 +260,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     map: getElement<HTMLButtonElement>("#tabMap"),
     battle: getElement<HTMLButtonElement>("#tabBattle"),
     testArena: getElement<HTMLButtonElement>("#tabTestArena"),
+    leaderboard: getElement<HTMLButtonElement>("#tabLeaderboard"),
     templateEditor: getElement<HTMLButtonElement>("#tabTemplateEditor"),
     partEditor: getElement<HTMLButtonElement>("#tabPartEditor"),
   };
@@ -290,16 +294,18 @@ export function bootstrap(options: BootstrapOptions = {}): void {
   let testArenaBattlefieldWidth = BATTLEFIELD_WIDTH;
   let testArenaBattlefieldHeight = BATTLEFIELD_HEIGHT;
   let testArenaGroundHeight = Math.floor(BATTLEFIELD_HEIGHT * DEFAULT_GROUND_HEIGHT_RATIO);
-  let testArenaSpawnTemplateId: string | null = null;
+  let testArenaSpawnTemplateIds: string[] = templates.map((template) => template.id);
+  let testArenaManualSpawnTemplateId: string | null = templates[0]?.id ?? null;
+  let testArenaSpawnTemplateDropdownOpen = false;
   let testArenaInvinciblePlayer = false;
   type TestArenaAiPreset =
     | "baseline"
     | "composite-baseline"
-    | "composite-neural-default"
-    | "component-config"
-    | "python-bridge";
+    | "composite-decision-default"
+    | "component-config";
   type TestArenaAiModuleKind = "target" | "movement" | "shoot";
   type TestArenaSide = "player" | "enemy";
+  type TestArenaPanelSection = "unit" | "ai" | "ui";
   type TestArenaAiOption = {
     id: string;
     label: string;
@@ -308,21 +314,78 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     reason?: string;
   };
   type TestArenaAiSelectionGrid = Record<TestArenaSide, Record<TestArenaAiModuleKind, string>>;
+  type TestArenaCompositeModelOption = {
+    id: string;
+    label: string;
+    spec?: MatchAiSpec;
+    score?: number;
+    rounds?: number;
+    games?: number;
+    compatible?: boolean;
+    reason?: string;
+  };
+  type TestArenaLeaderboardEntry = {
+    runId: string;
+    score?: number;
+    rounds?: number;
+    games?: number;
+    losses?: number;
+    ties?: number;
+    isUnranked?: boolean;
+    winRate?: number;
+    leaderboardScore?: number;
+    wins?: number;
+    spec?: MatchAiSpec;
+    mtimeMs: number;
+  };
   let testArenaPlayerAiPreset: TestArenaAiPreset = "component-config";
   let testArenaEnemyAiPreset: TestArenaAiPreset = "component-config";
   let latestCompositeSpec: MatchAiSpec | null = null;
+  let testArenaCompositeModelOptions: TestArenaCompositeModelOption[] = [
+    { id: "custom-components", label: "Custom components (target/movement/shoot)" },
+    {
+      id: "builtin-baseline-composite",
+      label: "builtin: baseline composite",
+      spec: {
+        familyId: "composite",
+        params: {},
+        composite: {
+          target: { familyId: "baseline-target", params: {} },
+          movement: { familyId: "baseline-movement", params: {} },
+          shoot: { familyId: "baseline-shoot", params: {} },
+        },
+      },
+    },
+    {
+      id: "builtin-dt-default-composite",
+      label: "builtin: dt composite (default params)",
+      spec: {
+        familyId: "composite",
+        params: {},
+        composite: {
+          target: { familyId: "dt-target", params: {} },
+          movement: { familyId: "dt-movement", params: {} },
+          shoot: { familyId: "dt-shoot", params: {} },
+        },
+      },
+    },
+  ];
+  let testArenaCompositeModelSelections: Record<TestArenaSide, string> = {
+    player: "custom-components",
+    enemy: "custom-components",
+  };
   const defaultAiOptions: Record<TestArenaAiModuleKind, TestArenaAiOption[]> = {
     target: [
       { id: "baseline-target", label: "builtin: baseline-target", spec: { familyId: "baseline-target", params: {} } },
-      { id: "neural-target-default", label: "builtin: neural-target (default)", spec: { familyId: "neural-target", params: {} } },
+      { id: "dt-target-default", label: "builtin: dt-target (default)", spec: { familyId: "dt-target", params: {} } },
     ],
     movement: [
       { id: "baseline-movement", label: "builtin: baseline-movement", spec: { familyId: "baseline-movement", params: {} } },
-      { id: "neural-movement-default", label: "builtin: neural-movement (default)", spec: { familyId: "neural-movement", params: {} } },
+      { id: "dt-movement-default", label: "builtin: dt-movement (default)", spec: { familyId: "dt-movement", params: {} } },
     ],
     shoot: [
       { id: "baseline-shoot", label: "builtin: baseline-shoot", spec: { familyId: "baseline-shoot", params: {} } },
-      { id: "neural-shoot-default", label: "builtin: neural-shoot (default)", spec: { familyId: "neural-shoot", params: {} } },
+      { id: "dt-shoot-default", label: "builtin: dt-shoot (default)", spec: { familyId: "dt-shoot", params: {} } },
     ],
   };
   let testArenaAiOptions: Record<TestArenaAiModuleKind, TestArenaAiOption[]> = {
@@ -354,6 +417,19 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       shoot: { familyId: "baseline-shoot", params: {} },
     },
   };
+  let testArenaLeaderboardLoading = false;
+  let testArenaLeaderboardEntries: TestArenaLeaderboardEntry[] = [];
+  let testArenaLeaderboardCompeteMode: "random-pair" | "unranked-vs-random" | "manual-pair" = "random-pair";
+  let testArenaLeaderboardCompeteRuns = 12;
+  let testArenaLeaderboardCompeteBusy = false;
+  let testArenaLeaderboardCompeteStatus = "";
+  let testArenaLeaderboardManualPairA = "";
+  let testArenaLeaderboardManualPairB = "";
+  let testArenaPanelSections: Record<TestArenaPanelSection, boolean> = {
+    unit: true,
+    ai: false,
+    ui: false,
+  };
   const isTemplateEditorScreen = (): boolean => screen === "templateEditor";
   const isPartEditorScreen = (): boolean => screen === "partEditor";
   const isEditorScreen = (): boolean => isTemplateEditorScreen() || isPartEditorScreen();
@@ -369,14 +445,6 @@ export function bootstrap(options: BootstrapOptions = {}): void {
   let debugDisplayLayer = false;
   let debugPartHpOverlay = false;
   let debugServerEnabled = false;
-  let pythonAiBridgeConnected = false;
-  let pythonAiBridgeClientId: string | null = null;
-  let pythonAiBridgeLastSeenMs = 0;
-  let pythonAiBridgeLastStatusPollMs = 0;
-  let pythonAiBridgeStatusInFlight = false;
-  let pythonAiBridgeRequestInFlight: string | null = null;
-  let pythonAiBridgeRequestPostedAtMs = 0;
-  let pythonAiBridgeResultPollAtMs = 0;
   const EDITOR_GRID_MAX_COLS = 10;
   const EDITOR_GRID_MAX_ROWS = 10;
   const EDITOR_GRID_MAX_SIZE = EDITOR_GRID_MAX_COLS * EDITOR_GRID_MAX_ROWS;
@@ -433,6 +501,9 @@ export function bootstrap(options: BootstrapOptions = {}): void {
   let editorDragStartClientY = 0;
   let editorDragLastClientX = 0;
   let editorDragLastClientY = 0;
+  let editorRightClickDeletePending = false;
+  let editorRightClickDeleteMouseX = 0;
+  let editorRightClickDeleteMouseY = 0;
   let battleViewOffsetX = 0;
   let battleViewOffsetY = 0;
   let battleViewScale = 1;
@@ -464,6 +535,14 @@ export function bootstrap(options: BootstrapOptions = {}): void {
   let partDesignerAnchorSlot: number | null = null;
   let partDesignerSelectedSlot: number | null = null;
   let partDesignerSlots: PartDesignerSlot[] = new Array<PartDesignerSlot>(EDITOR_GRID_MAX_SIZE).fill(null);
+  let partDesignerBrushSlot: NonNullable<PartDesignerSlot> = {
+    occupiesFunctionalSpace: true,
+    occupiesStructureSpace: false,
+    needsStructureBehind: true,
+    takesDamage: true,
+    isAttachPoint: false,
+    isShootingPoint: false,
+  };
   let partDesignerSupportOffsets = new Set<number>();
   let partDesignerEmptyStructureOffsets = new Set<number>();
   let partDesignerEmptyFunctionalOffsets = new Set<number>();
@@ -661,6 +740,42 @@ export function bootstrap(options: BootstrapOptions = {}): void {
   const normalizeTestArenaBattlefieldHeight = (value: number): number => Math.max(360, Math.min(2160, Math.floor(value)));
   const normalizeTestArenaZoomPercent = (value: number): number => Math.max(45, Math.min(240, Math.round(value)));
   const normalizeTestArenaGroundHeight = (value: number): number => Math.max(80, Math.min(Math.max(120, testArenaBattlefieldHeight - 40), Math.floor(value)));
+  const normalizeTestArenaSpawnTemplateIds = (candidateIds: ReadonlyArray<string>): string[] => {
+    const validIds = new Set<string>(templates.map((template) => template.id));
+    const normalized: string[] = [];
+    for (const id of candidateIds) {
+      if (!validIds.has(id)) {
+        continue;
+      }
+      if (normalized.includes(id)) {
+        continue;
+      }
+      normalized.push(id);
+    }
+    return normalized;
+  };
+  const setTestArenaSpawnTemplateIds = (candidateIds: ReadonlyArray<string>): string[] => {
+    testArenaSpawnTemplateIds = normalizeTestArenaSpawnTemplateIds(candidateIds);
+    return testArenaSpawnTemplateIds;
+  };
+  const getTestArenaSpawnTemplateIds = (): string[] => {
+    testArenaSpawnTemplateIds = normalizeTestArenaSpawnTemplateIds(testArenaSpawnTemplateIds);
+    return testArenaSpawnTemplateIds;
+  };
+  const normalizeTestArenaManualSpawnTemplateId = (candidateId: string | null): string | null => {
+    if (typeof candidateId === "string" && templates.some((template) => template.id === candidateId)) {
+      return candidateId;
+    }
+    return templates[0]?.id ?? null;
+  };
+  const setTestArenaManualSpawnTemplateId = (candidateId: string | null): string | null => {
+    testArenaManualSpawnTemplateId = normalizeTestArenaManualSpawnTemplateId(candidateId);
+    return testArenaManualSpawnTemplateId;
+  };
+  const getTestArenaManualSpawnTemplateId = (): string | null => {
+    testArenaManualSpawnTemplateId = normalizeTestArenaManualSpawnTemplateId(testArenaManualSpawnTemplateId);
+    return testArenaManualSpawnTemplateId;
+  };
   const syncTestArenaZoomInput = (): void => {
     const zoomInput = getOptionalElement<HTMLInputElement>("#testArenaZoomPercent");
     if (zoomInput) {
@@ -961,6 +1076,178 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     }
   };
 
+  const refreshTestArenaLeaderboard = async (): Promise<void> => {
+    testArenaLeaderboardLoading = true;
+    try {
+      const res = await fetch("/__arena/composite/leaderboard", { method: "GET" });
+      if (!res.ok) {
+        return;
+      }
+      const parsed = await res.json().catch(() => null) as { entries?: TestArenaLeaderboardEntry[] } | null;
+      testArenaLeaderboardEntries = Array.isArray(parsed?.entries) ? parsed.entries : [];
+      const availableIds = testArenaLeaderboardEntries.map((entry) => entry.runId);
+      if (!availableIds.includes(testArenaLeaderboardManualPairA)) {
+        testArenaLeaderboardManualPairA = availableIds[0] ?? "";
+      }
+      if (!availableIds.includes(testArenaLeaderboardManualPairB) || testArenaLeaderboardManualPairB === testArenaLeaderboardManualPairA) {
+        testArenaLeaderboardManualPairB = availableIds.find((id) => id !== testArenaLeaderboardManualPairA) ?? (availableIds[1] ?? "");
+      }
+    } catch {
+      testArenaLeaderboardEntries = [];
+      testArenaLeaderboardManualPairA = "";
+      testArenaLeaderboardManualPairB = "";
+    } finally {
+      testArenaLeaderboardLoading = false;
+    }
+  };
+
+  const findCompositeModelOptionById = (id: string): TestArenaCompositeModelOption | null => {
+    for (const option of testArenaCompositeModelOptions) {
+      if (option.id === id) {
+        return option;
+      }
+    }
+    return null;
+  };
+
+  const refreshTestArenaCompositeModelOptions = async (): Promise<void> => {
+    type ModelEntry = {
+      runId?: string;
+      label?: string;
+      score?: number;
+      rounds?: number;
+      games?: number;
+      wins?: number;
+      losses?: number;
+      ties?: number;
+      isUnranked?: boolean;
+      spec?: MatchAiSpec;
+    };
+    type ResponseShape = {
+      ok?: boolean;
+      entries?: ModelEntry[];
+    };
+    const defaults: TestArenaCompositeModelOption[] = [
+      testArenaCompositeModelOptions.find((entry) => entry.id === "custom-components")
+        ?? { id: "custom-components", label: "Custom components (target/movement/shoot)" },
+      testArenaCompositeModelOptions.find((entry) => entry.id === "builtin-baseline-composite")
+        ?? {
+          id: "builtin-baseline-composite",
+          label: "builtin: baseline composite",
+          spec: {
+            familyId: "composite",
+            params: {},
+            composite: {
+              target: { familyId: "baseline-target", params: {} },
+              movement: { familyId: "baseline-movement", params: {} },
+              shoot: { familyId: "baseline-shoot", params: {} },
+            },
+          },
+        },
+      testArenaCompositeModelOptions.find((entry) => entry.id === "builtin-dt-default-composite")
+        ?? {
+          id: "builtin-dt-default-composite",
+          label: "builtin: dt composite (default params)",
+          spec: {
+            familyId: "composite",
+            params: {},
+            composite: {
+              target: { familyId: "dt-target", params: {} },
+              movement: { familyId: "dt-movement", params: {} },
+              shoot: { familyId: "dt-shoot", params: {} },
+            },
+          },
+        },
+    ];
+    const merged: TestArenaCompositeModelOption[] = [...defaults];
+    try {
+      const res = await fetch("/__arena/composite/models", { method: "GET" });
+      if (res.ok) {
+        const parsed = await res.json().catch(() => null) as ResponseShape | null;
+        for (const entry of parsed?.entries ?? []) {
+          const runId = typeof entry.runId === "string" ? entry.runId : "";
+          if (!runId) {
+            continue;
+          }
+          const scoreLabel = Number.isFinite(entry.score) ? Number(entry.score).toFixed(2) : "100.00";
+          const roundsLabel = Number.isFinite(entry.rounds)
+            ? Math.max(0, Number(entry.rounds))
+            : (Number.isFinite(entry.games) ? Math.max(0, Number(entry.games)) : 0);
+          merged.push({
+            id: `saved-composite:${runId}`,
+            label: `saved:${runId} (score ${scoreLabel}, rounds ${roundsLabel})`,
+            score: Number.isFinite(entry.score) ? Number(entry.score) : undefined,
+            rounds: Number.isFinite(entry.rounds) ? Number(entry.rounds) : undefined,
+            games: Number.isFinite(entry.games) ? Number(entry.games) : undefined,
+            spec: entry.spec,
+            compatible: Boolean(
+              entry.spec?.familyId === "baseline"
+              || (entry.spec?.familyId === "composite" && entry.spec?.composite),
+            ),
+            reason: entry.spec ? undefined : "AI spec missing in run artifact.",
+          });
+        }
+      }
+    } catch {
+      // Keep built-in options only.
+    }
+    testArenaCompositeModelOptions = merged;
+    for (const side of ["player", "enemy"] as const) {
+      const current = testArenaCompositeModelSelections[side];
+      const selected = findCompositeModelOptionById(current);
+      const isValid = Boolean(selected && selected.compatible !== false);
+      if (!isValid) {
+        testArenaCompositeModelSelections[side] = "custom-components";
+      }
+    }
+  };
+
+  const runLeaderboardCompetition = async (
+    mode: "random-pair" | "unranked-vs-random" | "manual-pair",
+    runs: number,
+    runAId?: string,
+    runBId?: string,
+  ): Promise<void> => {
+    if (testArenaLeaderboardCompeteBusy) {
+      return;
+    }
+    if (mode === "manual-pair") {
+      if (!runAId || !runBId || runAId === runBId) {
+        testArenaLeaderboardCompeteStatus = "Select two different models for manual pair mode.";
+        renderPanels();
+        return;
+      }
+    }
+    testArenaLeaderboardCompeteBusy = true;
+    testArenaLeaderboardCompeteStatus = "Running leaderboard matches...";
+    renderPanels();
+    try {
+      const res = await fetch("/__arena/composite/leaderboard/compete", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          mode,
+          runs,
+          runAId: runAId ?? null,
+          runBId: runBId ?? null,
+        }),
+      });
+      const parsed = await res.json().catch(() => null) as { completed?: number; reason?: string } | null;
+      if (!res.ok) {
+        testArenaLeaderboardCompeteStatus = `Competition failed: ${parsed?.reason ?? "request failed"}`;
+        return;
+      }
+      await refreshTestArenaLeaderboard();
+      await refreshTestArenaCompositeModelOptions();
+      testArenaLeaderboardCompeteStatus = `Competition completed: ${Number(parsed?.completed ?? 0)} runs.`;
+    } catch {
+      testArenaLeaderboardCompeteStatus = "Competition failed due to network or server error.";
+    } finally {
+      testArenaLeaderboardCompeteBusy = false;
+      renderPanels();
+    }
+  };
+
   const findAiOptionById = (kind: TestArenaAiModuleKind, id: string): TestArenaAiOption | null => {
     const options = testArenaAiOptions[kind];
     for (const option of options) {
@@ -1058,25 +1345,36 @@ export function bootstrap(options: BootstrapOptions = {}): void {
   };
 
   const buildAiControllerFromPreset = (side: TestArenaSide, preset: TestArenaAiPreset): BattleAiController | null => {
-    if (preset === "baseline" || preset === "python-bridge") {
+    if (preset === "baseline") {
       return null;
     }
     if (preset === "composite-baseline") {
       return createBaselineCompositeAiController();
     }
-    if (preset === "composite-neural-default") {
+    if (preset === "composite-decision-default") {
       const spec: MatchAiSpec = {
         familyId: "composite",
         params: {},
         composite: {
-          target: { familyId: "neural-target", params: {} },
-          movement: { familyId: "neural-movement", params: {} },
-          shoot: { familyId: "neural-shoot", params: {} },
+          target: { familyId: "dt-target", params: {} },
+          movement: { familyId: "dt-movement", params: {} },
+          shoot: { familyId: "dt-shoot", params: {} },
         },
       };
       return makeCompositeAiController(spec);
     }
     if (preset === "component-config") {
+      const selectedModelId = testArenaCompositeModelSelections[side];
+      if (selectedModelId !== "custom-components") {
+        const selectedModel = findCompositeModelOptionById(selectedModelId);
+        if (selectedModel?.spec?.familyId === "baseline") {
+          return null;
+        }
+        if (selectedModel?.spec?.familyId === "composite" && selectedModel.spec.composite) {
+          return makeCompositeAiController(selectedModel.spec);
+        }
+        return null;
+      }
       const modules = testArenaResolvedCompositeModules[side];
       if (!modules) {
         return null;
@@ -1165,6 +1463,8 @@ export function bootstrap(options: BootstrapOptions = {}): void {
   );
   void fetchLatestCompositeSpec()
     .then(async () => {
+      await refreshTestArenaLeaderboard();
+      await refreshTestArenaCompositeModelOptions();
       await refreshTestArenaAiOptions();
       await refreshTestArenaComponentGrid();
     })
@@ -1428,6 +1728,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       ...(typeof spec.baseHp === "number" && Number.isFinite(spec.baseHp) && spec.baseHp > 0 ? { testBaseHpOverride: spec.baseHp } : {}),
     };
     applyBattlefieldDefaults();
+    battle.setEnemySpawnTemplateFilter(null);
     battle.start(node);
     battle.clearControlSelection();
     battle.getState().enemyGas = spec.enemyGas;
@@ -1826,19 +2127,23 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     mapPanel.classList.toggle("hidden", next !== "map");
     battlePanel.classList.toggle("hidden", next !== "battle");
     testArenaPanel.classList.toggle("hidden", next !== "testArena");
+    leaderboardCenter.classList.toggle("hidden", next !== "leaderboard");
     editorPanel.classList.toggle("hidden", !isEditorScreen());
     tabs.base.classList.toggle("active", next === "base");
     tabs.map.classList.toggle("active", next === "map");
     tabs.battle.classList.toggle("active", next === "battle");
     tabs.testArena.classList.toggle("active", next === "testArena");
+    tabs.leaderboard.classList.toggle("active", next === "leaderboard");
     tabs.templateEditor.classList.toggle("active", next === "templateEditor");
     tabs.partEditor.classList.toggle("active", next === "partEditor");
     if (!isEditorScreen()) {
       hideEditorTooltip();
     }
+    canvasViewport.classList.toggle("hidden", next === "leaderboard");
     if (!battleViewDragActive) {
       canvasViewport.style.cursor = isBattleScreen() ? "grab" : "default";
     }
+    weaponHud.classList.toggle("hidden", next === "leaderboard");
     applyBattleViewTransform();
   };
 
@@ -2149,10 +2454,6 @@ export function bootstrap(options: BootstrapOptions = {}): void {
           <div class="small">Selected box: ${selectedCoord ? `(${selectedCoord.x},${selectedCoord.y})` : "none"}</div>
           <div class="small">${selectedEntry ? "Box exists and can be edited below." : "No box at selected cell yet."}</div>
           <div class="row">
-            <button id="btnPartCreateSelected" ${selectedSlot === null ? "disabled" : ""}>Create Box</button>
-            <button id="btnPartDeleteSelected" ${selectedSlot === null ? "disabled" : ""}>Delete Box</button>
-          </div>
-          <div class="row">
             <label class="small"><input id="partBoxOccupiesStructure" type="checkbox" ${resolvedEntry.occupiesStructureSpace ? "checked" : ""} ${selectedSlot === null ? "disabled" : ""} /> Structure occupy</label>
             <label class="small"><input id="partBoxOccupiesFunctional" type="checkbox" ${resolvedEntry.occupiesFunctionalSpace ? "checked" : ""} ${selectedSlot === null ? "disabled" : ""} /> Functional occupy</label>
           </div>
@@ -2264,9 +2565,9 @@ export function bootstrap(options: BootstrapOptions = {}): void {
   const updateWeaponHud = (): void => {
     if (isEditorScreen()) {
       if (isPartEditorScreen()) {
-        weaponHud.innerHTML = `<div><strong>Part Designer</strong></div><div class="small">Tool=${partDesignerTool}. Left-click applies the selected tool, right-drag pans, and wheel zooms. Q/E rotates preview for directional parts.</div>`;
+        weaponHud.innerHTML = `<div><strong>Part Designer</strong></div><div class="small">Tool=${partDesignerTool}. Left-click applies the selected tool, right-click erases a box, right-drag pans, and wheel zooms. Q/E rotates preview for directional parts.</div>`;
       } else {
-        weaponHud.innerHTML = `<div><strong>Object Editor</strong></div><div class="small">Layer=${editorLayer} | Mode=${editorDeleteMode ? "delete" : "place"}. Left-click places/deletes by mode, right-drag pans, wheel zooms. Q/E = weapon rotate 90deg (ccw/cw). Display items attach to structure cells only.</div>`;
+        weaponHud.innerHTML = `<div><strong>Object Editor</strong></div><div class="small">Layer=${editorLayer} | Mode=${editorDeleteMode ? "delete" : "place"}. Left-click places/deletes by mode, right-click deletes (functional first, then structure), right-drag pans, wheel zooms. Q/E = weapon rotate 90deg (ccw/cw). Display items attach to structure cells only.</div>`;
       }
       return;
     }
@@ -2751,12 +3052,50 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     isShootingPoint: false,
   });
 
+  const clonePartDesignerSlot = (slot: NonNullable<PartDesignerSlot>): NonNullable<PartDesignerSlot> => ({
+    occupiesFunctionalSpace: slot.occupiesFunctionalSpace,
+    occupiesStructureSpace: slot.occupiesStructureSpace,
+    needsStructureBehind: slot.needsStructureBehind,
+    takesDamage: slot.takesDamage,
+    isAttachPoint: slot.isAttachPoint,
+    isShootingPoint: slot.isShootingPoint,
+  });
+
+  const normalizePartDesignerSlotForLayer = (
+    slot: NonNullable<PartDesignerSlot>,
+    layer: PartDefinition["layer"],
+  ): NonNullable<PartDesignerSlot> => {
+    const next = clonePartDesignerSlot(slot);
+    if (next.isAttachPoint) {
+      next.occupiesStructureSpace = false;
+      next.occupiesFunctionalSpace = false;
+      next.needsStructureBehind = false;
+      return next;
+    }
+    if (layer === "structure") {
+      next.occupiesStructureSpace = true;
+      next.occupiesFunctionalSpace = false;
+      next.needsStructureBehind = false;
+      next.isShootingPoint = false;
+      return next;
+    }
+    if (!next.occupiesStructureSpace && !next.occupiesFunctionalSpace) {
+      next.occupiesFunctionalSpace = true;
+    }
+    next.needsStructureBehind = next.needsStructureBehind && !next.occupiesStructureSpace && next.occupiesFunctionalSpace;
+    return next;
+  };
+
+  const setPartDesignerBrushFromSlot = (slot: NonNullable<PartDesignerSlot>): void => {
+    partDesignerBrushSlot = normalizePartDesignerSlotForLayer(slot, partDesignerDraft.layer);
+  };
+
   const ensurePartDesignerSlot = (slot: number): NonNullable<PartDesignerSlot> => {
     const current = partDesignerSlots[slot];
     if (current) {
       return current;
     }
-    const next = createDefaultPartDesignerSlot(partDesignerDraft.layer);
+    const next = normalizePartDesignerSlotForLayer(partDesignerBrushSlot, partDesignerDraft.layer);
     partDesignerSlots[slot] = next;
     return next;
   };
@@ -2772,6 +3111,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       partDesignerSelectedSlot = partDesignerAnchorSlot;
     }
     const anchorCoord = partDesignerAnchorSlot !== null ? slotToCoord(partDesignerAnchorSlot) : { x: 0, y: 0 };
+    const fallbackSlot = normalizePartDesignerSlotForLayer(partDesignerBrushSlot, partDesignerDraft.layer);
     const boxes = partDesignerSlots
       .map((entry, slotIndex) => ({ entry, slotIndex }))
       .filter((item): item is { entry: NonNullable<PartDesignerSlot>; slotIndex: number } => item.entry !== null)
@@ -2797,25 +3137,18 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       boxes.push({
         x: anchorCoord.x,
         y: anchorCoord.y,
-        occupiesFunctionalSpace: partDesignerDraft.layer !== "structure",
-        occupiesStructureSpace: partDesignerDraft.layer === "structure",
-        needsStructureBehind: partDesignerDraft.layer !== "structure",
-        isAttachPoint: false,
+        occupiesFunctionalSpace: fallbackSlot.occupiesFunctionalSpace,
+        occupiesStructureSpace: fallbackSlot.occupiesStructureSpace,
+        needsStructureBehind: fallbackSlot.needsStructureBehind,
+        isAttachPoint: fallbackSlot.isAttachPoint,
         isAnchorPoint: true,
-        isShootingPoint: false,
-        takesDamage: true,
-        takesFunctionalDamage: true,
+        isShootingPoint: fallbackSlot.isShootingPoint,
+        takesDamage: fallbackSlot.takesDamage,
+        takesFunctionalDamage: fallbackSlot.takesDamage,
       });
       const anchorSlot = coordToSlot(anchorCoord.x, anchorCoord.y);
       if (anchorSlot !== null) {
-        partDesignerSlots[anchorSlot] = {
-          occupiesFunctionalSpace: partDesignerDraft.layer !== "structure",
-          occupiesStructureSpace: partDesignerDraft.layer === "structure",
-          needsStructureBehind: partDesignerDraft.layer !== "structure",
-          takesDamage: true,
-          isAttachPoint: false,
-          isShootingPoint: false,
-        };
+        partDesignerSlots[anchorSlot] = clonePartDesignerSlot(fallbackSlot);
         if (partDesignerSelectedSlot === null) {
           partDesignerSelectedSlot = anchorSlot;
         }
@@ -2886,6 +3219,10 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     if (partDesignerSelectedSlot !== null && partDesignerSelectedSlot < 0) {
       partDesignerSelectedSlot = null;
     }
+    const selectedSlotEntry = partDesignerSelectedSlot !== null ? partDesignerSlots[partDesignerSelectedSlot] : null;
+    partDesignerBrushSlot = selectedSlotEntry
+      ? normalizePartDesignerSlotForLayer(selectedSlotEntry, partDesignerDraft.layer)
+      : createDefaultPartDesignerSlot(partDesignerDraft.layer);
 
     const anchorCoord = partDesignerAnchorSlot !== null ? slotToCoord(partDesignerAnchorSlot) : part.anchor;
     const loadOffsets = (
@@ -3051,7 +3388,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     context.fillStyle = "#dbe8f6";
     context.font = "14px Trebuchet MS";
     context.fillText(`Part Designer | Grid ${editorGridCols}x${editorGridRows} | Tool ${partDesignerTool}`, 18, 26);
-    context.fillText("Left-click: edit box | Right-drag: pan grid | Mouse wheel: zoom.", 18, 46);
+    context.fillText("Left-click: apply tool | Right-click: erase | Right-drag: pan | Mouse wheel: zoom.", 18, 46);
     context.fillStyle = validation.errors.length > 0 ? "#ffd1c1" : "#bde6c6";
     context.fillText(`Errors ${validation.errors.length} | Warnings ${validation.warnings.length}`, 18, 66);
 
@@ -3165,7 +3502,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     context.fillStyle = "#dbe8f6";
     context.font = "14px Trebuchet MS";
     context.fillText(`Grid ${editorGridCols}x${editorGridRows} | Layer ${editorLayer.toUpperCase()} ${editorDeleteMode ? "| DELETE" : "| PLACE"}`, 18, 26);
-    context.fillText("Left-click: place/delete | Right-drag: pan grid | Mouse wheel: zoom | Origin: (0,0).", 18, 46);
+    context.fillText("Left-click: place/delete | Right-click: delete (functional first) | Right-drag: pan | Mouse wheel: zoom | Origin: (0,0).", 18, 46);
 
     if (isCurrentEditorSelectionDirectional()) {
       context.fillStyle = "rgba(28, 43, 61, 0.92)";
@@ -3305,6 +3642,10 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     };
 
     if (eraseRequested) {
+      const removed = partDesignerSlots[slot];
+      if (removed) {
+        setPartDesignerBrushFromSlot(removed);
+      }
       partDesignerSlots[slot] = null;
       partDesignerSupportOffsets.delete(slot);
       partDesignerEmptyStructureOffsets.delete(slot);
@@ -3317,7 +3658,8 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     }
 
     if (partDesignerTool === "setAnchor") {
-      ensurePartDesignerSlot(slot);
+      const next = ensurePartDesignerSlot(slot);
+      setPartDesignerBrushFromSlot(next);
       partDesignerAnchorSlot = slot;
       recalcPartDraftFromSlots();
       return;
@@ -3339,7 +3681,8 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     }
 
     if (partDesignerTool === "select") {
-      ensurePartDesignerSlot(slot);
+      const next = ensurePartDesignerSlot(slot);
+      setPartDesignerBrushFromSlot(next);
       if (partDesignerAnchorSlot === null) {
         partDesignerAnchorSlot = slot;
       }
@@ -3362,6 +3705,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       next.takesDamage = true;
     }
     partDesignerSlots[slot] = next;
+    setPartDesignerBrushFromSlot(next);
     if (partDesignerAnchorSlot === null) {
       partDesignerAnchorSlot = slot;
     }
@@ -3382,6 +3726,23 @@ export function bootstrap(options: BootstrapOptions = {}): void {
 
     if (isPartEditorScreen()) {
       applyPartDesignerCellAction(slot, forceDelete);
+      return;
+    }
+
+    if (forceDelete) {
+      const removedFunctional = clearFunctionalGroupAtSlot(slot);
+      if (removedFunctional) {
+        recalcEditorDraftFromSlots();
+        return;
+      }
+      const hadStructure = editorStructureSlots[slot] !== null;
+      if (hadStructure) {
+        editorStructureSlots[slot] = null;
+        editorDisplaySlots[slot] = null;
+        recalcEditorDraftFromSlots();
+        return;
+      }
+      addLog(`No functional component or structure cell at row ${row + 1}, col ${col + 1}`, "warn");
       return;
     }
 
@@ -3555,9 +3916,33 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       ${battle.getState().outcome ? `<div class="row"><button id="btnBackToMap">Return to Map</button></div>` : ""}
     `;
 
-    const enemyTemplateOptions = templates
-      .map((template) => `<option value="${template.id}" ${template.id === testArenaSpawnTemplateId ? "selected" : ""}>${template.name}</option>`)
+    const selectedSpawnTemplateIds = getTestArenaSpawnTemplateIds();
+    const selectedSpawnTemplateIdSet = new Set<string>(selectedSpawnTemplateIds);
+    const spawnTemplateCheckboxRows = templates
+      .map((template) => `
+        <label class="small test-arena-spawn-option">
+          <input class="testArenaSpawnTemplateToggle" type="checkbox" data-template-id="${escapeHtml(template.id)}" ${selectedSpawnTemplateIdSet.has(template.id) ? "checked" : ""} />
+          <span>${escapeHtml(template.name)}</span>
+        </label>
+      `)
       .join("");
+    const spawnTemplateSummary = selectedSpawnTemplateIds.length <= 0
+      ? "Enemy spawn templates (none selected)"
+      : `Enemy spawn templates (${selectedSpawnTemplateIds.length} selected)`;
+    const spawnTemplateDropdownOpenAttr = testArenaSpawnTemplateDropdownOpen ? "open" : "";
+    const manualSpawnTemplateId = getTestArenaManualSpawnTemplateId();
+    const manualSpawnTemplateOptions = templates
+      .map((template) => `<option value="${template.id}" ${template.id === manualSpawnTemplateId ? "selected" : ""}>${escapeHtml(template.name)}</option>`)
+      .join("");
+    const renderCompositeModelOptions = (side: TestArenaSide): string => {
+      const selectedId = testArenaCompositeModelSelections[side];
+      return testArenaCompositeModelOptions
+        .map((entry) => {
+          const disabled = entry.compatible === false;
+          return `<option value="${entry.id}" ${entry.id === selectedId ? "selected" : ""} ${disabled ? "disabled" : ""}>${escapeHtml(entry.label)}</option>`;
+        })
+        .join("");
+    };
     const renderModuleCell = (side: TestArenaSide, kind: TestArenaAiModuleKind): string => {
       const selectedId = testArenaAiSelections[side][kind];
       const options = testArenaAiOptions[kind]
@@ -3570,18 +3955,14 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         <select id="testArenaCompSelect_${side}_${kind}">${options}</select>
       `;
     };
-    const pythonStatusText = pythonAiBridgeConnected
-      ? `Connected${pythonAiBridgeClientId ? ` (${pythonAiBridgeClientId})` : ""}`
-      : "Waiting for connection";
-    const pythonLastSeenLabel = pythonAiBridgeLastSeenMs > 0
-      ? `, last heartbeat ${Math.max(0, Math.round((Date.now() - pythonAiBridgeLastSeenMs) / 1000))}s ago`
-      : "";
-    const pythonStatusTone = pythonAiBridgeConnected ? "good" : "warn";
     const enemyCountLabel = Math.max(0, Math.floor(testArenaEnemyCount));
     const enemyCountActive = isTestArenaActive
       ? battle.getAliveEnemyCount()
       : enemyCountLabel;
     const zoomPercentLabel = Math.round(battleViewScale * 100);
+    const unitSectionOpenAttr = testArenaPanelSections.unit ? "open" : "";
+    const aiSectionOpenAttr = testArenaPanelSections.ai ? "open" : "";
+    const uiSectionOpenAttr = testArenaPanelSections.ui ? "open" : "";
     testArenaPanel.innerHTML = `
       <h3>Test Arena</h3>
       <div class="small">Debug arena for spawn pressure and survivability. Starts a battle without campaign rewards.</div>
@@ -3590,55 +3971,165 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         <button id="btnStartTestArena">${isTestArenaActive ? "Restart Test Arena" : "Start Test Arena"}</button>
         ${isTestArenaActive ? `<button id="btnEndTestArena">End Test Arena</button>` : ""}
       </div>
-      <div class="row">
-        <label class="small">Enemy count
-          <input id="testArenaEnemyCount" type="number" min="0" max="40" step="1" value="${enemyCountLabel}" />
-        </label>
-        <span class="small">Active: ${enemyCountActive}</span>
+      <details id="testArenaSectionUnit" class="test-arena-section" ${unitSectionOpenAttr}>
+        <summary><strong>Unit</strong></summary>
+        <div class="test-arena-section-body">
+          <div class="test-arena-inline-grid">
+            <label class="small">Enemy count
+              <input id="testArenaEnemyCount" type="number" min="0" max="40" step="1" value="${enemyCountLabel}" />
+            </label>
+            <span class="small">Active: ${enemyCountActive}</span>
+          </div>
+          <div class="test-arena-spawn-row">
+            <details id="testArenaSpawnTemplateDropdown" class="test-arena-spawn-dropdown" ${spawnTemplateDropdownOpenAttr}>
+              <summary class="small">${spawnTemplateSummary}</summary>
+              <div class="test-arena-spawn-options">
+                ${spawnTemplateCheckboxRows}
+              </div>
+            </details>
+          </div>
+          <div class="test-arena-spawn-row">
+            <label class="small">Manual spawn enemy
+              <select id="testArenaManualSpawnTemplate">
+                ${manualSpawnTemplateOptions}
+              </select>
+            </label>
+            <button id="btnSpawnTestEnemy">Spawn</button>
+          </div>
+          <div class="small">Checkbox dropdown affects automatic enemy spawn only.</div>
+          <label class="small"><input id="testArenaInvinciblePlayer" type="checkbox" ${testArenaInvinciblePlayer ? "checked" : ""} /> Player controlled invincible</label>
+          <div class="small">Invincible player still collides and can be targeted, but takes no damage.</div>
+        </div>
+      </details>
+      <details id="testArenaSectionAi" class="test-arena-section" ${aiSectionOpenAttr}>
+        <summary><strong>AI Selection</strong></summary>
+        <div class="test-arena-section-body">
+          <div class="row">
+            <button id="btnRefreshArenaAiModels">Refresh AI list</button>
+          </div>
+          <div class="small">Select composed model per side. Use Custom components if you want per-stage module control.</div>
+          <div class="test-arena-ai-model-grid">
+            <div class="small"></div>
+            <div class="small"><strong>Player</strong></div>
+            <div class="small"><strong>Enemy</strong></div>
+            <div class="small">Composed model</div>
+            <select id="testArenaCompositeModel_player">${renderCompositeModelOptions("player")}</select>
+            <select id="testArenaCompositeModel_enemy">${renderCompositeModelOptions("enemy")}</select>
+          </div>
+          <div class="small">Component grid below is active only when side model is set to Custom components.</div>
+          <div class="test-arena-ai-grid">
+            <div class="small"></div>
+            <div class="small"><strong>Player</strong></div>
+            <div class="small"><strong>Enemy</strong></div>
+            <div class="small">Target</div>
+            ${renderModuleCell("player", "target")}
+            ${renderModuleCell("enemy", "target")}
+            <div class="small">Movement</div>
+            ${renderModuleCell("player", "movement")}
+            ${renderModuleCell("enemy", "movement")}
+            <div class="small">Shoot</div>
+            ${renderModuleCell("player", "shoot")}
+            ${renderModuleCell("enemy", "shoot")}
+          </div>
+          <div class="small">AI presets apply to Test Arena only; campaign battles keep default behavior.</div>
+        </div>
+      </details>
+      <details id="testArenaSectionUi" class="test-arena-section" ${uiSectionOpenAttr}>
+        <summary><strong>UI Configuration</strong></summary>
+        <div class="test-arena-section-body">
+          <div class="small">Battlefield W/H and ground height update simulation size. Zoom changes display scale only.</div>
+          <div class="test-arena-ui-grid">
+            <span class="small">Width</span>
+            <span class="small">Height</span>
+            <span class="small">Zoom %</span>
+            <span class="small">Ground H</span>
+            <input id="testArenaBattlefieldWidth" type="number" min="640" max="4096" step="10" value="${testArenaBattlefieldWidth}" />
+            <input id="testArenaBattlefieldHeight" type="number" min="360" max="2160" step="10" value="${testArenaBattlefieldHeight}" />
+            <input id="testArenaZoomPercent" type="number" min="45" max="240" step="1" value="${zoomPercentLabel}" />
+            <input id="testArenaGroundHeight" type="number" min="80" max="${Math.max(120, testArenaBattlefieldHeight - 40)}" step="10" value="${testArenaGroundHeight}" />
+          </div>
+        </div>
+      </details>
+    `;
+
+    const leaderboardRows = testArenaLeaderboardEntries
+      .slice(0, 24)
+      .map((entry, index) => {
+        const winRate = Number.isFinite(entry.winRate) ? `${(Number(entry.winRate) * 100).toFixed(1)}%` : "-";
+        const score = Number.isFinite(entry.leaderboardScore) ? Number(entry.leaderboardScore).toFixed(2) : "-";
+        const wins = Number.isFinite(entry.wins) ? Number(entry.wins) : 0;
+        const rounds = Number.isFinite(entry.rounds) ? Number(entry.rounds) : (Number.isFinite(entry.games) ? Number(entry.games) : 0);
+        const losses = Number.isFinite(entry.losses) ? Number(entry.losses) : 0;
+        const ties = Number.isFinite(entry.ties) ? Number(entry.ties) : 0;
+        const rankTag = entry.isUnranked ? `<span class="small warn">unranked</span>` : "";
+        return `<tr>
+          <td>${index + 1}</td>
+          <td>${escapeHtml(entry.runId)} ${rankTag}</td>
+          <td>${score}</td>
+          <td>${winRate}</td>
+          <td>${wins}/${losses}/${ties}</td>
+          <td>${rounds}</td>
+        </tr>`;
+      })
+      .join("");
+    const competeRunsValue = Math.max(1, Math.min(200, Math.floor(testArenaLeaderboardCompeteRuns)));
+    const competeModeOptions = `
+      <option value="random-pair" ${testArenaLeaderboardCompeteMode === "random-pair" ? "selected" : ""}>Random pair</option>
+      <option value="unranked-vs-random" ${testArenaLeaderboardCompeteMode === "unranked-vs-random" ? "selected" : ""}>Unranked vs random</option>
+      <option value="manual-pair" ${testArenaLeaderboardCompeteMode === "manual-pair" ? "selected" : ""}>Manual pair</option>
+    `;
+    const manualPairOptionsA = testArenaLeaderboardEntries
+      .map((entry) => `<option value="${escapeHtml(entry.runId)}" ${entry.runId === testArenaLeaderboardManualPairA ? "selected" : ""}>${escapeHtml(entry.runId)}</option>`)
+      .join("");
+    const manualPairOptionsB = testArenaLeaderboardEntries
+      .map((entry) => `<option value="${escapeHtml(entry.runId)}" ${entry.runId === testArenaLeaderboardManualPairB ? "selected" : ""}>${escapeHtml(entry.runId)}</option>`)
+      .join("");
+    leaderboardCenter.innerHTML = `
+      <h3>AI Leaderboard</h3>
+      <div class="small">Real ranking by head-to-head matches. All runs start at score 100.</div>
+      <div class="leaderboard-layout">
+        <div class="leaderboard-actions">
+          <div class="small"><strong>Competition</strong></div>
+          <label class="small">Mode
+            <select id="leaderboardCompeteMode">
+              ${competeModeOptions}
+            </select>
+          </label>
+          <label class="small">Runs
+            <input id="leaderboardCompeteRuns" type="number" min="1" max="200" step="1" value="${competeRunsValue}" />
+          </label>
+          ${testArenaLeaderboardCompeteMode === "manual-pair" ? `
+            <label class="small">Model A
+              <select id="leaderboardManualPairA">${manualPairOptionsA}</select>
+            </label>
+            <label class="small">Model B
+              <select id="leaderboardManualPairB">${manualPairOptionsB}</select>
+            </label>
+          ` : ""}
+          <div class="row">
+            <button id="btnLeaderboardCompete" ${testArenaLeaderboardCompeteBusy ? "disabled" : ""}>${testArenaLeaderboardCompeteBusy ? "Running..." : "Run Competition"}</button>
+            <button id="btnRefreshLeaderboard">Refresh</button>
+          </div>
+          <div class="small">${escapeHtml(testArenaLeaderboardCompeteStatus || " ")}</div>
+        </div>
+        <div class="leaderboard-table-wrap" style="margin-top:0; border:1px solid #333; border-radius:6px; padding:6px; max-height:480px; overflow:auto;">
+          ${testArenaLeaderboardLoading ? `<div class="small">Loading...</div>` : ""}
+          ${!testArenaLeaderboardLoading && leaderboardRows.length <= 0 ? `<div class="small warn">No leaderboard data found. Train composite runs first.</div>` : ""}
+          ${!testArenaLeaderboardLoading && leaderboardRows.length > 0 ? `<table style="width:100%; border-collapse:collapse; font-size:12px;">
+            <thead>
+              <tr>
+                <th style="text-align:left;">#</th>
+                <th style="text-align:left;">Run</th>
+                <th style="text-align:left;">Score</th>
+                <th style="text-align:left;">Win Rate</th>
+                <th style="text-align:left;">W/L/T</th>
+                <th style="text-align:left;">Rounds</th>
+              </tr>
+            </thead>
+            <tbody>${leaderboardRows}</tbody>
+          </table>` : ""}
+        </div>
       </div>
-      <div style="display:grid; grid-template-columns:repeat(4, minmax(0, 1fr)); gap:6px; align-items:center;">
-        <span class="small">Width</span>
-        <span class="small">Height</span>
-        <span class="small">Zoom %</span>
-        <span class="small">Ground H</span>
-        <input id="testArenaBattlefieldWidth" type="number" min="640" max="4096" step="10" value="${testArenaBattlefieldWidth}" />
-        <input id="testArenaBattlefieldHeight" type="number" min="360" max="2160" step="10" value="${testArenaBattlefieldHeight}" />
-        <input id="testArenaZoomPercent" type="number" min="45" max="240" step="1" value="${zoomPercentLabel}" />
-        <input id="testArenaGroundHeight" type="number" min="80" max="${Math.max(120, testArenaBattlefieldHeight - 40)}" step="10" value="${testArenaGroundHeight}" />
-      </div>
-      <div class="row">
-        <label class="small">Spawn enemy
-          <select id="testArenaSpawnTemplate">
-            <option value="">Select...</option>
-            ${enemyTemplateOptions}
-          </select>
-        </label>
-        <button id="btnSpawnTestEnemy">Spawn</button>
-      </div>
-      <div class="row">
-        <label class="small"><input id="testArenaInvinciblePlayer" type="checkbox" ${testArenaInvinciblePlayer ? "checked" : ""} /> Player controlled invincible</label>
-      </div>
-      <div class="row">
-        <button id="btnRefreshArenaAiModels">Refresh AI list</button>
-      </div>
-      <div class="small">Select AI module per side (player/enemy) and stage (target/movement/shoot).</div>
-      <div style="display:grid; grid-template-columns:120px minmax(0,1fr) minmax(0,1fr); gap:6px; align-items:start;">
-        <div class="small"></div>
-        <div class="small"><strong>Player</strong></div>
-        <div class="small"><strong>Enemy</strong></div>
-        <div class="small">Target</div>
-        ${renderModuleCell("player", "target")}
-        ${renderModuleCell("enemy", "target")}
-        <div class="small">Movement</div>
-        ${renderModuleCell("player", "movement")}
-        ${renderModuleCell("enemy", "movement")}
-        <div class="small">Shoot</div>
-        ${renderModuleCell("player", "shoot")}
-        ${renderModuleCell("enemy", "shoot")}
-      </div>
-      ${testArenaNeedsPythonBridge() ? `<div class="small ${pythonStatusTone}">Python AI bridge: ${pythonStatusText}${pythonLastSeenLabel}</div>` : ""}
-      <div class="small">Invincible player still collides and can be targeted, but takes no damage.</div>
-      <div class="small">AI presets apply to Test Arena only; campaign battles keep default behavior.</div>
     `;
 
     ensureEditorSelectionForLayer();
@@ -3991,47 +4482,10 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     }
   };
 
-  const isPythonBridgePreset = (preset: TestArenaAiPreset): boolean => preset === "python-bridge";
-
   const getExternalAiSidesFromPresets = (): { player: boolean; enemy: boolean } => ({
-    player: isPythonBridgePreset(testArenaPlayerAiPreset),
-    enemy: isPythonBridgePreset(testArenaEnemyAiPreset),
+    player: false,
+    enemy: false,
   });
-
-  const testArenaNeedsPythonBridge = (): boolean => {
-    const externalSides = getExternalAiSidesFromPresets();
-    return externalSides.player || externalSides.enemy;
-  };
-
-  const fetchPythonAiBridgeStatus = async (): Promise<void> => {
-    if (pythonAiBridgeStatusInFlight) {
-      return;
-    }
-    pythonAiBridgeStatusInFlight = true;
-    try {
-      const res = await fetch("/__pyai/status", { method: "GET" });
-      if (!res.ok) {
-        pythonAiBridgeConnected = false;
-        pythonAiBridgeClientId = null;
-        pythonAiBridgeLastSeenMs = 0;
-        return;
-      }
-      const parsed = await res.json().catch(() => null) as {
-        connected?: boolean;
-        clientId?: string | null;
-        lastSeenMs?: number;
-      } | null;
-      pythonAiBridgeConnected = parsed?.connected === true;
-      pythonAiBridgeClientId = typeof parsed?.clientId === "string" ? parsed.clientId : null;
-      pythonAiBridgeLastSeenMs = Number.isFinite(parsed?.lastSeenMs) ? Number(parsed?.lastSeenMs) : 0;
-    } catch {
-      pythonAiBridgeConnected = false;
-      pythonAiBridgeClientId = null;
-      pythonAiBridgeLastSeenMs = 0;
-    } finally {
-      pythonAiBridgeStatusInFlight = false;
-    }
-  };
 
   const applyTestArenaBattlefieldSize = (): void => {
     const width = normalizeTestArenaBattlefieldWidth(testArenaBattlefieldWidth);
@@ -4069,22 +4523,17 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     if (battle.getState().active && !battle.getState().outcome) {
       battle.resetToMapMode();
     }
-    pythonAiBridgeRequestInFlight = null;
-    pythonAiBridgeRequestPostedAtMs = 0;
-    pythonAiBridgeResultPollAtMs = 0;
+    await refreshTestArenaCompositeModelOptions();
     await refreshTestArenaAiOptions();
     await refreshTestArenaComponentGrid();
     applyTestArenaAiControllers();
+    battle.setEnemySpawnTemplateFilter(getTestArenaSpawnTemplateIds());
     battle.start(testArenaNode);
     battle.setControlledUnitInvincible(testArenaInvinciblePlayer);
     battle.setEnemyActiveCount(testArenaEnemyCount);
-    addLog(
-      `Test Arena started. P[target=${testArenaAiSelections.player.target}, movement=${testArenaAiSelections.player.movement}, shoot=${testArenaAiSelections.player.shoot}] `
-      + `E[target=${testArenaAiSelections.enemy.target}, movement=${testArenaAiSelections.enemy.movement}, shoot=${testArenaAiSelections.enemy.shoot}].`,
-    );
-    if (testArenaNeedsPythonBridge() && !pythonAiBridgeConnected) {
-      addLog("Python AI bridge waiting for connection...", "warn");
-    }
+    const playerModel = findCompositeModelOptionById(testArenaCompositeModelSelections.player)?.label ?? testArenaCompositeModelSelections.player;
+    const enemyModel = findCompositeModelOptionById(testArenaCompositeModelSelections.enemy)?.label ?? testArenaCompositeModelSelections.enemy;
+    addLog(`Test Arena started. P model=${playerModel} | E model=${enemyModel}.`);
     setScreen("testArena");
     centerBattleViewYOnPlayerBase();
     renderPanels();
@@ -4169,9 +4618,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         applyBattlefieldDefaults();
         battle.setAiControllers({});
         battle.setExternalAiSides({ player: false, enemy: false });
-        pythonAiBridgeRequestInFlight = null;
-        pythonAiBridgeRequestPostedAtMs = 0;
-        pythonAiBridgeResultPollAtMs = 0;
+        battle.setEnemySpawnTemplateFilter(null);
         battle.start(node);
         addLog(`Battle started at ${node.name}`);
         setScreen("battle");
@@ -4215,15 +4662,90 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       void startTestArena();
     });
 
+    getOptionalElement<HTMLButtonElement>("#btnRefreshLeaderboard")?.addEventListener("click", async () => {
+      renderPanels();
+      await refreshTestArenaLeaderboard();
+      await refreshTestArenaCompositeModelOptions();
+      renderPanels();
+    });
+
+    getOptionalElement<HTMLSelectElement>("#leaderboardCompeteMode")?.addEventListener("change", (event) => {
+      const next = (event.currentTarget as HTMLSelectElement).value;
+      testArenaLeaderboardCompeteMode = next === "unranked-vs-random"
+        ? "unranked-vs-random"
+        : next === "manual-pair"
+          ? "manual-pair"
+          : "random-pair";
+      renderPanels();
+    });
+
+    getOptionalElement<HTMLSelectElement>("#leaderboardManualPairA")?.addEventListener("change", (event) => {
+      testArenaLeaderboardManualPairA = (event.currentTarget as HTMLSelectElement).value;
+      renderPanels();
+    });
+    getOptionalElement<HTMLSelectElement>("#leaderboardManualPairB")?.addEventListener("change", (event) => {
+      testArenaLeaderboardManualPairB = (event.currentTarget as HTMLSelectElement).value;
+      renderPanels();
+    });
+
+    const leaderboardCompeteRunsInput = getOptionalElement<HTMLInputElement>("#leaderboardCompeteRuns");
+    const commitLeaderboardCompeteRuns = (): void => {
+      const raw = getOptionalElement<HTMLInputElement>("#leaderboardCompeteRuns")?.value ?? "";
+      const parsed = Number.parseInt(raw, 10);
+      if (!Number.isFinite(parsed)) {
+        testArenaLeaderboardCompeteRuns = 12;
+      } else {
+        testArenaLeaderboardCompeteRuns = Math.max(1, Math.min(200, parsed));
+      }
+      renderPanels();
+    };
+    leaderboardCompeteRunsInput?.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter") {
+        return;
+      }
+      event.preventDefault();
+      leaderboardCompeteRunsInput.blur();
+    });
+    leaderboardCompeteRunsInput?.addEventListener("blur", () => {
+      commitLeaderboardCompeteRuns();
+    });
+
+    getOptionalElement<HTMLButtonElement>("#btnLeaderboardCompete")?.addEventListener("click", async () => {
+      await runLeaderboardCompetition(
+        testArenaLeaderboardCompeteMode,
+        testArenaLeaderboardCompeteRuns,
+        testArenaLeaderboardManualPairA,
+        testArenaLeaderboardManualPairB,
+      );
+    });
+
     getOptionalElement<HTMLButtonElement>("#btnEndTestArena")?.addEventListener("click", () => {
-      pythonAiBridgeRequestInFlight = null;
-      pythonAiBridgeRequestPostedAtMs = 0;
-      pythonAiBridgeResultPollAtMs = 0;
       battle.setExternalAiSides({ player: false, enemy: false });
       battle.resetToMapMode();
       setScreen("testArena");
       renderPanels();
     });
+
+    const bindTestArenaSectionToggle = (selector: string, section: TestArenaPanelSection): void => {
+      const element = getOptionalElement<HTMLDetailsElement>(selector);
+      if (!element) {
+        return;
+      }
+      testArenaPanelSections[section] = element.open;
+      element.addEventListener("toggle", () => {
+        testArenaPanelSections[section] = element.open;
+      });
+    };
+    bindTestArenaSectionToggle("#testArenaSectionUnit", "unit");
+    bindTestArenaSectionToggle("#testArenaSectionAi", "ai");
+    bindTestArenaSectionToggle("#testArenaSectionUi", "ui");
+    const spawnTemplateDropdown = getOptionalElement<HTMLDetailsElement>("#testArenaSpawnTemplateDropdown");
+    if (spawnTemplateDropdown) {
+      testArenaSpawnTemplateDropdownOpen = spawnTemplateDropdown.open;
+      spawnTemplateDropdown.addEventListener("toggle", () => {
+        testArenaSpawnTemplateDropdownOpen = spawnTemplateDropdown.open;
+      });
+    }
 
     const bindCommitOnEnterOrBlur = (input: HTMLInputElement | null, onCommit: () => void): void => {
       if (!input) {
@@ -4331,15 +4853,57 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     };
     bindCommitOnEnterOrBlur(getOptionalElement<HTMLInputElement>("#testArenaGroundHeight"), commitTestArenaGroundHeight);
 
-    getOptionalElement<HTMLButtonElement>("#btnSpawnTestEnemy")?.addEventListener("click", () => {
-      const selection = getOptionalElement<HTMLSelectElement>("#testArenaSpawnTemplate")?.value ?? "";
+    document.querySelectorAll<HTMLInputElement>("input.testArenaSpawnTemplateToggle").forEach((input) => {
+      input.addEventListener("change", (event) => {
+        const checkbox = event.currentTarget as HTMLInputElement;
+        const templateId = checkbox.getAttribute("data-template-id") ?? "";
+        if (!templateId) {
+          return;
+        }
+        const nextSelection = new Set<string>(getTestArenaSpawnTemplateIds());
+        if (checkbox.checked) {
+          nextSelection.add(templateId);
+        } else {
+          nextSelection.delete(templateId);
+        }
+        const appliedSelection = setTestArenaSpawnTemplateIds(Array.from(nextSelection));
+        battle.setEnemySpawnTemplateFilter(appliedSelection);
+        if (battle.getState().active && battle.getState().nodeId === testArenaNode.id) {
+          const updated = battle.setEnemyActiveCount(testArenaEnemyCount);
+          addLog(
+            appliedSelection.length > 0
+              ? `Enemy spawn templates updated (${appliedSelection.length} selected). Active: ${updated}.`
+              : `Enemy spawn templates cleared. Active: ${updated}.`,
+            appliedSelection.length > 0 ? "good" : "warn",
+          );
+        } else {
+          addLog(
+            appliedSelection.length > 0
+              ? `Enemy spawn templates queued (${appliedSelection.length} selected).`
+              : "Enemy spawn templates queued: none selected.",
+            "warn",
+          );
+        }
+        renderPanels();
+      });
+    });
+
+    getOptionalElement<HTMLSelectElement>("#testArenaManualSpawnTemplate")?.addEventListener("change", (event) => {
+      const nextValue = (event.currentTarget as HTMLSelectElement).value;
+      setTestArenaManualSpawnTemplateId(nextValue);
+    });
+
+    getOptionalElement<HTMLButtonElement>("#btnSpawnTestEnemy")?.addEventListener("click", async () => {
+      const selection = getOptionalElement<HTMLSelectElement>("#testArenaManualSpawnTemplate")?.value
+        ?? getTestArenaManualSpawnTemplateId()
+        ?? "";
       if (!selection) {
-        addLog("Select an enemy template to spawn.", "warn");
+        addLog("Select a manual enemy template to spawn.", "warn");
         return;
       }
-      testArenaSpawnTemplateId = selection;
+      setTestArenaManualSpawnTemplateId(selection);
       if (!battle.getState().active || battle.getState().nodeId !== testArenaNode.id) {
-        void startTestArena();
+        await startTestArena();
       }
       const spawned = battle.spawnEnemyTemplate(selection);
       addLog(spawned ? `Spawned enemy: ${selection}.` : `Failed to spawn enemy: ${selection}.`, spawned ? "good" : "bad");
@@ -4380,14 +4944,35 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     bindComponentSelect("enemy", "movement");
     bindComponentSelect("enemy", "shoot");
 
+    const bindCompositeModelSelect = (side: TestArenaSide): void => {
+      getOptionalElement<HTMLSelectElement>(`#testArenaCompositeModel_${side}`)?.addEventListener("change", async (event) => {
+        const nextId = (event.currentTarget as HTMLSelectElement).value;
+        const option = findCompositeModelOptionById(nextId);
+        if (!option || option.compatible === false) {
+          addLog(`${side} composed model is not selectable.`, "warn");
+          renderPanels();
+          return;
+        }
+        testArenaCompositeModelSelections[side] = nextId;
+        if (battle.getState().active && battle.getState().nodeId === testArenaNode.id) {
+          applyTestArenaAiControllers();
+        }
+        addLog(`Test Arena ${side} model -> ${option.label}`, "good");
+        renderPanels();
+      });
+    };
+    bindCompositeModelSelect("player");
+    bindCompositeModelSelect("enemy");
+
     getOptionalElement<HTMLButtonElement>("#btnRefreshArenaAiModels")?.addEventListener("click", async () => {
       await fetchLatestCompositeSpec();
+      await refreshTestArenaCompositeModelOptions();
       await refreshTestArenaAiOptions();
       await refreshTestArenaComponentGrid();
       if (battle.getState().active && battle.getState().nodeId === testArenaNode.id) {
         applyTestArenaAiControllers();
       }
-      addLog("Refreshed available AI module list.", "good");
+      addLog("Refreshed available AI models and modules.", "good");
       renderPanels();
     });
 
@@ -4802,6 +5387,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         loaderServesTags: partDesignerDraft.layer === "structure" ? undefined : defaults.loaderServesTags,
         loaderCooldownMultiplier: partDesignerDraft.layer === "structure" ? undefined : defaults.loaderCooldownMultiplier,
       };
+      partDesignerBrushSlot = normalizePartDesignerSlotForLayer(partDesignerBrushSlot, partDesignerDraft.layer);
       syncPartMetaDefaultsIfNotEdited();
       recalcPartDraftFromSlots();
       renderPanels();
@@ -5230,6 +5816,15 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     setScreen("testArena");
     renderPanels();
   });
+  tabs.leaderboard.addEventListener("click", () => {
+    setScreen("leaderboard");
+    renderPanels();
+    void refreshTestArenaLeaderboard().then(() => {
+      void refreshTestArenaCompositeModelOptions().then(() => {
+        renderPanels();
+      });
+    });
+  });
   tabs.templateEditor.addEventListener("click", () => {
     setScreen("templateEditor");
     renderPanels();
@@ -5254,31 +5849,6 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       return;
     }
     if (isPartEditorScreen()) {
-      if (button.id === "btnPartCreateSelected") {
-        if (partDesignerSelectedSlot === null) {
-          return;
-        }
-        ensurePartDesignerSlot(partDesignerSelectedSlot);
-        if (partDesignerAnchorSlot === null) {
-          partDesignerAnchorSlot = partDesignerSelectedSlot;
-        }
-        recalcPartDraftFromSlots();
-        renderPanels();
-      } else if (button.id === "btnPartDeleteSelected") {
-        if (partDesignerSelectedSlot === null) {
-          return;
-        }
-        const slot = partDesignerSelectedSlot;
-        partDesignerSlots[slot] = null;
-        partDesignerSupportOffsets.delete(slot);
-        partDesignerEmptyStructureOffsets.delete(slot);
-        partDesignerEmptyFunctionalOffsets.delete(slot);
-        if (partDesignerAnchorSlot === slot) {
-          partDesignerAnchorSlot = null;
-        }
-        recalcPartDraftFromSlots();
-        renderPanels();
-      }
       return;
     }
     if (!isTemplateEditorScreen()) {
@@ -5362,6 +5932,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         return;
       }
       partDesignerSlots[slotIndex] = slot;
+      setPartDesignerBrushFromSlot(slot);
       recalcPartDraftFromSlots();
       renderPanels();
       return;
@@ -5607,6 +6178,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       const targetCanvas = activeEditorCanvas();
       const { x, y } = getPointerOnCanvas(event, targetCanvas);
       if (event.button === 0) {
+        editorRightClickDeletePending = false;
         applyEditorCellAction(x, y);
         renderPanels();
         return;
@@ -5618,6 +6190,9 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       editorDragStartClientY = event.clientY;
       editorDragLastClientX = event.clientX;
       editorDragLastClientY = event.clientY;
+      editorRightClickDeletePending = true;
+      editorRightClickDeleteMouseX = x;
+      editorRightClickDeleteMouseY = y;
       return;
     }
     if (isBattleScreen() && event.button === 2) {
@@ -5632,13 +6207,6 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       return;
     }
     const { x, y } = getPointerOnCanvas(event, canvas);
-    if (isBattleScreen() && battle.getState().active && battle.getState().nodeId === testArenaNode.id) {
-      // Test Arena is for AI-vs-AI validation; avoid accidental player manual-control lock.
-      battle.setAim(x, y);
-      battle.clearControlSelection();
-      renderPanels();
-      return;
-    }
     battle.handleLeftPointerDown(x, y);
     renderPanels();
   });
@@ -5651,8 +6219,14 @@ export function bootstrap(options: BootstrapOptions = {}): void {
 
   window.addEventListener("mouseup", () => {
     if (isEditorScreen() && editorDragActive) {
+      const shouldDeleteCell = !editorDragMoved && editorRightClickDeletePending;
       editorDragActive = false;
       editorDragMoved = false;
+      editorRightClickDeletePending = false;
+      if (shouldDeleteCell) {
+        applyEditorCellAction(editorRightClickDeleteMouseX, editorRightClickDeleteMouseY, true);
+        renderPanels();
+      }
     }
     if (battleViewDragActive) {
       if (!battleViewDragMoved && isBattleScreen()) {
@@ -5670,6 +6244,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     if (isEditorScreen()) {
       editorDragActive = false;
       editorDragMoved = false;
+      editorRightClickDeletePending = false;
     }
     battle.handlePointerUp();
   });
@@ -5684,6 +6259,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         const movedDistance = Math.hypot(event.clientX - editorDragStartClientX, event.clientY - editorDragStartClientY);
         if (movedDistance > 4) {
           editorDragMoved = true;
+          editorRightClickDeletePending = false;
         }
         if (editorDragMoved) {
           const drawCanvas = activeEditorCanvas();
@@ -5755,142 +6331,6 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       renderPanels();
     });
 
-  const toExternalCommandEntries = (rawCommands: unknown): Array<{ unitId: string; command: any }> => {
-    if (!Array.isArray(rawCommands)) {
-      return [];
-    }
-    const out: Array<{ unitId: string; command: any }> = [];
-    for (const raw of rawCommands) {
-      const entry = raw as {
-        unit_id?: string;
-        move?: { dir_x?: number; dir_y?: number; allow_descend?: boolean };
-        facing?: number;
-        fire_requests?: Array<{ slot?: number; aim_x?: number; aim_y?: number; intended_target_id?: string; intended_target_y?: number }>;
-      };
-      const unitId = typeof entry.unit_id === "string" ? entry.unit_id.trim() : "";
-      if (!unitId) {
-        continue;
-      }
-      const move = entry.move ?? {};
-      const facingRaw = Number(entry.facing ?? 0);
-      const fireRequests = Array.isArray(entry.fire_requests)
-        ? entry.fire_requests.map((req) => ({
-            slot: Number(req.slot ?? -1),
-            aimX: Number(req.aim_x ?? 0),
-            aimY: Number(req.aim_y ?? 0),
-            intendedTargetId: typeof req.intended_target_id === "string" && req.intended_target_id.length > 0 ? req.intended_target_id : null,
-            intendedTargetY: Number.isFinite(req.intended_target_y) ? Number(req.intended_target_y) : null,
-            manual: false,
-          }))
-        : [];
-      out.push({
-        unitId,
-        command: {
-          move: {
-            dirX: Number.isFinite(move.dir_x) ? Number(move.dir_x) : 0,
-            dirY: Number.isFinite(move.dir_y) ? Number(move.dir_y) : 0,
-            allowDescend: move.allow_descend === true,
-          },
-          facing: facingRaw === 1 ? 1 : facingRaw === -1 ? -1 : null,
-          fire: fireRequests,
-        },
-      });
-    }
-    return out;
-  };
-
-  const runExternalPythonBridgeStep = async (dt: number): Promise<boolean> => {
-    const state = battle.getState();
-    if (!(state.active && state.nodeId === testArenaNode.id && testArenaNeedsPythonBridge())) {
-      return false;
-    }
-    const nowMs = Date.now();
-    if (nowMs - pythonAiBridgeLastStatusPollMs > 1000) {
-      pythonAiBridgeLastStatusPollMs = nowMs;
-      await fetchPythonAiBridgeStatus();
-    }
-    if (!pythonAiBridgeConnected) {
-      return true;
-    }
-
-    const externalSides = getExternalAiSidesFromPresets();
-    const pendingUnits = battle.getPendingExternalAiUnits().filter((unit) => {
-      return (unit.side === "player" && externalSides.player) || (unit.side === "enemy" && externalSides.enemy);
-    });
-
-    if (pendingUnits.length <= 0) {
-      battle.clearExternalCommands();
-      battle.update(dt, keys);
-      followSelectedUnitWithCamera();
-      return true;
-    }
-
-    if (!pythonAiBridgeRequestInFlight) {
-      try {
-        const res = await fetch("/__pyai/request", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            battleId: state.nodeId,
-            simTimeMs: nowMs,
-            snapshot: {
-              battlefield: battle.getBattlefieldInfo(),
-              state,
-            },
-            pendingUnits,
-            externalSides,
-          }),
-        });
-        const parsed = await res.json().catch(() => null) as { ok?: boolean; connected?: boolean; requestId?: string } | null;
-        if (parsed?.ok && parsed.requestId) {
-          pythonAiBridgeRequestInFlight = parsed.requestId;
-          pythonAiBridgeRequestPostedAtMs = nowMs;
-          pythonAiBridgeResultPollAtMs = 0;
-        } else if (parsed?.connected === false) {
-          pythonAiBridgeConnected = false;
-        }
-      } catch {
-        pythonAiBridgeConnected = false;
-      }
-      return true;
-    }
-
-    if (nowMs - pythonAiBridgeResultPollAtMs < 16) {
-      return true;
-    }
-    pythonAiBridgeResultPollAtMs = nowMs;
-    if (nowMs - pythonAiBridgeRequestPostedAtMs > 30_000) {
-      pythonAiBridgeRequestInFlight = null;
-      pythonAiBridgeConnected = false;
-      return true;
-    }
-
-    try {
-      const requestId = pythonAiBridgeRequestInFlight;
-      const resultRes = await fetch(`/__pyai/result/${encodeURIComponent(requestId)}`, { method: "GET" });
-      if (!resultRes.ok) {
-        return true;
-      }
-      const resultJson = await resultRes.json().catch(() => null) as {
-        status?: "pending" | "done";
-        result?: { commands?: unknown[]; errors?: string[] };
-      } | null;
-      if (resultJson?.status !== "done") {
-        return true;
-      }
-      const commands = toExternalCommandEntries(resultJson?.result?.commands ?? []);
-      battle.setExternalCommands(commands);
-      pythonAiBridgeRequestInFlight = null;
-      pythonAiBridgeRequestPostedAtMs = 0;
-      pythonAiBridgeResultPollAtMs = 0;
-      battle.update(dt, keys);
-      followSelectedUnitWithCamera();
-      return true;
-    } catch {
-      return true;
-    }
-  };
-
   let panelBucket = -1;
   let loopUpdateBusy = false;
   const testArenaLastBlockedByUnit = new Map<string, { reason: string; atMs: number }>();
@@ -5927,11 +6367,6 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       return;
     }
     if (!(isBattleScreen() && battle.getState().active)) {
-      return;
-    }
-    const handledByExternalBridge = await runExternalPythonBridgeStep(dt);
-    if (handledByExternalBridge) {
-      logTestArenaFireBlockedReasons();
       return;
     }
     battle.update(dt, keys);

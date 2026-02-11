@@ -82,6 +82,7 @@ export class BattleSession {
   private debugTargetLineEnabled: boolean;
   private debugPartHpEnabled: boolean;
   private controlledUnitInvincible: boolean;
+  private enemySpawnTemplateAllowList: Set<string> | null;
   private groundHeightPx: number;
   private readonly baselineController: BattleAiController;
 
@@ -118,6 +119,7 @@ export class BattleSession {
     this.debugTargetLineEnabled = false;
     this.debugPartHpEnabled = false;
     this.controlledUnitInvincible = false;
+    this.enemySpawnTemplateAllowList = null;
     this.groundHeightPx = Math.max(80, canvas.height * DEFAULT_GROUND_HEIGHT_RATIO);
     this.baselineController = createBaselineCompositeAiController();
   }
@@ -285,6 +287,26 @@ export class BattleSession {
     return this.arenaDeploy("enemy", templateId, { chargeGas: false, ignoreCap: true, ignoreLowGasThreshold: true });
   }
 
+  public setEnemySpawnTemplateFilter(templateIds: ReadonlyArray<string> | null): string[] {
+    if (templateIds === null) {
+      this.enemySpawnTemplateAllowList = null;
+      return [];
+    }
+    const validIds = new Set<string>(this.templates.map((template) => template.id));
+    const normalized: string[] = [];
+    for (const id of templateIds) {
+      if (!validIds.has(id)) {
+        continue;
+      }
+      if (normalized.includes(id)) {
+        continue;
+      }
+      normalized.push(id);
+    }
+    this.enemySpawnTemplateAllowList = new Set<string>(normalized);
+    return normalized;
+  }
+
   public setBattlefieldSize(width: number, height: number): { width: number; height: number } {
     const normalizedWidth = clamp(Math.floor(width), 640, 4096);
     const normalizedHeight = clamp(Math.floor(height), 360, 2160);
@@ -380,10 +402,10 @@ export class BattleSession {
     const fireReqs: FireRequest[] = [];
     for (let slot = 0; slot < controlled.weaponAttachmentIds.length; slot += 1) {
       if (this.isWeaponManualControlEnabled(controlled, slot)) {
+        const angleRad = Math.atan2(this.aimY - controlled.y, this.aimX - controlled.x);
         fireReqs.push({
           slot,
-          aimX: this.aimX,
-          aimY: this.aimY,
+          angleRad,
           intendedTargetId: null,
           intendedTargetY: null,
           manual: true,
@@ -1064,6 +1086,9 @@ export class BattleSession {
       return false;
     }
     const candidates = this.templates.filter((template) => {
+      if (this.enemySpawnTemplateAllowList && !this.enemySpawnTemplateAllowList.has(template.id)) {
+        return false;
+      }
       const validation = validateTemplateDetailed(template, { partCatalog: this.partCatalog });
       if (validation.errors.length > 0) {
         return false;
@@ -1282,7 +1307,7 @@ export class BattleSession {
     unit: UnitInstance,
     slot: number,
     manual: boolean,
-    target: { x: number; y: number } | null,
+    requestedAngleRad: number,
     intendedTargetId: string | null,
     intendedTargetY: number | null,
   ): boolean {
@@ -1314,11 +1339,11 @@ export class BattleSession {
     if (!shot) {
       return false;
     }
+    const safeAngle = Number.isFinite(requestedAngleRad) ? requestedAngleRad : 0;
     const effectiveRange = this.getEffectiveWeaponRange(unit, shot.range);
-    const fallbackX = unit.x + unit.facing * 400;
     const baseAim = {
-      x: target?.x ?? fallbackX,
-      y: target?.y ?? unit.y,
+      x: unit.x + Math.cos(safeAngle) * effectiveRange,
+      y: unit.y + Math.sin(safeAngle) * effectiveRange,
     };
     const adjustedAim = adjustAimForWeaponPolicy(attachment.component, baseAim);
     const targetX = adjustedAim.x;
@@ -1853,8 +1878,7 @@ export class BattleSession {
       return result;
     }
     for (const req of command.fire) {
-      const target = { x: req.aimX, y: req.aimY };
-      const fired = this.fireWeaponSlot(unit, req.slot, req.manual, target, req.intendedTargetId, req.intendedTargetY);
+      const fired = this.fireWeaponSlot(unit, req.slot, req.manual, req.angleRad, req.intendedTargetId, req.intendedTargetY);
       if (fired) {
         result.firedSlots.push(req.slot);
       } else {
@@ -1908,10 +1932,10 @@ export class BattleSession {
     if (this.manualFireHeld) {
       for (let slot = 0; slot < unit.weaponAttachmentIds.length; slot += 1) {
         if (this.isWeaponManualControlEnabled(unit, slot)) {
+          const angleRad = Math.atan2(this.aimY - unit.y, this.aimX - unit.x);
           fire.push({
             slot,
-            aimX: this.aimX,
-            aimY: this.aimY,
+            angleRad,
             intendedTargetId: null,
             intendedTargetY: null,
             manual: true,
@@ -1972,8 +1996,7 @@ export class BattleSession {
           if ((unit.weaponFireTimers[slot] ?? 0) > 0) continue;
           fire.push({
             slot,
-            aimX: aim.x,
-            aimY: aim.y,
+            angleRad: Math.atan2(aim.y - unit.y, aim.x - unit.x),
             intendedTargetId: target ? target.id : null,
             intendedTargetY: intendedY,
             manual: false,
@@ -2017,8 +2040,7 @@ export class BattleSession {
           if ((unit.weaponFireTimers[slot] ?? 0) > 0) continue;
           fire.push({
             slot,
-            aimX: decision.firePlan.aim.x,
-            aimY: decision.firePlan.aim.y,
+            angleRad: decision.firePlan.angleRad,
             intendedTargetId: decision.firePlan.intendedTargetId,
             intendedTargetY: decision.firePlan.intendedTargetY,
             manual: false,
@@ -2059,8 +2081,7 @@ export class BattleSession {
           if ((unit.weaponFireTimers[slot] ?? 0) > 0) continue;
           fire.push({
             slot,
-            aimX: target.x,
-            aimY: target.y,
+            angleRad: Math.atan2(target.y - unit.y, target.x - unit.x),
             intendedTargetId: target.id,
             intendedTargetY: target.y,
             manual: false,

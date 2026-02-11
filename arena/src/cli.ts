@@ -6,7 +6,6 @@ import { runSpawnTraining } from "./train/run-spawn-training.ts";
 import { openReplayUiFromFile } from "./replay/open-replay-ui.ts";
 import { evaluateVsBaseline } from "./eval/evaluate-vs-baseline.ts";
 import { runCompositeTraining } from "./train/run-composite-training.ts";
-import { startGrpcServer } from "./grpc/server.ts";
 
 type Args = Record<string, string | boolean>;
 
@@ -181,12 +180,6 @@ async function main(): Promise<void> {
     const targetSource = asModuleSource(args.targetSource, "baseline");
     const movementSource = asModuleSource(args.movementSource, "baseline");
     const shootSource = asModuleSource(args.shootSource, "baseline");
-    const targetLayers = asNumber(args.targetLayers, NaN);
-    const targetHidden = asNumber(args.targetHidden, NaN);
-    const movementLayers = asNumber(args.movementLayers, NaN);
-    const movementHidden = asNumber(args.movementHidden, NaN);
-    const shootLayers = asNumber(args.shootLayers, NaN);
-    const shootHidden = asNumber(args.shootHidden, NaN);
     const quiet = args.quiet === true || args.quiet === "true";
     await runCompositeTraining({
       seed0,
@@ -207,12 +200,6 @@ async function main(): Promise<void> {
       targetSource,
       movementSource,
       shootSource,
-      targetLayers: Number.isFinite(targetLayers) ? targetLayers : null,
-      targetHidden: Number.isFinite(targetHidden) ? targetHidden : null,
-      movementLayers: Number.isFinite(movementLayers) ? movementLayers : null,
-      movementHidden: Number.isFinite(movementHidden) ? movementHidden : null,
-      shootLayers: Number.isFinite(shootLayers) ? shootLayers : null,
-      shootHidden: Number.isFinite(shootHidden) ? shootHidden : null,
       quiet,
     });
     return;
@@ -263,12 +250,6 @@ async function main(): Promise<void> {
     });
     return;
   }
-  if (cmd === "serve-grpc") {
-    const port = asNumber(args.port, Number(process.env.ARENA_GRPC_PORT ?? 50051));
-    await startGrpcServer(Math.max(1, Math.floor(port)));
-    return;
-  }
-
   // eslint-disable-next-line no-console
   console.log(
     [
@@ -279,9 +260,8 @@ async function main(): Promise<void> {
       "  train --ai range-bias --generations 25 --population 40 --parallel 8",
       "  train-spawn --spawnAi spawn-weighted --microFamily range-bias --generations 25 --population 40 --parallel 8",
       "  train-composite --scope all --generations 20 --population 24 --phaseSeeds 16 --nUnits 4",
-      "  train-composite --scope shoot --shootSource new --movementSource baseline --targetSource baseline --shootLayers 2 --shootHidden 16",
+      "  train-composite --scope shoot --shootSource new --movementSource baseline --targetSource baseline",
       "  eval --ai range-bias --fromStore true --seeds 200 --parallel 20",
-      "  serve-grpc --port 50051",
       "  replay --file match.json",
       "",
       "Common flags:",

@@ -33,11 +33,6 @@ type CompositeSnapshot = {
   shoot: CompositeModuleSpec;
 };
 
-type ArchConfig = {
-  layers: number | null;
-  hidden: number | null;
-};
-
 function ensureDir(path: string): void {
   mkdirSync(path, { recursive: true });
 }
@@ -55,9 +50,9 @@ function buildSeedList(seed0: number, count: number): number[] {
 }
 
 function familyIdFor(kind: ModuleKind): string {
-  if (kind === "shoot") return "neural-shoot";
-  if (kind === "movement") return "neural-movement";
-  return "neural-target";
+  if (kind === "shoot") return "dt-shoot";
+  if (kind === "movement") return "dt-movement";
+  return "dt-target";
 }
 
 function defaultPhaseDefs(nUnits: number, phaseSeeds: number): Record<ModuleKind, PhaseDef[]> {
@@ -120,23 +115,9 @@ function parseModuleSpecFile(path: string, moduleKind: ModuleKind): CompositeMod
   return { familyId, params };
 }
 
-function applyArch(params: Params, moduleKind: ModuleKind, arch: ArchConfig): Params {
-  const out: Params = { ...params };
-  const prefix = `${moduleKind}.`;
-  if (typeof arch.layers === "number" && Number.isFinite(arch.layers) && arch.layers > 0) {
-    out[`${prefix}layers`] = Math.max(1, Math.min(2, Math.floor(arch.layers)));
-  }
-  if (typeof arch.hidden === "number" && Number.isFinite(arch.hidden) && arch.hidden > 0) {
-    out[`${prefix}hidden`] = Math.max(4, Math.min(24, Math.floor(arch.hidden)));
-  }
-  return out;
-}
-
 function resolveSource(
   moduleKind: ModuleKind,
   source: ModuleSourceArg,
-  seed: CompositeSnapshot,
-  arch: ArchConfig,
 ): CompositeModuleSpec {
   if (source === "baseline") {
     return baselineCompositeConfig()[moduleKind];
@@ -145,15 +126,11 @@ function resolveSource(
     const schema = getModuleSchema(moduleKind);
     return {
       familyId: familyIdFor(moduleKind),
-      params: applyArch(defaultParams(schema), moduleKind, arch),
+      params: defaultParams(schema),
     };
   }
   const trainedPath = source.slice("trained:".length);
-  const trained = parseModuleSpecFile(resolve(process.cwd(), trainedPath), moduleKind);
-  return {
-    familyId: trained.familyId,
-    params: applyArch(trained.params ?? {}, moduleKind, arch),
-  };
+  return parseModuleSpecFile(resolve(process.cwd(), trainedPath), moduleKind);
 }
 
 function makeEvalSpecs(
@@ -201,39 +178,30 @@ export async function runCompositeTraining(opts: {
   targetSource?: ModuleSourceArg;
   movementSource?: ModuleSourceArg;
   shootSource?: ModuleSourceArg;
-  targetLayers?: number | null;
-  targetHidden?: number | null;
-  movementLayers?: number | null;
-  movementHidden?: number | null;
-  shootLayers?: number | null;
-  shootHidden?: number | null;
   quiet?: boolean;
 }): Promise<void> {
-  const runId = `composite-${isoNow()}`;
-  const dataRoot = resolve(process.cwd(), ".arena-data");
-  const runDir = resolve(dataRoot, "runs", runId);
-  ensureDir(runDir);
-
   const scope: TrainScope = opts.scope ?? "all";
   const order: ModuleKind[] = scope === "all" ? ["shoot", "movement", "target"] : [scope];
 
-  const arch: Record<ModuleKind, ArchConfig> = {
-    target: { layers: opts.targetLayers ?? null, hidden: opts.targetHidden ?? null },
-    movement: { layers: opts.movementLayers ?? null, hidden: opts.movementHidden ?? null },
-    shoot: { layers: opts.shootLayers ?? null, hidden: opts.shootHidden ?? null },
-  };
-
   let best: CompositeSnapshot = baselineCompositeConfig();
   if (opts.seedCompositePath) {
-    const fromFile = parseModuleSpecFile(resolve(process.cwd(), opts.seedCompositePath), "target");
-    best.target = fromFile;
+    best.target = parseModuleSpecFile(resolve(process.cwd(), opts.seedCompositePath), "target");
     best.movement = parseModuleSpecFile(resolve(process.cwd(), opts.seedCompositePath), "movement");
     best.shoot = parseModuleSpecFile(resolve(process.cwd(), opts.seedCompositePath), "shoot");
   }
 
-  best.target = resolveSource("target", opts.targetSource ?? "baseline", best, arch.target);
-  best.movement = resolveSource("movement", opts.movementSource ?? "baseline", best, arch.movement);
-  best.shoot = resolveSource("shoot", opts.shootSource ?? "baseline", best, arch.shoot);
+  best.target = resolveSource("target", opts.targetSource ?? "baseline");
+  best.movement = resolveSource("movement", opts.movementSource ?? "baseline");
+  best.shoot = resolveSource("shoot", opts.shootSource ?? "baseline");
+
+  const normalizeName = (familyId: string): string => {
+    const normalized = familyId.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+    return normalized || "unknown";
+  };
+  const runId = `${normalizeName(best.target.familyId)}-${normalizeName(best.movement.familyId)}-${normalizeName(best.shoot.familyId)}-${isoNow()}`;
+  const dataRoot = resolve(process.cwd(), ".arena-data");
+  const runDir = resolve(dataRoot, "runs", runId);
+  ensureDir(runDir);
 
   const phases = defaultPhaseDefs(opts.nUnits, opts.phaseSeeds);
   const pool = new WorkerPool(WorkerPool.matchWorkerUrl(), opts.parallel);
@@ -241,8 +209,8 @@ export async function runCompositeTraining(opts: {
     for (const moduleKind of order) {
       const schema = getModuleSchema(moduleKind);
       let currentBestParams = best[moduleKind].familyId === familyIdFor(moduleKind)
-        ? applyArch(best[moduleKind].params, moduleKind, arch[moduleKind])
-        : applyArch(defaultParams(schema), moduleKind, arch[moduleKind]);
+        ? best[moduleKind].params
+        : defaultParams(schema);
 
       for (const phase of phases[moduleKind]) {
         const phaseDir = resolve(runDir, moduleKind, phase.id);
@@ -265,15 +233,14 @@ export async function runCompositeTraining(opts: {
         const seeds = buildSeedList(opts.seed0, phase.seeds);
         const pop: Params[] = [currentBestParams];
         while (pop.length < opts.population) {
-          pop.push(applyArch(randomParams(schema), moduleKind, arch[moduleKind]));
+          pop.push(randomParams(schema));
         }
 
         let bestCandidate: Candidate | null = null;
         for (let gen = 0; gen < opts.generations; gen += 1) {
           const evaluated: Candidate[] = [];
           for (const params of pop) {
-            const bounded = applyArch(params, moduleKind, arch[moduleKind]);
-            const candidateModules = withCandidate(best, moduleKind, bounded);
+            const candidateModules = withCandidate(best, moduleKind, params);
             const baselineModules = best;
             const specs = makeEvalSpecs(baseMatch, candidateModules, baselineModules, seeds);
             const results = (await Promise.all(specs.map((s) => pool.run(s)))) as MatchResult[];
@@ -286,7 +253,7 @@ export async function runCompositeTraining(opts: {
 
             const wl = wilsonLowerBound(agg.wins, agg.games);
             const candidate: Candidate = {
-              params: bounded,
+              params,
               score: agg.score,
               wins: agg.wins,
               games: agg.games,
@@ -306,12 +273,12 @@ export async function runCompositeTraining(opts: {
           while (pop.length < opts.population) {
             const a = elites[Math.floor(Math.random() * elites.length)]?.params ?? elites[0].params;
             const b = elites[Math.floor(Math.random() * elites.length)]?.params ?? elites[0].params;
-            pop.push(applyArch(mutate(schema, crossover(a, b)), moduleKind, arch[moduleKind]));
+            pop.push(mutate(schema, crossover(a, b)));
           }
 
           if (!opts.quiet) {
             // eslint-disable-next-line no-console
-            console.log(`[train-composite] scope=${scope} module=${moduleKind} phase=${phase.id} gen=${gen} bestLB=${(bestCandidate?.wl ?? 0).toFixed(4)} bestScore=${(bestCandidate?.score ?? 0).toFixed(2)}`);
+            console.log(`[compare-composite] scope=${scope} module=${moduleKind} phase=${phase.id} gen=${gen} bestLB=${(bestCandidate?.wl ?? 0).toFixed(4)} bestScore=${(bestCandidate?.score ?? 0).toFixed(2)}`);
           }
 
           writeFileSync(

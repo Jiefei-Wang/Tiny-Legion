@@ -45,8 +45,9 @@ Lose condition chain:
   - Contested
 - Includes a dedicated `Test Arena` top-level tab (parallel to `Battle`) for debug scenarios.
 - Test Arena overrides both battle bases to extremely high HP so base destruction does not end the test run.
-- Test Arena controls allow setting enemy count, battlefield simulation size (`W`/`H`), ground-zone height, display zoom percentage, spawning a specific enemy template, and toggling controlled-unit invincibility (no HP loss, still collides and can be hit).
-- Test Arena AI presets for player/enemy include a `Python Bridge (external)` option; when selected, battle stepping waits for Python bridge connection and per-tick command responses.
+- Test Arena controls allow setting enemy count, battlefield simulation size (`W`/`H`), ground-zone height, display zoom percentage, selecting enemy auto-spawn templates from a checkbox dropdown (automatic spawn pool only), and toggling controlled-unit invincibility (no HP loss, still collides and can be hit).
+- Test Arena options panel is organized as collapsible tabs to save space: battle start/stop actions are always in the first row, `Unit` is expanded by default, `AI Selection` is collapsed by default, and `UI Configuration` is grouped in its own tab.
+- Test Arena AI presets are local JS/TS-only and run without external Python bridge/service dependencies.
 - Test Arena parameter inputs apply on `Enter` or input blur (no separate apply button).
 - Test Arena zoom percentage is live-synced when mouse-wheel zoom changes the battlefield view.
 
@@ -84,7 +85,8 @@ Current implementation includes dedicated in-app editor tabs where the player ca
 - Functional parts may declare `directional: true`; only directional parts show direction UI and use rotation controls. Parts without it are undirectional by default.
 - Functional placement supports `center place on click` mode in template editor (developer/user toggle).
 - Editor canvas uses a resizable grid up to `10x10` with right-drag panning.
-- Editor viewport input now uses right-drag panning (instead of left-drag), and mouse-wheel zoom is supported in both Template Editor and Part Editor.
+- Editor viewport input now supports right-click delete/erase on the targeted cell/box; right-click drag still pans (click vs drag), and mouse-wheel zoom is supported in both Template Editor and Part Editor.
+- In Template Editor, right-click delete is staged per cell: delete functional first; if no functional remains, delete structure (and attached display) on the next click.
 - Battle, Template Editor, and Part Editor each render to their own canvas while sharing the same viewport window.
 - Template Editor and Part Editor now keep independent pan/view memory; switching tabs restores each editor's last view.
 - Editor view defaults to centered origin (`0,0`) on first load and recenters only when loading a different template/part.
@@ -114,6 +116,8 @@ Current implementation includes dedicated in-app editor tabs where the player ca
     - `Editor Meta`: category (dropdown) + subcategory (free text),
     - `Part Properties`: tags + checkbox-enabled property groups with conditional parameter inputs (instead of always showing all parameters),
   - right panel edits per-box properties of the currently selected grid cell.
+- Part Designer box editing keeps a persistent box-property brush: right-click erase does not reset the next created box to defaults, so repeated left-click placements reuse the current box property profile.
+- Part Designer per-cell box creation/deletion is driven by canvas clicks (left apply / right erase); the old `Create Box` and `Delete Box` buttons are removed from the right panel.
 - Each part definition includes:
   - `baseComponent` (runtime behavior family),
   - developer metadata (`category`, `subcategory`, `tags`),
@@ -325,6 +329,7 @@ Recommended starter values:
 - Tracking missile homing reacquires the nearest valid enemy around its intended aim point when needed.
 - Loader naming uses `cannonLoader` (legacy `gunLoader` IDs remain load-compatible).
 - If left click intersects a friendly object, it selects that object as controlled unit.
+- Test Arena uses the same left-click friendly-unit selection rule as regular battle mode.
 - When a controlled unit fires, projectile vector is computed toward current mouse aim target.
 - Number keys `1..9` toggle per-slot manual weapon control for the currently controlled unit (default `ON` for every weapon slot).
 - `Shift+1..9` toggles per-slot auto-fire state.
@@ -595,17 +600,22 @@ The current playable implementation already includes:
 - AI split into targeting, movement, and shooting modules with a shared composite interface in `packages/game-core/src/ai/composite/`.
 - Baseline combat AI now runs through `createCompositeAiController(...)` (target -> movement -> shoot), and the legacy decision-tree entrypoint is kept as a compatibility wrapper.
 - Target module returns ranked targets (sorted by importance); movement consumes ranked targets + battlefield state; shooting consumes ranked targets + movement intent + weapon readiness.
-- Arena now supports composite module wiring (`target/movement/shoot`) so each module can be replaced and trained independently.
-- Composite training roadmap is implemented as phased sequence:
+- Arena supports composite module wiring (`target/movement/shoot`) so each module can be replaced and compared independently.
+- `dt-shoot` now exposes additional trainable angle-feature parameters: `weaponSpeed` (for standardized relative distance), plus weighted terms over `stdX`, `stdY`, `stdY/stdX`, and `stdY/(stdX^2)` to bias final firing angle.
+- Composite compare/optimization runs in phased sequence:
   - Phase 1: no-base 1v1 (shoot/movement only)
   - Phase 2: no-base NvN
   - Phase 3: full battlefield with bases
 - Test Arena includes a `2 x 3` AI component grid (player/enemy x target/movement/shoot), and each cell is a single dropdown for quick switching.
+- Test Arena AI Selection now includes per-side composed-model selectors (saved leaderboard runs + built-ins); selecting a composed model applies the full target/movement/shoot bundle for that side.
 - Each dropdown lists built-in module options plus all saved module specs discovered from arena run artifacts (`arena/.arena-data/runs/*/best-composite.json`).
 - Grid changes apply immediately (no manual apply step).
+- Left-side mode menu includes a dedicated `Leaderboard` screen (new row in the mode grid) that shows ranked composite run scores.
+- Leaderboard rating is match-based: each composite run starts at score `100`, then head-to-head results adjust both models using an Elo-style expected-outcome update (larger score gaps produce larger swing factors).
+- Leaderboard panel includes quick competition controls: `random pair`, `unranked vs random`, and `manual pair` modes plus configurable run count.
+- Leaderboard model pool includes a built-in `baseline-game-ai` entry representing the game's default baseline AI, so trained runs are ranked directly against current in-game baseline behavior.
 - Test Arena module-selection contract is documented in `game/AI_COMPONENT_CONFIG.md`.
-- Test Arena Python bridge status is shown in-panel (`Waiting for connection` until a Python bridge client connects to `/__pyai/*` endpoints).
-- Training automation script `train_ai.sh` provides module-specific training (`shoot`/`movement`/`target`) and full compose training (`compose`) with per-module neural depth/hidden-size controls and trained/new component source selection.
+- Training automation script `train_ai.sh` provides module-specific optimization (`shoot`/`movement`/`target`) and full compose optimization (`compose`) with per-module source selection (`baseline|new|trained:<path>`).
 
 Current gaps still being iterated:
 

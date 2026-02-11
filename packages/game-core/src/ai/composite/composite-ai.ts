@@ -37,7 +37,6 @@ export interface MovementDecision {
 
 export interface FirePlan {
   preferredSlot: number;
-  aim: { x: number; y: number };
   intendedTargetId: string | null;
   intendedTargetY: number | null;
   angleRad: number;

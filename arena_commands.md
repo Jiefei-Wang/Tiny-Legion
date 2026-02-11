@@ -138,48 +138,8 @@ Endpoints:
 - `POST /match` with a `MatchSpec` JSON
 - `POST /train` with training options JSON (starts training async; returns 202)
 
-## Serve (gRPC, Training Session API)
+## Deprecated Paths Removed
 
-```bash
-npm --prefix arena run serve:grpc
-# or custom port
-npm --prefix arena run serve:grpc -- --port 50051
-```
-
-Service definition:
-
-- `arena/proto/arena_service.proto`
-
-Core RPCs:
-
-- `CreateBattle`
-- `StepBattle`
-- `GetBattle`
-- `CloseBattle`
-
-Python helper files:
-
-- `arena/python/arena_client.py`
-- `arena/python/example_baseline_ai.py`
-- `arena/python/test_arena_bridge.py` (Test Arena browser bridge client)
-
-Python training script:
-
-- `arena/python/train.py`
-  - Builds baseline composer then replaces selected modules with neural modules.
-  - Runs behavior-cloning warm start from baseline trajectories before policy-gradient updates.
-  - Uses delayed reward updates from gas-value differential with reward clipping, entropy bonus, and normalized advantage.
-  - Runs periodic deterministic evaluation and supports best-checkpoint saving.
-  - Saves `.pt` and auto-converts each trained component to `.onnx` plus `*.component.json` metadata.
-
-Stable fire-module training example:
-
-```bash
-python arena/python/train.py --episodes 200 --max-steps-per-episode 3000 --chunk-seconds 1.0 --learning-rate 5e-4 --bc-episodes 6 --bc-epochs 3 --bc-steps-per-episode 500 --eval-every-episodes 20 --eval-episodes 8 --save-best-only true
-```
-
-Convert an existing checkpoint manually:
-
-```bash
-python arena/python/train.py --convert-checkpoint arena/.arena-data/python-models/fire_YYYYMMDD_HHMMSS.pt --convert-component fire
-```
+- gRPC battle training service has been removed.
+- Python bridge and Python training helpers have been removed.
+- ONNX export/load flow has been removed from arena/game runtime.

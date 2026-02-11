@@ -172,9 +172,6 @@ Arena training/runtime package (implemented):
 
 ```text
 arena/src/
-  grpc/
-    server.ts
-    session-manager.ts
   ai/
     ai-schema.ts
     composite-controller.ts
@@ -185,7 +182,6 @@ arena/src/
       evade-bias.ts
       aggressive-rush.ts
       adaptive-kite.ts
-      neural-linear.ts
       base-rush.ts
   eval/
     evaluate-vs-baseline.ts
@@ -212,35 +208,10 @@ arena/src/
     open-replay-ui.ts
 ```
 
-Python training helper surface (new):
-
-```text
-arena/
-  AI_INTERFACE_PYTHON.md
-  AI_INTERFACE_JS.md
-  proto/arena_service.proto
-  python/
-    train.py
-    modules/
-      arena_client.py
-      test_arena_bridge.py
-      ai_composer.py
-      features.py
-      example_baseline_ai.py
-```
-
 Notes:
 
-- `arena/python/modules/arena_client.py` defines Python helper APIs:
-  - `start_battle(client, config)`
-  - `AI_callback(fun)`
-  - `ArenaClient.run_until_terminal(...)`
-- `arena/python/modules/ai_composer.py` defines composable target/movement/fire modules and includes neural-module variants.
-- `arena/python/modules/features.py` defines feature schemas and concrete extraction functions for target/movement/fire stages.
-- `arena/python/train.py` trains selected neural composer modules using delayed rewards (10s chunks) and backpropagation.
-- `arena/python/modules/example_baseline_ai.py` provides a baseline-style callback example that maps full snapshot input to per-unit commands.
-- These files define and document the Python/JS AI boundary before gRPC server rollout, so training callback shape and JS model adapter shape remain stable.
-- `BattleSessionOptions` now supports external AI control flags (`externalAiSides`) and external-command helpers used by arena gRPC sessions.
+- Composite module families are decision-tree/rule based (`baseline-*` + `dt-*`), with no neural/ONNX runtime path.
+- `run-composite-training.ts` performs phased headless compare/optimization over decision-tree module parameters.
 
 Arena-specific architecture notes:
 
@@ -248,24 +219,19 @@ Arena-specific architecture notes:
 - Training and evaluation run headless through `WorkerPool` + `match-worker.ts` for parallel CPU usage.
 - Model ranking now prioritizes `winRateLowerBound` then `winRate`, then `score`.
 - Arena composite AI path can supply per-side `{ target, movement, shoot }` module specs that instantiate game-core `createCompositeAiController(...)`.
-- `run-composite-training.ts` trains modules in staged order (`shoot -> movement -> target`) with phase scenarios:
+- `run-composite-training.ts` optimizes modules in staged order (`shoot -> movement -> target`) with phase scenarios:
   - no-base 1v1,
   - no-base NvN,
   - full base battle.
 - `train-composite` CLI now supports:
-  - scoped module training (`--scope shoot|movement|target|all`),
+  - scoped module optimization (`--scope shoot|movement|target|all`),
   - per-module source selection (`baseline|new|trained:<path>`),
-  - per-module architecture locks (`*Layers`, `*Hidden`),
   - optional seed composite loading (`--seedComposite`).
 - `cli.ts` includes an `eval` command for reproducible held-out benchmarking versus `baseline`.
 - Replay UI (`arena-ui/src/main.ts`) still uses game interface bootstrap (`game/src/app/bootstrap.ts`) while consuming AI/simulation primitives from `packages/game-core`.
 - Game dev server exposes `/__arena/composite/latest` for Test Arena to load latest trained composite spec from `arena/.arena-data/runs/*/best-composite.json`.
-- Game dev server exposes `/__pyai/*` broker endpoints for Test Arena external Python AI bridge (connect/status/request/next/respond/result).
-- Arena includes a gRPC training-session interface (`serve:grpc`) with lifecycle RPCs in `arena/proto/arena_service.proto`:
-  - `CreateBattle`
-  - `StepBattle`
-  - `GetBattle`
-  - `CloseBattle`
+- Game dev server exposes `/__arena/composite/leaderboard` for in-game ranking entries backed by persistent match-based rating storage (`arena/.arena-data/leaderboard/composite-elo.json`).
+- Game dev server exposes `/__arena/composite/models` (saved composed-model inventory with score/rounds/spec, including built-in `baseline-game-ai`) and `/__arena/composite/leaderboard/compete` (run head-to-head leaderboard matches from UI controls).
 
 Map node metadata supports test-only battle tuning via optional fields on `MapNode`:
 
@@ -274,11 +240,14 @@ Map node metadata supports test-only battle tuning via optional fields on `MapNo
 - `testBaseHpOverride` sets both player/enemy battle base HP and max HP for long-running test battles.
 - The `Test Arena` tab uses these overrides while skipping campaign rewards/ownership changes.
 - Test Arena UI controls for enemy count / battlefield size / zoom apply on input commit (`Enter` or blur) without extra apply buttons.
-- Test Arena AI control uses a `2 x 3` component grid (`player|enemy` x `target|movement|shoot`) with one dropdown per cell.
+- Test Arena enemy-spawn selection uses a checkbox dropdown allowlist; selected template IDs are applied to `BattleSession` enemy auto-spawn candidate filtering only (manual spawn uses its own direct template selector).
+- Test Arena AI control supports side-level composed-model selection (full `{ target, movement, shoot }` bundle) plus a `2 x 3` component grid fallback for custom per-module composition.
 - Dropdown inventory is populated from:
   - built-in module presets,
   - saved module specs enumerated from `arena/.arena-data/runs/*/best-composite.json` via dev endpoint `GET /__arena/composite/modules`.
 - Selecting a dropdown value maps directly to one composite module spec (`{ familyId, params }`) and reapplies controller wiring immediately.
+- Left-side mode menu includes a dedicated `Leaderboard` screen that fetches ranked entries from `GET /__arena/composite/leaderboard`.
+- Leaderboard screen includes controls to trigger server-side compare batches (`random pair`, `unranked vs random`, `manual pair`) via `POST /__arena/composite/leaderboard/compete`.
 - Selection format and examples are documented in `game/AI_COMPONENT_CONFIG.md`.
 
 Template/editor architecture notes:
@@ -325,6 +294,7 @@ Encode your game rules as explicit modules (not scattered checks):
 - `battle-session.ts` (unified command system)
   - all unit control (player input, combat AI, retreat AI, air-drop AI) produces a `UnitCommand` each tick.
   - `UnitCommand` contains `move` (direction), `facing`, and `fire` (list of `FireRequest`).
+  - `FireRequest` carries `slot`, `manual`, and world-space `angleRad` (radians); fire execution derives aim projection from angle and effective range, then applies weapon-policy/angle clamps.
   - `executeCommand()` applies the command with unified enforcement of movement physics, weapon constraints, and boundary clamping.
   - command builders: `playerInputToCommand`, `aiDecisionToCommand`, `airDropReturnToCommand`, `retreatToCommand`.
   - controller priority: player-controlled → air-drop → armed AI (decision tree) → weaponless air (triggers air-drop) → ground weaponless (retreat).
@@ -457,7 +427,9 @@ Editor UX implementation details:
 - Template Editor and Part Editor maintain separate grid pan/view state, so tab switching restores each editor's last viewport.
 - Editor grid viewport defaults to screen-centered origin and only recenters when loading a different template/part.
 - Battle, Template Editor, and Part Editor now each render to dedicated canvases (`#battleCanvas`, `#templateEditorCanvas`, `#partEditorCanvas`) layered in the shared viewport container.
-- Editor viewport controls use right-click drag for panning and mouse wheel for zoom; battle keeps right-drag pan and wheel zoom.
+- Editor viewport controls use right-click click-to-delete and right-click drag for panning, plus mouse wheel zoom; battle keeps right-drag pan and wheel zoom.
+- Template Editor right-click delete prioritizes functional removal at a cell before structure removal on subsequent click.
+- Part Editor uses a persistent box-property brush so erased/recreated boxes can reuse the latest per-box property configuration without re-toggling each field.
 - Editor functional attachments persist `partId` + `component` for runtime compatibility and part-catalog lookup.
 - Weapon functional entries may carry `rotateQuarter` metadata (0..3, each step = 90deg).
 - Heavy-shot weapons use grouped multi-cell occupancy in editor and rotate footprint with `rotateQuarter`.
@@ -537,17 +509,6 @@ Dev-server debug probe RPC (dev-only, no eval; used by agents/scripts to fetch a
 - `GET /__debug/probe/next?clientId=...` -> client polls for work
 - `POST /__debug/probe/<probeId>/response` -> client returns results
 - `GET /__debug/probe/<probeId>` -> fetch probe status/results
-
-Dev-server Python AI bridge RPC (dev-only; Test Arena external AI handshake + request/response broker):
-
-- `POST /__pyai/connect` -> register Python bridge client
-- `POST /__pyai/heartbeat` -> keep client alive
-- `POST /__pyai/disconnect` -> unregister client
-- `GET /__pyai/status` -> bridge connection status
-- `POST /__pyai/request` -> browser enqueues AI decision request
-- `GET /__pyai/next?clientId=...` -> Python client polls for pending request
-- `POST /__pyai/respond/<requestId>` -> Python posts commands for one request
-- `GET /__pyai/result/<requestId>` -> browser polls request result
 
 Runtime log file path:
 

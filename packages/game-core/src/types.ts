@@ -1,4 +1,4 @@
-export type ScreenMode = "base" | "map" | "battle" | "testArena" | "templateEditor" | "partEditor";
+export type ScreenMode = "base" | "map" | "battle" | "testArena" | "leaderboard" | "templateEditor" | "partEditor";
 
 export type MaterialId = "basic" | "reinforced" | "ceramic" | "reactive" | "combined";
 
@@ -439,9 +439,8 @@ export interface KeyState {
 export interface FireRequest {
   /** Weapon slot index to fire. */
   slot: number;
-  /** World-coordinate aim point. The executor clamps to weapon angle limits. */
-  aimX: number;
-  aimY: number;
+  /** Desired world firing angle in radians. The executor clamps to weapon limits. */
+  angleRad: number;
   /** For AI shot-feedback tracking. */
   intendedTargetId: string | null;
   intendedTargetY: number | null;

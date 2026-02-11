@@ -55,10 +55,6 @@ function clamp(n: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, n));
 }
 
-function sigmoid(x: number): number {
-  return 1 / (1 + Math.exp(-x));
-}
-
 function aliveCount(units: any[], side: "player" | "enemy"): number {
   return units.filter((unit: any) => unit.alive && unit.side === side).length;
 }
@@ -255,76 +251,6 @@ export async function runMatch(spec: MatchSpec): Promise<MatchResult> {
             debug: {
               ...decision.debug,
               decisionPath: `${decision.debug.decisionPath} > arena.adaptive-kite.retreat`,
-            },
-          };
-        },
-      };
-    }
-
-    if (kind === "neural-linear") {
-      const wRange = [
-        Number(aiSpec.params.wr0 ?? 0),
-        Number(aiSpec.params.wr1 ?? 0),
-        Number(aiSpec.params.wr2 ?? 0),
-        Number(aiSpec.params.wr3 ?? 0),
-        Number(aiSpec.params.wr4 ?? 0),
-        Number(aiSpec.params.wr5 ?? 0),
-      ];
-      const wEvade = [
-        Number(aiSpec.params.we0 ?? 0),
-        Number(aiSpec.params.we1 ?? 0),
-        Number(aiSpec.params.we2 ?? 0),
-        Number(aiSpec.params.we3 ?? 0),
-        Number(aiSpec.params.we4 ?? 0),
-        Number(aiSpec.params.we5 ?? 0),
-      ];
-      const bRange = Number(aiSpec.params.br ?? 0);
-      const bEvade = Number(aiSpec.params.be ?? 0);
-      const retreatScale = Number(aiSpec.params.retreatScale ?? 1);
-      return {
-        decide: (input: any) => {
-          const integrity = clamp(structureIntegrity(input.unit), 0, 1);
-          const distToBase = Math.hypot(input.baseTarget.x - input.unit.x, input.baseTarget.y - input.unit.y);
-          const maxRangeNorm = clamp(distToBase / 900, 0, 1);
-          const speedNorm = clamp(Math.hypot(input.unit.vx, input.unit.vy) / Math.max(1, input.unit.maxSpeed), 0, 1);
-          const canFire = input.unit.weaponAutoFire?.some((x: boolean) => x) ? 1 : 0;
-          const isAir = input.unit.type === "air" ? 1 : 0;
-          const f = [1, integrity, maxRangeNorm, speedNorm, canFire, isAir];
-          let zRange = bRange;
-          let zEvade = bEvade;
-          for (let i = 0; i < f.length; i += 1) {
-            zRange += f[i] * wRange[i];
-            zEvade += f[i] * wEvade[i];
-          }
-          const rangeFactor = 0.35 + sigmoid(zRange) * 1.25;
-          const evadeProb = sigmoid(zEvade);
-          const decision = evaluateCombatDecisionTree(
-            input.unit,
-            input.state,
-            input.dt,
-            Math.max(35, input.desiredRange * rangeFactor),
-            input.baseTarget,
-            input.canShootAtAngle,
-            input.getEffectiveWeaponRange,
-          );
-          if (evadeProb < 0.5) {
-            return decision;
-          }
-          const dx = input.unit.x - input.baseTarget.x;
-          const dy = input.unit.y - input.baseTarget.y;
-          const len = Math.hypot(dx, dy) || 1;
-          const push = clamp((evadeProb - 0.5) * 2, 0, 1) * clamp(retreatScale, 0.1, 2.6);
-          return {
-            ...decision,
-            state: "evade",
-            movement: {
-              ax: decision.movement.ax + (dx / len) * push,
-              ay: decision.movement.ay + (dy / len) * push * 0.7,
-              shouldEvade: true,
-            },
-            debug: {
-              ...decision.debug,
-              decisionPath: `${decision.debug.decisionPath} > arena.neural-linear.evade`,
             },
           };
         },
