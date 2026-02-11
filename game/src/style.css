@@ -420,7 +420,7 @@ button.active {
 .leaderboard-layout {
   margin-top: 6px;
   display: grid;
-  grid-template-columns: 260px minmax(0, 1fr);
+  grid-template-columns: 1fr;
   gap: 10px;
 }
 

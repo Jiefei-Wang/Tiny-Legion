@@ -17,3 +17,6 @@ export const GROUND_PROJECTILE_MAX_DROP_BELOW_FIRE_Y = 200;
 
 // Battle rules
 export const BATTLE_SALVAGE_REFUND_FACTOR = 0.6;
+
+// Combat constants
+export const IMPULSE_DAMAGE_STRESS_FACTOR = 2.2;

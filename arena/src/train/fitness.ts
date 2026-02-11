@@ -14,14 +14,15 @@ export function scoreForSide(outcome: "win" | "tie" | "loss", gasWorthDelta: num
   return O * 1_000_000 + gasWorthDelta;
 }
 
-export function aggregateResults(results: MatchResult[], candidateSideForEach: (r: MatchResult) => "player" | "enemy"): Aggregate {
+export function aggregateResults(results: MatchResult[], candidateSideForEach: (r: MatchResult, index: number) => "player" | "enemy"): Aggregate {
   let wins = 0;
   let ties = 0;
   let losses = 0;
   let sumGas = 0;
   let sumScore = 0;
-  for (const r of results) {
-    const side = candidateSideForEach(r);
+  for (let index = 0; index < results.length; index += 1) {
+    const r = results[index];
+    const side = candidateSideForEach(r, index);
     const s = r.sides[side];
     const outcome: "win" | "tie" | "loss" = s.tie ? "tie" : s.win ? "win" : "loss";
     if (outcome === "win") {

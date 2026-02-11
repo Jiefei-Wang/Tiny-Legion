@@ -158,6 +158,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
           <div id="mapPanel" class="card panel hidden"></div>
           <div id="battlePanel" class="card panel hidden"></div>
           <div id="testArenaPanel" class="card panel hidden"></div>
+          <div id="leaderboardPanel" class="card panel hidden"></div>
           <div id="editorPanel" class="card panel hidden"></div>
         </section>
 
@@ -209,6 +210,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
   const mapPanel = getElement<HTMLDivElement>("#mapPanel");
   const battlePanel = getElement<HTMLDivElement>("#battlePanel");
   const testArenaPanel = getElement<HTMLDivElement>("#testArenaPanel");
+  const leaderboardPanel = getElement<HTMLDivElement>("#leaderboardPanel");
   const leaderboardCenter = getElement<HTMLDivElement>("#leaderboardCenter");
   const editorPanel = getElement<HTMLDivElement>("#editorPanel");
   const selectedInfo = getElement<HTMLDivElement>("#selectedInfo");
@@ -1219,27 +1221,44 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       }
     }
     testArenaLeaderboardCompeteBusy = true;
-    testArenaLeaderboardCompeteStatus = "Running leaderboard matches...";
+    const totalRuns = Math.max(1, Math.min(200, Math.floor(runs)));
+    let completedTotal = 0;
+    testArenaLeaderboardCompeteStatus = `Running leaderboard matches... 0/${totalRuns}`;
     renderPanels();
     try {
-      const res = await fetch("/__arena/composite/leaderboard/compete", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          mode,
-          runs,
-          runAId: runAId ?? null,
-          runBId: runBId ?? null,
-        }),
-      });
-      const parsed = await res.json().catch(() => null) as { completed?: number; reason?: string } | null;
-      if (!res.ok) {
-        testArenaLeaderboardCompeteStatus = `Competition failed: ${parsed?.reason ?? "request failed"}`;
-        return;
+      for (let i = 0; i < totalRuns; i += 1) {
+        const res = await fetch("/__arena/composite/leaderboard/compete", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            mode,
+            runs: 1,
+            runAId: runAId ?? null,
+            runBId: runBId ?? null,
+          }),
+        });
+        const parsed = await res.json().catch(() => null) as { completed?: number; reason?: string } | null;
+        if (!res.ok) {
+          testArenaLeaderboardCompeteStatus = `Competition stopped at ${completedTotal}/${totalRuns}: ${parsed?.reason ?? "request failed"}`;
+          break;
+        }
+        const completedThisRound = Math.max(0, Number(parsed?.completed ?? 0));
+        completedTotal += completedThisRound;
+        await refreshTestArenaLeaderboard();
+        await refreshTestArenaCompositeModelOptions();
+        testArenaLeaderboardCompeteStatus = `Running leaderboard matches... ${completedTotal}/${totalRuns}`;
+        renderPanels();
+        if (completedThisRound <= 0) {
+          break;
+        }
       }
-      await refreshTestArenaLeaderboard();
-      await refreshTestArenaCompositeModelOptions();
-      testArenaLeaderboardCompeteStatus = `Competition completed: ${Number(parsed?.completed ?? 0)} runs.`;
+      if (completedTotal >= totalRuns) {
+        testArenaLeaderboardCompeteStatus = `Competition completed: ${completedTotal}/${totalRuns} rounds.`;
+      } else if (completedTotal > 0) {
+        testArenaLeaderboardCompeteStatus = `Competition partially completed: ${completedTotal}/${totalRuns} rounds.`;
+      } else if (!testArenaLeaderboardCompeteStatus.toLowerCase().includes("stopped")) {
+        testArenaLeaderboardCompeteStatus = "Competition finished with no completed rounds.";
+      }
     } catch {
       testArenaLeaderboardCompeteStatus = "Competition failed due to network or server error.";
     } finally {
@@ -2127,6 +2146,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     mapPanel.classList.toggle("hidden", next !== "map");
     battlePanel.classList.toggle("hidden", next !== "battle");
     testArenaPanel.classList.toggle("hidden", next !== "testArena");
+    leaderboardPanel.classList.toggle("hidden", next !== "leaderboard");
     leaderboardCenter.classList.toggle("hidden", next !== "leaderboard");
     editorPanel.classList.toggle("hidden", !isEditorScreen());
     tabs.base.classList.toggle("active", next === "base");
@@ -3927,8 +3947,8 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       `)
       .join("");
     const spawnTemplateSummary = selectedSpawnTemplateIds.length <= 0
-      ? "Enemy spawn templates (none selected)"
-      : `Enemy spawn templates (${selectedSpawnTemplateIds.length} selected)`;
+      ? "Enemy (none selected)"
+      : `Enemy (${selectedSpawnTemplateIds.length} selected)`;
     const spawnTemplateDropdownOpenAttr = testArenaSpawnTemplateDropdownOpen ? "open" : "";
     const manualSpawnTemplateId = getTestArenaManualSpawnTemplateId();
     const manualSpawnTemplateOptions = templates
@@ -4084,51 +4104,53 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     const manualPairOptionsB = testArenaLeaderboardEntries
       .map((entry) => `<option value="${escapeHtml(entry.runId)}" ${entry.runId === testArenaLeaderboardManualPairB ? "selected" : ""}>${escapeHtml(entry.runId)}</option>`)
       .join("");
+    leaderboardPanel.innerHTML = `
+      <h3>Leaderboard Options</h3>
+      <div class="small">Configure and run Elo competitions between AI models.</div>
+      <div class="leaderboard-actions">
+        <label class="small">Mode
+          <select id="leaderboardCompeteMode">
+            ${competeModeOptions}
+          </select>
+        </label>
+        <label class="small">Runs
+          <input id="leaderboardCompeteRuns" type="number" min="1" max="200" step="1" value="${competeRunsValue}" />
+        </label>
+        ${testArenaLeaderboardCompeteMode === "manual-pair" ? `
+          <label class="small">Model A
+            <select id="leaderboardManualPairA">${manualPairOptionsA}</select>
+          </label>
+          <label class="small">Model B
+            <select id="leaderboardManualPairB">${manualPairOptionsB}</select>
+          </label>
+        ` : ""}
+        <div class="row">
+          <button id="btnLeaderboardCompete" ${testArenaLeaderboardCompeteBusy ? "disabled" : ""}>${testArenaLeaderboardCompeteBusy ? "Running..." : "Run Competition"}</button>
+          <button id="btnRefreshLeaderboard">Refresh</button>
+        </div>
+        <div class="small">${escapeHtml(testArenaLeaderboardCompeteStatus || " ")}</div>
+      </div>
+    `;
+
     leaderboardCenter.innerHTML = `
       <h3>AI Leaderboard</h3>
       <div class="small">Real ranking by head-to-head matches. All runs start at score 100.</div>
-      <div class="leaderboard-layout">
-        <div class="leaderboard-actions">
-          <div class="small"><strong>Competition</strong></div>
-          <label class="small">Mode
-            <select id="leaderboardCompeteMode">
-              ${competeModeOptions}
-            </select>
-          </label>
-          <label class="small">Runs
-            <input id="leaderboardCompeteRuns" type="number" min="1" max="200" step="1" value="${competeRunsValue}" />
-          </label>
-          ${testArenaLeaderboardCompeteMode === "manual-pair" ? `
-            <label class="small">Model A
-              <select id="leaderboardManualPairA">${manualPairOptionsA}</select>
-            </label>
-            <label class="small">Model B
-              <select id="leaderboardManualPairB">${manualPairOptionsB}</select>
-            </label>
-          ` : ""}
-          <div class="row">
-            <button id="btnLeaderboardCompete" ${testArenaLeaderboardCompeteBusy ? "disabled" : ""}>${testArenaLeaderboardCompeteBusy ? "Running..." : "Run Competition"}</button>
-            <button id="btnRefreshLeaderboard">Refresh</button>
-          </div>
-          <div class="small">${escapeHtml(testArenaLeaderboardCompeteStatus || " ")}</div>
-        </div>
-        <div class="leaderboard-table-wrap" style="margin-top:0; border:1px solid #333; border-radius:6px; padding:6px; max-height:480px; overflow:auto;">
-          ${testArenaLeaderboardLoading ? `<div class="small">Loading...</div>` : ""}
-          ${!testArenaLeaderboardLoading && leaderboardRows.length <= 0 ? `<div class="small warn">No leaderboard data found. Train composite runs first.</div>` : ""}
-          ${!testArenaLeaderboardLoading && leaderboardRows.length > 0 ? `<table style="width:100%; border-collapse:collapse; font-size:12px;">
-            <thead>
-              <tr>
-                <th style="text-align:left;">#</th>
-                <th style="text-align:left;">Run</th>
-                <th style="text-align:left;">Score</th>
-                <th style="text-align:left;">Win Rate</th>
-                <th style="text-align:left;">W/L/T</th>
-                <th style="text-align:left;">Rounds</th>
-              </tr>
-            </thead>
-            <tbody>${leaderboardRows}</tbody>
-          </table>` : ""}
-        </div>
+      <div class="leaderboard-table-wrap" style="margin-top:6px; border:1px solid #333; border-radius:6px; padding:6px; max-height:520px; overflow:auto;">
+        ${testArenaLeaderboardLoading ? `<div class="small">Loading...</div>` : ""}
+        ${!testArenaLeaderboardLoading && leaderboardRows.length <= 0 ? `<div class="small warn">No leaderboard data found. Train composite runs first.</div>` : ""}
+        ${!testArenaLeaderboardLoading && leaderboardRows.length > 0 ? `<table style="width:100%; border-collapse:collapse; font-size:12px;">
+          <thead>
+            <tr>
+              <th style="text-align:left;">#</th>
+              <th style="text-align:left;">Run</th>
+              <th style="text-align:left;">Score</th>
+              <th style="text-align:left;">Win Rate</th>
+              <th style="text-align:left;">W/L/T</th>
+              <th style="text-align:left;">Rounds</th>
+            </tr>
+          </thead>
+          <tbody>${leaderboardRows}</tbody>
+        </table>` : ""}
       </div>
     `;
 

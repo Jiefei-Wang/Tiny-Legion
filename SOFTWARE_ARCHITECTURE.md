@@ -222,7 +222,9 @@ Arena-specific architecture notes:
 - `run-composite-training.ts` optimizes modules in staged order (`shoot -> movement -> target`) with phase scenarios:
   - no-base 1v1,
   - no-base NvN,
-  - full base battle.
+  - full base battle,
+  - leaderboard-nearby ladder (`p4-leaderboard`) against saved models with similar Elo score.
+- Composite phase scenarios are config-driven from `arena/composite-training.phases.json` (override via `--phaseConfig`) with per-phase template wildcard filters and battlefield params (`width`, `height`, optional `groundHeight`).
 - `train-composite` CLI now supports:
   - scoped module optimization (`--scope shoot|movement|target|all`),
   - per-module source selection (`baseline|new|trained:<path>`),

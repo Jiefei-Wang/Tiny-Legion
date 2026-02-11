@@ -30,7 +30,6 @@ import { canOperate } from "../../simulation/units/control-unit-rules.ts";
 import { instantiateUnit } from "../../simulation/units/unit-builder.ts";
 import { selectBestTarget } from "../../ai/targeting/target-selector.ts";
 import { solveBallisticAim } from "../../ai/shooting/ballistic-aim.ts";
-import { adjustAimForWeaponPolicy } from "../../ai/shooting/weapon-ai-policy.ts";
 import { createBaselineCompositeAiController } from "../../ai/composite/baseline-modules.ts";
 import { validateTemplateDetailed } from "../../templates/template-validation.ts";
 import { createDefaultPartDefinitions, mergePartCatalogs } from "../../parts/part-schema.ts";
@@ -1341,14 +1340,15 @@ export class BattleSession {
     }
     const safeAngle = Number.isFinite(requestedAngleRad) ? requestedAngleRad : 0;
     const effectiveRange = this.getEffectiveWeaponRange(unit, shot.range);
-    const baseAim = {
-      x: unit.x + Math.cos(safeAngle) * effectiveRange,
-      y: unit.y + Math.sin(safeAngle) * effectiveRange,
-    };
-    const adjustedAim = adjustAimForWeaponPolicy(attachment.component, baseAim);
-    const targetX = adjustedAim.x;
-    const targetY = adjustedAim.y;
-    const finalIntendedTargetY = intendedTargetY ?? targetY;
+    // Calculate target point for intended target tracking (homings, etc.)
+    const targetX = unit.x + Math.cos(safeAngle) * effectiveRange;
+    const targetY = unit.y + Math.sin(safeAngle) * effectiveRange;
+    const adjustedTargetY = (() => {
+      if (attachment.component === "trackingMissile") return targetY - 10;
+      if (attachment.component === "explosiveShell") return targetY + 4;
+      return targetY;
+    })();
+    const finalIntendedTargetY = intendedTargetY ?? adjustedTargetY;
     const finalIntendedTargetX = targetX;
     const resolvedHomingTargetId = shot.weaponClass === "tracking"
       ? (intendedTargetId ?? this.findClosestEnemyToPoint(unit.side, finalIntendedTargetX, finalIntendedTargetY)?.id ?? null)
@@ -1364,14 +1364,12 @@ export class BattleSession {
       : this.getCellOffsetWorld(unit, attachment.cell, weaponCellSize);
     const weaponOriginX = unit.x + weaponOffset.x;
     const weaponOriginY = unit.y + weaponOffset.y;
-    const dx = targetX - weaponOriginX;
-    const dy = targetY - weaponOriginY;
-    const clampedAim = this.clampAimVectorToWeaponAngle(unit, attachment.component, dx, dy, attachment.stats?.shootAngleDeg);
+    // Clamp angle directly (no dx/dy round-trip)
+    const fireAngle = this.clampAndAdjustAngle(unit, attachment.component, safeAngle, attachment.stats?.shootAngleDeg);
     const spreadRad = (((Math.random() * 2) - 1) * shot.spreadDeg * Math.PI) / 180;
-    const baseAngle = Math.atan2(clampedAim.dy, clampedAim.dx);
-    const fireAngle = baseAngle + spreadRad;
-    const ux = Math.cos(fireAngle);
-    const uy = Math.sin(fireAngle);
+    const finalFireAngle = fireAngle + spreadRad;
+    const ux = Math.cos(finalFireAngle);
+    const uy = Math.sin(finalFireAngle);
     const muzzleDistance = weaponCellSize * 0.55 + 2;
     const explosiveFuse = shot.explosive?.fuse ?? "impact";
     const explosiveIsBomb = shot.explosive?.deliveryMode === "bomb";
@@ -1432,26 +1430,24 @@ export class BattleSession {
     return true;
   }
 
-  private clampAimVectorToWeaponAngle(
+  private clampAndAdjustAngle(
     unit: UnitInstance,
     componentId: keyof typeof COMPONENTS,
-    dx: number,
-    dy: number,
+    angleRad: number,
     shootAngleDegOverride?: number,
-  ): { dx: number; dy: number } {
+  ): number {
     const stats = COMPONENTS[componentId];
     const shootAngleDeg = shootAngleDegOverride ?? stats.shootAngleDeg ?? 120;
     const halfAngleRad = (shootAngleDeg * Math.PI / 180) * 0.5;
     const facingAngle = unit.facing === 1 ? 0 : Math.PI;
-    const aimAngle = Math.atan2(dy, dx);
-    const delta = Math.atan2(Math.sin(aimAngle - facingAngle), Math.cos(aimAngle - facingAngle));
-    const clampedDelta = clamp(delta, -halfAngleRad, halfAngleRad);
-    const clampedAngle = facingAngle + clampedDelta;
-    const length = Math.max(1, Math.hypot(dx, dy));
-    return {
-      dx: Math.cos(clampedAngle) * length,
-      dy: Math.sin(clampedAngle) * length,
-    };
+
+    // Normalize angle relative to facing
+    const relativeAngle = Math.atan2(Math.sin(angleRad - facingAngle), Math.cos(angleRad - facingAngle));
+
+    // Clamp to weapon arc
+    const clampedRelative = clamp(relativeAngle, -halfAngleRad, halfAngleRad);
+
+    return facingAngle + clampedRelative;
   }
 
   private requiresDedicatedLoader(weaponClass: BattleState["projectiles"][number]["weaponClass"]): boolean {

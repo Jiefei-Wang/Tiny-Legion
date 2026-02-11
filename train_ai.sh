@@ -10,6 +10,7 @@ fi
 
 scope="all"
 seed_composite=""
+phase_config=""
 phase_seeds="16"
 generations="20"
 population="24"
@@ -32,6 +33,7 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --scope) scope="$2"; shift 2 ;;
     --seed-composite) seed_composite="$2"; shift 2 ;;
+    --phase-config) phase_config="$2"; shift 2 ;;
     --phase-seeds) phase_seeds="$2"; shift 2 ;;
     --generations) generations="$2"; shift 2 ;;
     --population) population="$2"; shift 2 ;;
@@ -64,6 +66,7 @@ if [[ "$command" == "help" ]]; then
   echo ""
   echo "Common options"
   echo "  --seed-composite <path>     Start from saved composite JSON"
+  echo "  --phase-config <path>       Phase scenario config JSON (default: arena/composite-training.phases.json)"
   echo "  --target-source <source>    baseline | new | trained:<path>"
   echo "  --movement-source <source>  baseline | new | trained:<path>"
   echo "  --shoot-source <source>     baseline | new | trained:<path>"
@@ -83,6 +86,7 @@ fi
 cmd=(npm --prefix "${ROOT_DIR}/arena" run train:composite -- --scope "$scope" --phaseSeeds "$phase_seeds" --generations "$generations" --population "$population" --parallel "$parallel" --maxSimSeconds "$max_sim_seconds" --nodeDefense "$node_defense" --baseHp "$base_hp" --playerGas "$player_gas" --enemyGas "$enemy_gas" --spawnBurst "$spawn_burst" --spawnMaxActive "$spawn_max_active" --nUnits "$n_units" --targetSource "$target_source" --movementSource "$movement_source" --shootSource "$shoot_source")
 
 if [[ -n "$seed_composite" ]]; then cmd+=(--seedComposite "$seed_composite"); fi
+if [[ -n "$phase_config" ]]; then cmd+=(--phaseConfig "$phase_config"); fi
 if [[ "$quiet" == "true" ]]; then cmd+=(--quiet true); fi
 
 printf 'Running:'

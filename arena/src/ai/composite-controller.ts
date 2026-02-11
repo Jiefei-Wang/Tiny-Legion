@@ -199,7 +199,7 @@ function createDecisionTreeShootAi(params: Params): ShootAiModule {
       return 0;
     }
     if (Math.abs(denominator) < 1e-6) {
-      return 0;
+      return 10000;
     }
     return numerator / denominator;
   };
@@ -229,7 +229,8 @@ function createDecisionTreeShootAi(params: Params): ShootAiModule {
         + yOverX * angleWeightYOverX
         + yOverX2 * angleWeightYOverX2
       );
-      const adjustedAngle = clamp(decision.firePlan.angleRad + angleDelta, -Math.PI, Math.PI);
+      const adjustedAngleRaw = decision.firePlan.angleRad + angleDelta;
+      const adjustedAngle = Number.isFinite(adjustedAngleRaw) ? adjustedAngleRaw : decision.firePlan.angleRad;
       const adjustedDecision = {
         ...decision,
         firePlan: {

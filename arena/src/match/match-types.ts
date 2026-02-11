@@ -34,6 +34,12 @@ export type MatchSpec = {
     withBase: boolean;
     initialUnitsPerSide: number;
   };
+  templateNames?: string[];
+  battlefield?: {
+    width?: number;
+    height?: number;
+    groundHeight?: number;
+  };
   spawnMode?: SpawnMode;
   spawnPlayer?: SpawnSpec;
   spawnEnemy?: SpawnSpec;

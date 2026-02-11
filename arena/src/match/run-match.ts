@@ -55,13 +55,38 @@ function clamp(n: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, n));
 }
 
+function wildcardToRegex(pattern: string): RegExp {
+  const escaped = pattern.replace(/[.+?^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*");
+  return new RegExp(`^${escaped}$`);
+}
+
+function matchesTemplatePattern(templateId: string, pattern: string): boolean {
+  if (pattern === "*") {
+    return true;
+  }
+  return wildcardToRegex(pattern).test(templateId);
+}
+
 function aliveCount(units: any[], side: "player" | "enemy"): number {
   return units.filter((unit: any) => unit.alive && unit.side === side).length;
 }
 
 export async function runMatch(spec: MatchSpec): Promise<MatchResult> {
   setMathRandomSeed(spec.seed);
-  const templates = await loadRuntimeMergedTemplates();
+  const allTemplates = await loadRuntimeMergedTemplates();
+  const templatePatterns = Array.isArray(spec.templateNames) && spec.templateNames.length > 0
+    ? spec.templateNames
+    : ["*"];
+  const templates = allTemplates.filter((template: any) => {
+    const id = String(template?.id ?? "");
+    if (!id) {
+      return false;
+    }
+    return templatePatterns.some((pattern) => matchesTemplatePattern(id, String(pattern)));
+  });
+  if (templates.length <= 0) {
+    throw new Error(`runMatch: no templates matched pattern(s): ${templatePatterns.join(", ")}`);
+  }
   const templateById = new Map<string, any>(templates.map((t: any) => [String(t.id), t] as const));
   const refundFactor = BATTLE_SALVAGE_REFUND_FACTOR;
 
@@ -295,7 +320,9 @@ export async function runMatch(spec: MatchSpec): Promise<MatchResult> {
     throw new Error(`Unsupported AI family in runner: ${kind}`);
   };
 
-  const canvas = createMockCanvas(BATTLEFIELD_WIDTH, BATTLEFIELD_HEIGHT);
+  const battlefieldWidth = clamp(Math.floor(spec.battlefield?.width ?? BATTLEFIELD_WIDTH), 640, 4096);
+  const battlefieldHeight = clamp(Math.floor(spec.battlefield?.height ?? BATTLEFIELD_HEIGHT), 360, 2160);
+  const canvas = createMockCanvas(battlefieldWidth, battlefieldHeight);
   const battle = new BattleSession(canvas, hooks, templates, {
     aiControllers: {
       player: aiForSide("player"),
@@ -322,6 +349,9 @@ export async function runMatch(spec: MatchSpec): Promise<MatchResult> {
       : {}),
   };
   battle.start(node);
+  if (typeof spec.battlefield?.groundHeight === "number" && Number.isFinite(spec.battlefield.groundHeight)) {
+    battle.setGroundHeight(spec.battlefield.groundHeight);
+  }
   battle.clearControlSelection();
 
   const rosterPreference = ["scout-ground", "tank-ground", "air-jet", "air-propeller", "air-light"];

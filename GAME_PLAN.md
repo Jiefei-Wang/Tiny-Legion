@@ -602,10 +602,13 @@ The current playable implementation already includes:
 - Target module returns ranked targets (sorted by importance); movement consumes ranked targets + battlefield state; shooting consumes ranked targets + movement intent + weapon readiness.
 - Arena supports composite module wiring (`target/movement/shoot`) so each module can be replaced and compared independently.
 - `dt-shoot` now exposes additional trainable angle-feature parameters: `weaponSpeed` (for standardized relative distance), plus weighted terms over `stdX`, `stdY`, `stdY/stdX`, and `stdY/(stdX^2)` to bias final firing angle.
+- `dt-shoot` angle adjustment is now passed through without pre-clamping in AI module logic; runtime fire/control execution remains the source of angle constraint enforcement.
 - Composite compare/optimization runs in phased sequence:
   - Phase 1: no-base 1v1 (shoot/movement only)
   - Phase 2: no-base NvN
   - Phase 3: full battlefield with bases
+  - Phase 4: leaderboard-nearby ladder (`p4-leaderboard`) where candidates are evaluated against saved models whose Elo scores are closest to current candidate reference score.
+- Composite phase scenarios are configurable in `arena/composite-training.phases.json`, including per-phase template-name filters with wildcard support (`*`) and battlefield sizing (`width`, `height`, optional `groundHeight`).
 - Test Arena includes a `2 x 3` AI component grid (player/enemy x target/movement/shoot), and each cell is a single dropdown for quick switching.
 - Test Arena AI Selection now includes per-side composed-model selectors (saved leaderboard runs + built-ins); selecting a composed model applies the full target/movement/shoot bundle for that side.
 - Each dropdown lists built-in module options plus all saved module specs discovered from arena run artifacts (`arena/.arena-data/runs/*/best-composite.json`).
@@ -614,6 +617,7 @@ The current playable implementation already includes:
 - Leaderboard rating is match-based: each composite run starts at score `100`, then head-to-head results adjust both models using an Elo-style expected-outcome update (larger score gaps produce larger swing factors).
 - Leaderboard panel includes quick competition controls: `random pair`, `unranked vs random`, and `manual pair` modes plus configurable run count.
 - Leaderboard model pool includes a built-in `baseline-game-ai` entry representing the game's default baseline AI, so trained runs are ranked directly against current in-game baseline behavior.
+- Leaderboard competition updates are now incremental in UI: after each completed round, the table/model list refresh immediately so ranking changes are visible in real time.
 - Test Arena module-selection contract is documented in `game/AI_COMPONENT_CONFIG.md`.
 - Training automation script `train_ai.sh` provides module-specific optimization (`shoot`/`movement`/`target`) and full compose optimization (`compose`) with per-module source selection (`baseline|new|trained:<path>`).
 

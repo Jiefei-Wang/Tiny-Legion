@@ -177,6 +177,7 @@ async function main(): Promise<void> {
     const nUnits = asNumber(args.nUnits, 4);
     const scope = asString(args.scope, "all");
     const seedCompositePath = typeof args.seedComposite === "string" ? args.seedComposite : null;
+    const phaseConfigPath = typeof args.phaseConfig === "string" ? args.phaseConfig : null;
     const targetSource = asModuleSource(args.targetSource, "baseline");
     const movementSource = asModuleSource(args.movementSource, "baseline");
     const shootSource = asModuleSource(args.shootSource, "baseline");
@@ -195,6 +196,7 @@ async function main(): Promise<void> {
       spawnBurst: Math.max(1, Math.floor(spawnBurst)),
       spawnMaxActive: Math.max(1, Math.floor(spawnMaxActive)),
       nUnits: Math.max(2, Math.floor(nUnits)),
+      phaseConfigPath,
       scope: scope === "shoot" || scope === "movement" || scope === "target" || scope === "all" ? scope : "all",
       seedCompositePath,
       targetSource,
@@ -261,6 +263,7 @@ async function main(): Promise<void> {
       "  train-spawn --spawnAi spawn-weighted --microFamily range-bias --generations 25 --population 40 --parallel 8",
       "  train-composite --scope all --generations 20 --population 24 --phaseSeeds 16 --nUnits 4",
       "  train-composite --scope shoot --shootSource new --movementSource baseline --targetSource baseline",
+      "  train-composite --phaseConfig composite-training.phases.json",
       "  eval --ai range-bias --fromStore true --seeds 200 --parallel 20",
       "  replay --file match.json",
       "",

@@ -1,0 +1,38 @@
+{
+  "phases": [
+    {
+      "id": "p1-no-base-1v1",
+      "withBase": false,
+      "initialUnitsPerSide": 1,
+      "seeds": 16,
+      "templateNames": ["*"],
+      "battlefield": { "width": 1800, "height": 900, "groundHeight": 620 }
+    },
+    {
+      "id": "p2-no-base-nvn",
+      "withBase": false,
+      "initialUnitsPerSide": 4,
+      "seeds": 16,
+      "templateNames": ["*"],
+      "battlefield": { "width": 2000, "height": 1000, "groundHeight": 680 }
+    },
+    {
+      "id": "p3-battlefield-base",
+      "withBase": true,
+      "initialUnitsPerSide": 4,
+      "seeds": 16,
+      "templateNames": ["*"],
+      "battlefield": { "width": 2000, "height": 1000, "groundHeight": 680 }
+    },
+    {
+      "id": "p4-leaderboard",
+      "withBase": true,
+      "initialUnitsPerSide": 4,
+      "seeds": 16,
+      "templateNames": ["*"],
+      "battlefield": { "width": 2000, "height": 1000, "groundHeight": 680 },
+      "opponentMode": "leaderboard-nearby",
+      "leaderboard": { "opponentCount": 6 }
+    }
+  ]
+}
