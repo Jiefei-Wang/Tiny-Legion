@@ -38,14 +38,16 @@ npm --prefix game run test:headless
 npm --prefix arena install
 
 # run one match (writes a replay artifact)
-npm --prefix arena run match -- --aiA baseline --aiB range-bias --seed 123 --out .arena-data/test-match.json
+npm --prefix arena run match -- --seed 123 --out .arena-data/test-match.json
 
 # replay a match artifact
 npm --prefix arena run replay -- --file .arena-data/test-match.json
 
-# train an AI family against baseline (genetic algorithm)
-npm --prefix arena run train -- --ai range-bias --generations 25 --population 40 --seeds 20 --parallel 8
+# train a composed AI (target/movement/shoot components)
+npm --prefix arena run train:composite -- --scope all --generations 20 --population 24 --phaseSeeds 16 --parallel 8 --nUnits 4
 ```
+
+Current runtime note: arena match execution is composite-only (`familyId: "composite"`); baseline is represented as a baseline composite module bundle.
 
 Artifacts:
 

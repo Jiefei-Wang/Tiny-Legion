@@ -6,9 +6,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "match": "npm run build && node .dist/arena/src/cli.js match",
-    "train": "npm run build && node .dist/arena/src/cli.js train",
     "train:composite": "npm run build && node .dist/arena/src/cli.js train-composite",
-    "train:spawn": "npm run build && node .dist/arena/src/cli.js train-spawn",
     "replay": "npm run build && node .dist/arena/src/cli.js replay",
     "serve": "npm run build && node .dist/arena/src/server.js"
   },

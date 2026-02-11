@@ -1182,10 +1182,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
             rounds: Number.isFinite(entry.rounds) ? Number(entry.rounds) : undefined,
             games: Number.isFinite(entry.games) ? Number(entry.games) : undefined,
             spec: entry.spec,
-            compatible: Boolean(
-              entry.spec?.familyId === "baseline"
-              || (entry.spec?.familyId === "composite" && entry.spec?.composite),
-            ),
+            compatible: Boolean(entry.spec?.familyId === "composite" && entry.spec?.composite),
             reason: entry.spec ? undefined : "AI spec missing in run artifact.",
           });
         }
@@ -1386,9 +1383,6 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       const selectedModelId = testArenaCompositeModelSelections[side];
       if (selectedModelId !== "custom-components") {
         const selectedModel = findCompositeModelOptionById(selectedModelId);
-        if (selectedModel?.spec?.familyId === "baseline") {
-          return null;
-        }
         if (selectedModel?.spec?.familyId === "composite" && selectedModel.spec.composite) {
           return makeCompositeAiController(selectedModel.spec);
         }

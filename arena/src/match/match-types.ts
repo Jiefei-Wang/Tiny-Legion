@@ -3,9 +3,9 @@ import type { Params } from "../ai/ai-schema.ts";
 export type Side = "player" | "enemy";
 
 export type MatchAiSpec = {
-  familyId: string;
+  familyId: "composite";
   params: Params;
-  composite?: {
+  composite: {
     target: { familyId: string; params: Params };
     movement: { familyId: string; params: Params };
     shoot: { familyId: string; params: Params };

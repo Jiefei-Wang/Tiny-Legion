@@ -175,16 +175,6 @@ arena/src/
   ai/
     ai-schema.ts
     composite-controller.ts
-    families.ts
-    families/
-      baseline.ts
-      range-bias.ts
-      evade-bias.ts
-      aggressive-rush.ts
-      adaptive-kite.ts
-      base-rush.ts
-  eval/
-    evaluate-vs-baseline.ts
   match/
     match-types.ts
     run-match.ts
@@ -196,11 +186,8 @@ arena/src/
     families/spawn-weighted.ts
   train/
     run-composite-training.ts
-    run-training.ts
-    run-spawn-training.ts
     fitness.ts
     param-genetics.ts
-    model-store.ts
   worker/
     match-worker.ts
   replay/
@@ -229,7 +216,8 @@ Arena-specific architecture notes:
   - scoped module optimization (`--scope shoot|movement|target|all`),
   - per-module source selection (`baseline|new|trained:<path>`),
   - optional seed composite loading (`--seedComposite`).
-- `cli.ts` includes an `eval` command for reproducible held-out benchmarking versus `baseline`.
+- `cli.ts` supports `match`, `train-composite`, and `replay` commands (legacy `train`/`train-spawn`/`eval` flows were removed).
+- `match` runtime is composite-only (`familyId: "composite"`); baseline-vs-baseline test matches are represented by baseline module bundles on both sides.
 - Replay UI (`arena-ui/src/main.ts`) still uses game interface bootstrap (`game/src/app/bootstrap.ts`) while consuming AI/simulation primitives from `packages/game-core`.
 - Game dev server exposes `/__arena/composite/latest` for Test Arena to load latest trained composite spec from `arena/.arena-data/runs/*/best-composite.json`.
 - Game dev server exposes `/__arena/composite/leaderboard` for in-game ranking entries backed by persistent match-based rating storage (`arena/.arena-data/leaderboard/composite-elo.json`).

@@ -1,7 +1,6 @@
 import { createServer } from "node:http";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { runMatch } from "./match/run-match.ts";
-import { runTraining } from "./train/run-training.ts";
 
 function readBody(req: IncomingMessage): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -28,14 +27,6 @@ const server = createServer(async (req: IncomingMessage, res: ServerResponse) =>
       const spec = JSON.parse(body || "{}") as any;
       const result = await runMatch(spec);
       json(res, 200, result);
-      return;
-    }
-    if (req.method === "POST" && url.pathname === "/train") {
-      const body = await readBody(req);
-      const opts = JSON.parse(body || "{}") as any;
-      // fire and forget: return immediately
-      void runTraining(opts);
-      json(res, 202, { ok: true });
       return;
     }
     json(res, 404, { error: "not found" });

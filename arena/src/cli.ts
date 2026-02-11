@@ -1,10 +1,7 @@
 import { runSingleMatch } from "./match/run-single-match.ts";
-import { runTraining } from "./train/run-training.ts";
 import { runReplay } from "./replay/run-replay.ts";
 import { loadArenaDefaults } from "./config/arena-config.ts";
-import { runSpawnTraining } from "./train/run-spawn-training.ts";
 import { openReplayUiFromFile } from "./replay/open-replay-ui.ts";
-import { evaluateVsBaseline } from "./eval/evaluate-vs-baseline.ts";
 import { runCompositeTraining } from "./train/run-composite-training.ts";
 
 type Args = Record<string, string | boolean>;
@@ -59,8 +56,8 @@ async function main(): Promise<void> {
   const { cmd, args } = parseArgs(process.argv.slice(2));
   const defaults = loadArenaDefaults();
   if (cmd === "match") {
-    const aiA = asString(args.aiA, "baseline");
-    const aiB = asString(args.aiB, "baseline");
+    const playerCompositePath = typeof args.playerComposite === "string" ? args.playerComposite : null;
+    const enemyCompositePath = typeof args.enemyComposite === "string" ? args.enemyComposite : null;
     const seed = asNumber(args.seed, Date.now() % 1_000_000);
     const maxSimSeconds = asNumber(args.maxSimSeconds, defaults.maxSimSeconds ?? 240);
     const nodeDefense = asNumber(args.nodeDefense, defaults.nodeDefense ?? 1);
@@ -69,14 +66,10 @@ async function main(): Promise<void> {
     const baseHp = asNumber(args.baseHp, defaults.baseHp ?? NaN);
     const spawnBurst = asNumber(args.spawnBurst, defaults.spawnBurst ?? 1);
     const spawnMaxActive = asNumber(args.spawnMaxActive, defaults.spawnMaxActive ?? 5);
-    const paramsAPath = typeof args.paramsA === "string" ? args.paramsA : null;
-    const paramsBPath = typeof args.paramsB === "string" ? args.paramsB : null;
     const outPath = typeof args.out === "string" ? args.out : null;
     await runSingleMatch({
-      aiA,
-      aiB,
-      paramsAPath,
-      paramsBPath,
+      playerCompositePath,
+      enemyCompositePath,
       seed,
       maxSimSeconds,
       nodeDefense,
@@ -86,78 +79,6 @@ async function main(): Promise<void> {
       playerGas,
       enemyGas,
       outPath,
-    });
-    return;
-  }
-  if (cmd === "train") {
-    const ai = asString(args.ai, "range-bias");
-    const seed0 = asNumber(args.seed0, 100);
-    const seeds = asNumber(args.seeds, defaults.seeds ?? 20);
-    const generations = asNumber(args.generations, defaults.generations ?? 25);
-    const population = asNumber(args.population, defaults.population ?? 40);
-    const parallel = asNumber(args.parallel, defaults.parallel ?? 8);
-    const maxSimSeconds = asNumber(args.maxSimSeconds, defaults.maxSimSeconds ?? 240);
-    const nodeDefense = asNumber(args.nodeDefense, defaults.nodeDefense ?? 1);
-    const playerGas = asNumber(args.playerGas, defaults.playerGas ?? 10000);
-    const enemyGas = asNumber(args.enemyGas, defaults.enemyGas ?? 10000);
-    const baseHp = asNumber(args.baseHp, defaults.baseHp ?? NaN);
-    const maxModels = asNumber(args.maxModels, defaults.maxModels ?? 100);
-    const spawnBurst = asNumber(args.spawnBurst, defaults.spawnBurst ?? 1);
-    const spawnMaxActive = asNumber(args.spawnMaxActive, defaults.spawnMaxActive ?? 5);
-    const quiet = args.quiet === true || args.quiet === "true";
-    await runTraining({
-      ai,
-      seed0,
-      seeds,
-      generations,
-      population,
-      parallel,
-      maxSimSeconds,
-      nodeDefense,
-      baseHp: Number.isFinite(baseHp) && baseHp > 0 ? baseHp : null,
-      playerGas,
-      enemyGas,
-      spawnBurst: Math.max(1, Math.floor(spawnBurst)),
-      spawnMaxActive: Math.max(1, Math.floor(spawnMaxActive)),
-      maxModels,
-      quiet,
-    });
-    return;
-  }
-  if (cmd === "train-spawn") {
-    const spawnAi = asString(args.spawnAi, "spawn-weighted");
-    const microFamily = asString(args.microFamily, "range-bias");
-    const seed0 = asNumber(args.seed0, 100);
-    const seeds = asNumber(args.seeds, defaults.seeds ?? 20);
-    const generations = asNumber(args.generations, defaults.generations ?? 25);
-    const population = asNumber(args.population, defaults.population ?? 40);
-    const parallel = asNumber(args.parallel, defaults.parallel ?? 8);
-    const maxSimSeconds = asNumber(args.maxSimSeconds, defaults.maxSimSeconds ?? 240);
-    const nodeDefense = asNumber(args.nodeDefense, defaults.nodeDefense ?? 1);
-    const playerGas = asNumber(args.playerGas, defaults.playerGas ?? 10000);
-    const enemyGas = asNumber(args.enemyGas, defaults.enemyGas ?? 10000);
-    const baseHp = asNumber(args.baseHp, defaults.baseHp ?? NaN);
-    const maxModels = asNumber(args.maxModels, defaults.maxModels ?? 100);
-    const spawnBurst = asNumber(args.spawnBurst, defaults.spawnBurst ?? 1);
-    const spawnMaxActive = asNumber(args.spawnMaxActive, defaults.spawnMaxActive ?? 5);
-    const quiet = args.quiet === true || args.quiet === "true";
-    await runSpawnTraining({
-      spawnAi,
-      microFamily,
-      seed0,
-      seeds,
-      generations,
-      population,
-      parallel,
-      maxSimSeconds,
-      nodeDefense,
-      baseHp: Number.isFinite(baseHp) && baseHp > 0 ? baseHp : null,
-      playerGas,
-      enemyGas,
-      spawnBurst: Math.max(1, Math.floor(spawnBurst)),
-      spawnMaxActive: Math.max(1, Math.floor(spawnMaxActive)),
-      maxModels,
-      quiet,
     });
     return;
   }
@@ -219,52 +140,17 @@ async function main(): Promise<void> {
     await openReplayUiFromFile(replayPath);
     return;
   }
-  if (cmd === "eval") {
-    const ai = asString(args.ai, "range-bias");
-    const paramsPath = typeof args.params === "string" ? args.params : null;
-    const fromStore = args.fromStore === true || args.fromStore === "true";
-    const seed0 = asNumber(args.seed0, 2000);
-    const seeds = asNumber(args.seeds, 200);
-    const parallel = asNumber(args.parallel, 20);
-    const maxSimSeconds = asNumber(args.maxSimSeconds, defaults.maxSimSeconds ?? 240);
-    const nodeDefense = asNumber(args.nodeDefense, defaults.nodeDefense ?? 1);
-    const playerGas = asNumber(args.playerGas, defaults.playerGas ?? 10000);
-    const enemyGas = asNumber(args.enemyGas, defaults.enemyGas ?? 10000);
-    const baseHp = asNumber(args.baseHp, defaults.baseHp ?? NaN);
-    const spawnBurst = asNumber(args.spawnBurst, defaults.spawnBurst ?? 1);
-    const spawnMaxActive = asNumber(args.spawnMaxActive, defaults.spawnMaxActive ?? 5);
-    const outPath = typeof args.out === "string" ? args.out : null;
-    await evaluateVsBaseline({
-      ai,
-      paramsPath,
-      fromStore,
-      seed0,
-      seeds,
-      parallel,
-      maxSimSeconds,
-      nodeDefense,
-      baseHp: Number.isFinite(baseHp) && baseHp > 0 ? baseHp : null,
-      playerGas,
-      enemyGas,
-      spawnBurst: Math.max(1, Math.floor(spawnBurst)),
-      spawnMaxActive: Math.max(1, Math.floor(spawnMaxActive)),
-      outPath,
-    });
-    return;
-  }
   // eslint-disable-next-line no-console
   console.log(
     [
       "arena cli",
       "",
       "Commands:",
-      "  match --aiA baseline --aiB range-bias --seed 123 --out match.json",
-      "  train --ai range-bias --generations 25 --population 40 --parallel 8",
-      "  train-spawn --spawnAi spawn-weighted --microFamily range-bias --generations 25 --population 40 --parallel 8",
+      "  match --seed 123 --out match.json",
+      "  match --playerComposite player.json --enemyComposite enemy.json --seed 123 --out match.json",
       "  train-composite --scope all --generations 20 --population 24 --phaseSeeds 16 --nUnits 4",
       "  train-composite --scope shoot --shootSource new --movementSource baseline --targetSource baseline",
       "  train-composite --phaseConfig composite-training.phases.json",
-      "  eval --ai range-bias --fromStore true --seeds 200 --parallel 20",
       "  replay --file match.json",
       "",
       "Common flags:",

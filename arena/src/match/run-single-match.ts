@@ -1,27 +1,50 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { resolve, dirname } from "node:path";
-import { getFamily } from "../ai/families.ts";
-import type { Params } from "../ai/ai-schema.ts";
-import type { MatchSpec } from "./match-types.ts";
+import { baselineCompositeConfig, type CompositeConfig } from "../ai/composite-controller.ts";
+import type { MatchAiSpec, MatchSpec } from "./match-types.ts";
 import { runMatch } from "./run-match.ts";
 
-function readParams(path: string | null): Params {
-  if (!path) {
-    return {};
-  }
+function parseCompositeSpec(path: string): MatchAiSpec {
   const raw = readFileSync(path, "utf8");
   const parsed = JSON.parse(raw) as unknown;
   if (!parsed || typeof parsed !== "object") {
-    throw new Error(`Invalid params file: ${path}`);
+    throw new Error(`Invalid composite file: ${path}`);
   }
-  return parsed as Params;
+
+  const obj = parsed as Record<string, unknown>;
+  if (obj.familyId === "composite" && obj.composite && typeof obj.composite === "object") {
+    return {
+      familyId: "composite",
+      params: {},
+      composite: obj.composite as MatchAiSpec["composite"],
+    };
+  }
+
+  if (obj.target && obj.movement && obj.shoot) {
+    return {
+      familyId: "composite",
+      params: {},
+      composite: obj as unknown as CompositeConfig,
+    };
+  }
+
+  throw new Error(`Invalid composite file: ${path}. Expected full MatchAiSpec or {target,movement,shoot}.`);
+}
+
+function resolveComposite(path: string | null): MatchAiSpec {
+  if (!path) {
+    return {
+      familyId: "composite",
+      params: {},
+      composite: baselineCompositeConfig(),
+    };
+  }
+  return parseCompositeSpec(path);
 }
 
 export async function runSingleMatch(opts: {
-  aiA: string;
-  aiB: string;
-  paramsAPath: string | null;
-  paramsBPath: string | null;
+  playerCompositePath: string | null;
+  enemyCompositePath: string | null;
   seed: number;
   maxSimSeconds: number;
   nodeDefense: number;
@@ -32,15 +55,6 @@ export async function runSingleMatch(opts: {
   enemyGas: number;
   outPath: string | null;
 }): Promise<void> {
-  const familyA = getFamily(opts.aiA);
-  const familyB = getFamily(opts.aiB);
-  const paramsA = readParams(opts.paramsAPath);
-  const paramsB = readParams(opts.paramsBPath);
-
-  // Validate by instantiation.
-  familyA.make(paramsA);
-  familyB.make(paramsB);
-
   const spec: MatchSpec = {
     seed: opts.seed,
     maxSimSeconds: opts.maxSimSeconds,
@@ -50,8 +64,8 @@ export async function runSingleMatch(opts: {
     spawnMaxActive: opts.spawnMaxActive,
     playerGas: opts.playerGas,
     enemyGas: opts.enemyGas,
-    aiPlayer: { familyId: familyA.id, params: paramsA },
-    aiEnemy: { familyId: familyB.id, params: paramsB },
+    aiPlayer: resolveComposite(opts.playerCompositePath),
+    aiEnemy: resolveComposite(opts.enemyCompositePath),
   };
 
   const result = await runMatch(spec);

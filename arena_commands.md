@@ -119,7 +119,9 @@ npm --prefix arena run train:composite -- \
 Single headless match:
 
 ```bash
-npm --prefix arena run match -- --aiA baseline --aiB range-bias --seed 123 --out .arena-data/test-match.json
+npm --prefix arena run match -- --seed 123 --out .arena-data/test-match.json
+# Optional per-side composite override:
+# --playerComposite <path-to-composite-json> --enemyComposite <path-to-composite-json>
 ```
 
 Replay artifact:
@@ -139,3 +141,5 @@ npm --prefix arena run replay -- --headless --file .arena-data/test-match.json
 - Python bridge/training commands are removed.
 - gRPC training server commands are removed.
 - ONNX export/load flow is removed.
+- Legacy arena micro-AI families (`range-bias`, `evade-bias`, `aggressive-rush`, `adaptive-kite`, `base-rush`) are removed.
+- Legacy `arena train`, `arena train-spawn`, and `arena eval` flows are removed.
