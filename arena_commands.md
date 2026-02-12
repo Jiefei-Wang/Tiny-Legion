@@ -62,32 +62,13 @@ Example combination:
 Using wrapper script:
 
 ```bash
-./train_ai.sh compose \
-  --target-source new \
-  --movement-source baseline \
-  --shoot-source new \
-  --phase-seeds 16 \
-  --generations 20 \
-  --population 24 \
-  --parallel 8 \
-  --n-units 4
+./train_ai.sh compose --target-source new --movement-source baseline --shoot-source new --phase-seeds 16 --generations 20 --population 24 --parallel 8 --n-units 4
 ```
 
 Direct CLI equivalent:
 
 ```bash
-npm --prefix arena run train:composite -- \
-  --scope all \
-  --phaseConfig arena/composite-training.phases.json \
-  --targetSource new \
-  --movementSource baseline \
-  --shootSource new \
-  --shootFamily dt-shoot-atan \
-  --phaseSeeds 16 \
-  --generations 20 \
-  --population 24 \
-  --parallel 8 \
-  --nUnits 4
+npm --prefix arena run train:composite -- --scope all --phaseConfig arena/composite-training.phases.json --targetSource new --movementSource baseline --shootSource new --shootFamily dt-shoot-atan --phaseSeeds 16 --generations 20 --population 24 --parallel 8 --nUnits 4
 ```
 
 ## Train Single Component Only
@@ -95,31 +76,19 @@ npm --prefix arena run train:composite -- \
 Train shoot only (hold others fixed by source):
 
 ```bash
-./train_ai.sh shoot \
-  --target-source baseline \
-  --movement-source baseline \
-  --shoot-source new
+./train_ai.sh shoot --target-source baseline --movement-source baseline --shoot-source new
 ```
 
 Direct CLI:
 
 ```bash
-npm --prefix arena run train:composite -- \
-  --scope shoot \
-  --targetSource baseline \
-  --movementSource baseline \
-  --shootSource new \
-  --shootFamily dt-shoot-atan
+npm --prefix arena run train:composite -- --scope shoot --targetSource baseline --movementSource baseline --shootSource new --shootFamily dt-shoot-atan
 ```
 
 ## Seed From Existing Trained Composite
 
 ```bash
-./train_ai.sh compose \
-  --seed-composite arena/.arena-data/runs/<run-id>/best-composite.json \
-  --target-source trained:arena/.arena-data/runs/<run-id>/best-composite.json \
-  --movement-source trained:arena/.arena-data/runs/<run-id>/best-composite.json \
-  --shoot-source trained:arena/.arena-data/runs/<run-id>/best-composite.json
+./train_ai.sh compose --seed-composite arena/.arena-data/runs/<run-id>/best-composite.json --target-source trained:arena/.arena-data/runs/<run-id>/best-composite.json --movement-source trained:arena/.arena-data/runs/<run-id>/best-composite.json --shoot-source trained:arena/.arena-data/runs/<run-id>/best-composite.json
 ```
 
 ## Useful Runtime Commands
