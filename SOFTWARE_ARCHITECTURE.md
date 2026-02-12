@@ -234,7 +234,8 @@ Map node metadata supports test-only battle tuning via optional fields on `MapNo
 - `testBaseHpOverride` sets both player/enemy battle base HP and max HP for long-running test battles.
 - The `Test Arena` tab uses these overrides while skipping campaign rewards/ownership changes.
 - Test Arena UI controls for enemy count / battlefield size / zoom apply on input commit (`Enter` or blur) without extra apply buttons.
-- Test Arena enemy-spawn selection uses a checkbox dropdown allowlist; selected template IDs are applied to `BattleSession` enemy auto-spawn candidate filtering only (manual spawn uses its own direct template selector).
+- Test Arena enemy-spawn selection uses a checkbox dropdown allowlist; selected template IDs are applied to `BattleSession` enemy auto-spawn candidate filtering (manual spawn uses its own direct template selector).
+- Test Arena Unit tab includes an auto-spawn mirror toggle that spawns the same auto-selected template on the player side whenever the enemy auto-spawner creates a unit.
 - Test Arena AI control supports side-level composed-model selection (full `{ target, movement, shoot }` bundle) plus a `2 x 3` component grid fallback for custom per-module composition.
 - Dropdown inventory is populated from:
   - built-in module presets,

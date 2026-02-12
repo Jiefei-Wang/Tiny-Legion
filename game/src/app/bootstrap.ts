@@ -307,6 +307,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
   let testArenaSpawnTemplateIds: string[] = templates.map((template) => template.id);
   let testArenaManualSpawnTemplateId: string | null = templates[0]?.id ?? null;
   let testArenaSpawnTemplateDropdownOpen = false;
+  let testArenaAutoSpawnBothSides = false;
   let testArenaInvinciblePlayer = false;
   type TestArenaAiPreset =
     | "baseline"
@@ -4002,6 +4003,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
               </div>
             </details>
           </div>
+          <label class="small"><input id="testArenaAutoSpawnBothSides" type="checkbox" ${testArenaAutoSpawnBothSides ? "checked" : ""} /> Auto spawn same template on player side</label>
           <div class="test-arena-spawn-row">
             <label class="small">Manual spawn enemy
               <select id="testArenaManualSpawnTemplate">
@@ -4010,7 +4012,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
             </label>
             <button id="btnSpawnTestEnemy">Spawn</button>
           </div>
-          <div class="small">Checkbox dropdown affects automatic enemy spawn only.</div>
+          <div class="small">Checkbox dropdown controls automatic enemy spawn templates. Mirror toggle also auto spawns selected templates on player side.</div>
           <label class="small"><input id="testArenaInvinciblePlayer" type="checkbox" ${testArenaInvinciblePlayer ? "checked" : ""} /> Player controlled invincible</label>
           <div class="small">Invincible player still collides and can be targeted, but takes no damage.</div>
         </div>
@@ -4568,6 +4570,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     await refreshTestArenaComponentGrid();
     applyTestArenaAiControllers();
     battle.setEnemySpawnTemplateFilter(getTestArenaSpawnTemplateIds());
+    battle.setAutoSpawnEnemyTemplateOnPlayerSide(testArenaAutoSpawnBothSides);
     battle.start(testArenaNode);
     battle.setControlledUnitInvincible(testArenaInvinciblePlayer);
     battle.setEnemyActiveCount(testArenaEnemyCount);
@@ -4954,6 +4957,18 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     getOptionalElement<HTMLSelectElement>("#testArenaManualSpawnTemplate")?.addEventListener("change", (event) => {
       const nextValue = (event.currentTarget as HTMLSelectElement).value;
       setTestArenaManualSpawnTemplateId(nextValue);
+    });
+
+    getOptionalElement<HTMLInputElement>("#testArenaAutoSpawnBothSides")?.addEventListener("change", (event) => {
+      testArenaAutoSpawnBothSides = (event.currentTarget as HTMLInputElement).checked;
+      battle.setAutoSpawnEnemyTemplateOnPlayerSide(testArenaAutoSpawnBothSides);
+      addLog(
+        testArenaAutoSpawnBothSides
+          ? "Auto spawn mirror enabled: selected enemy templates will also spawn on player side."
+          : "Auto spawn mirror disabled: automatic spawn will only create enemy units.",
+        "warn",
+      );
+      renderPanels();
     });
 
     getOptionalElement<HTMLButtonElement>("#btnSpawnTestEnemy")?.addEventListener("click", async () => {

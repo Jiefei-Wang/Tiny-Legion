@@ -82,6 +82,7 @@ export class BattleSession {
   private debugPartHpEnabled: boolean;
   private controlledUnitInvincible: boolean;
   private enemySpawnTemplateAllowList: Set<string> | null;
+  private autoSpawnEnemyTemplateOnPlayerSide: boolean;
   private groundHeightPx: number;
   private readonly baselineController: BattleAiController;
 
@@ -119,6 +120,7 @@ export class BattleSession {
     this.debugPartHpEnabled = false;
     this.controlledUnitInvincible = false;
     this.enemySpawnTemplateAllowList = null;
+    this.autoSpawnEnemyTemplateOnPlayerSide = false;
     this.groundHeightPx = Math.max(80, canvas.height * DEFAULT_GROUND_HEIGHT_RATIO);
     this.baselineController = createBaselineCompositeAiController();
   }
@@ -304,6 +306,10 @@ export class BattleSession {
     }
     this.enemySpawnTemplateAllowList = new Set<string>(normalized);
     return normalized;
+  }
+
+  public setAutoSpawnEnemyTemplateOnPlayerSide(enabled: boolean): void {
+    this.autoSpawnEnemyTemplateOnPlayerSide = enabled === true;
   }
 
   public setBattlefieldSize(width: number, height: number): { width: number; height: number } {
@@ -1122,7 +1128,20 @@ export class BattleSession {
       this.state.enemyGas -= template.gasCost;
     }
     this.state.units.push(enemy);
+    if (this.autoSpawnEnemyTemplateOnPlayerSide) {
+      this.spawnMirroredPlayerTemplate(template, y);
+    }
     return true;
+  }
+
+  private spawnMirroredPlayerTemplate(template: UnitTemplate, y: number): void {
+    const player = instantiateUnit(this.templates, template.id, "player", 120, y, {
+      partCatalog: this.partCatalog,
+    });
+    if (!player) {
+      return;
+    }
+    this.state.units.push(player);
   }
 
   public arenaDeploy(

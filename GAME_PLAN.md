@@ -45,7 +45,7 @@ Lose condition chain:
   - Contested
 - Includes a dedicated `Test Arena` top-level tab (parallel to `Battle`) for debug scenarios.
 - Test Arena overrides both battle bases to extremely high HP so base destruction does not end the test run.
-- Test Arena controls allow setting enemy count, battlefield simulation size (`W`/`H`), ground-zone height, display zoom percentage, selecting enemy auto-spawn templates from a checkbox dropdown (automatic spawn pool only), and toggling controlled-unit invincibility (no HP loss, still collides and can be hit).
+- Test Arena controls allow setting enemy count, battlefield simulation size (`W`/`H`), ground-zone height, display zoom percentage, selecting enemy auto-spawn templates from a checkbox dropdown, optionally mirroring those automatic spawns to the player side using the same template, and toggling controlled-unit invincibility (no HP loss, still collides and can be hit).
 - Test Arena options panel is organized as collapsible tabs to save space: battle start/stop actions are always in the first row, `Unit` is expanded by default, `AI Selection` is collapsed by default, and `UI Configuration` is grouped in its own tab.
 - Test Arena AI presets are local JS/TS-only and run without external Python bridge/service dependencies.
 - Test Arena parameter inputs apply on `Enter` or input blur (no separate apply button).
