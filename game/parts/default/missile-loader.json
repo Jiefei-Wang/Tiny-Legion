@@ -1,5 +1,5 @@
 {
-  "id": "missile-loader",
+  "id": 16,
   "name": "Missile Loader",
   "layer": "functional",
   "baseComponent": "missileLoader",

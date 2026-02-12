@@ -92,7 +92,7 @@ function computeAirLiftAccel(template: UnitTemplate, partCatalog: ReadonlyArray<
     }
     const rotateQuarterRaw = attachment.rotateQuarter ?? 0;
     const rotateQuarter = normalizePartAttachmentRotate(part ?? {
-      id: component,
+      id: -1,
       name: component,
       layer: "functional",
       baseComponent: component,

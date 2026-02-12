@@ -407,6 +407,7 @@ Part persistence middleware (dev server via `vite.config.ts`):
 - `GET /__parts/user` -> read user part definitions from `game/parts/user`
 - `PUT /__parts/user/:id` -> save/overwrite one user part definition JSON
 - `DELETE /__parts/user/:id` -> remove one user part definition JSON
+- Part save filenames are canonicalized from `part.name` (illegal filename symbols removed); delete/update resolves by internal integer `part.id`, not by filename.
 
 Startup flow in `bootstrap.ts` merges templates from built-in defaults + file-backed defaults + user templates, then feeds the merged list into deploy/editor flows.
 
@@ -475,6 +476,8 @@ Developer Part Designer UX:
 - Category/subcategory auto-sync to base defaults only while those fields remain unmodified by the user.
 - Material runtime defaults are sourced from balance config and can still be overridden by file-backed structure-material part definitions when present.
 - Part `Open` window mirrors template open-row actions with right-aligned `Copy` / `Delete` controls.
+- Part definitions use integer IDs internally (`id` and all template/attachment `partId` references).
+- Part Editor does not expose editable ID input; new/copy flows auto-assign next available integer ID.
 - UI split:
   - left panel edits part-level fields (`name`, `id`, `baseComponent`, `directional`) plus grouped controls:
     - `Editor Meta` (`category` dropdown + `subcategory` text),

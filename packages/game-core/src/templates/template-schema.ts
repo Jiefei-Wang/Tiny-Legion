@@ -467,8 +467,8 @@ export function parseTemplate(input: unknown, options: ParseTemplateOptions = {}
       return null;
     }
     const record = rawCell as Record<string, unknown>;
-    const partId = typeof record.partId === "string" ? record.partId.trim() : "";
-    if (partId.length <= 0) {
+    const partId = typeof record.partId === "number" && Number.isInteger(record.partId) ? record.partId : Number.NaN;
+    if (!Number.isInteger(partId) || partId < 1) {
       return null;
     }
     const part = resolvePartDefinitionForAttachment({ partId }, partCatalog);
@@ -497,8 +497,8 @@ export function parseTemplate(input: unknown, options: ParseTemplateOptions = {}
       continue;
     }
     const record = rawAttachment as Record<string, unknown>;
-    const partId = typeof record.partId === "string" && record.partId.trim().length > 0
-      ? record.partId.trim()
+    const partId = typeof record.partId === "number" && Number.isInteger(record.partId) && record.partId >= 1
+      ? record.partId
       : undefined;
 
     const partFromId = partId

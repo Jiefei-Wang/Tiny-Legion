@@ -1,5 +1,5 @@
 {
-  "id": "light-steel",
+  "id": 10,
   "name": "Light Steel",
   "layer": "structure",
   "baseComponent": "control",

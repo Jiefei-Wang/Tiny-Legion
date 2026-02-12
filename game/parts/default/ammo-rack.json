@@ -1,9 +1,9 @@
 {
-  "id": "tracking-missile",
-  "name": "Tracking Missile Pod",
+  "id": 1,
+  "name": "Ammo Rack",
   "layer": "functional",
-  "baseComponent": "trackingMissile",
-  "directional": true,
+  "baseComponent": "ammo",
+  "directional": false,
   "anchor": {
     "x": 0,
     "y": 0
@@ -17,7 +17,7 @@
       "needsStructureBehind": true,
       "isAttachPoint": false,
       "isAnchorPoint": true,
-      "isShootingPoint": true,
+      "isShootingPoint": false,
       "takesDamage": true
     }
   ],
@@ -30,18 +30,17 @@
     "requireEmptyFunctionalOffsets": []
   },
   "properties": {
-    "category": "weapon",
-    "subcategory": "tracking",
+    "category": "functional",
+    "subcategory": "ammo",
     "isEngine": false,
-    "isWeapon": true,
+    "isWeapon": false,
     "isLoader": false,
     "isArmor": false,
-    "weaponType": "tracking",
     "hasCoreTuning": false
   },
   "tags": [
     "default",
-    "weapon",
-    "tracking"
+    "support",
+    "volatile"
   ]
 }

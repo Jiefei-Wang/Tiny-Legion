@@ -6,43 +6,43 @@
   "gasCostOverride": 38,
   "structure": [
     {
-      "partId": "material-basic"
+      "partId": 11
     },
     {
-      "partId": "material-basic"
+      "partId": 11
     },
     {
-      "partId": "material-basic"
+      "partId": 11
     },
     {
-      "partId": "material-basic"
+      "partId": 11
     },
     {
-      "partId": "material-basic"
+      "partId": 11
     }
   ],
   "attachments": [
     {
       "component": "control",
-      "partId": "control",
+      "partId": 3,
       "cell": 2,
       "rotateQuarter": 0
     },
     {
       "component": "engineM",
-      "partId": "engine-m",
+      "partId": 5,
       "cell": 1,
       "rotateQuarter": 0
     },
     {
       "component": "heavyCannon",
-      "partId": "heavy-cannon",
+      "partId": 8,
       "cell": 3,
       "rotateQuarter": 0
     },
     {
       "component": "cannonLoader",
-      "partId": "cannon-loader",
+      "partId": 2,
       "cell": 0,
       "rotateQuarter": 0
     }

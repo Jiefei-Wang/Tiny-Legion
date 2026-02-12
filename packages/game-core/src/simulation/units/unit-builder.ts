@@ -27,7 +27,7 @@ export function createInitialTemplates(): UnitTemplate[] {
       type: "ground",
       gasCost: 22,
       gasCostOverride: 22,
-      structure: [{ partId: "material-basic" }, { partId: "material-basic" }, { partId: "material-basic" }],
+      structure: [{ partId: 11 }, { partId: 11 }, { partId: 11 }],
       attachments: [
         { component: "control", cell: 1 },
         { component: "engineS", cell: 0 },
@@ -41,11 +41,11 @@ export function createInitialTemplates(): UnitTemplate[] {
       gasCost: 38,
       gasCostOverride: 38,
       structure: [
-        { partId: "material-basic" },
-        { partId: "material-basic" },
-        { partId: "material-basic" },
-        { partId: "material-basic" },
-        { partId: "material-basic" },
+        { partId: 11 },
+        { partId: 11 },
+        { partId: 11 },
+        { partId: 11 },
+        { partId: 11 },
       ],
       attachments: [
         { component: "control", cell: 2 },
@@ -62,10 +62,10 @@ export function createInitialTemplates(): UnitTemplate[] {
       gasCost: 48,
       gasCostOverride: 48,
       structure: [
-        { partId: "material-basic", x: -1, y: 0 },
-        { partId: "material-basic", x: 0, y: 0 },
-        { partId: "material-basic", x: 1, y: 0 },
-        { partId: "material-basic", x: 0, y: 1 },
+        { partId: 11, x: -1, y: 0 },
+        { partId: 11, x: 0, y: 0 },
+        { partId: 11, x: 1, y: 0 },
+        { partId: 11, x: 0, y: 1 },
       ],
       attachments: [
         { component: "control", cell: 1, x: 0, y: 0 },
@@ -81,12 +81,12 @@ export function createInitialTemplates(): UnitTemplate[] {
       gasCost: 54,
       gasCostOverride: 54,
       structure: [
-        { partId: "material-basic", x: -1, y: 0 },
-        { partId: "material-basic", x: 0, y: 0 },
-        { partId: "material-basic", x: 1, y: 0 },
-        { partId: "material-basic", x: -1, y: 1 },
-        { partId: "material-basic", x: 0, y: 1 },
-        { partId: "material-basic", x: 1, y: 1 },
+        { partId: 11, x: -1, y: 0 },
+        { partId: 11, x: 0, y: 0 },
+        { partId: 11, x: 1, y: 0 },
+        { partId: 11, x: -1, y: 1 },
+        { partId: 11, x: 0, y: 1 },
+        { partId: 11, x: 1, y: 1 },
       ],
       attachments: [
         { component: "control", cell: 4, x: 0, y: 1 },
@@ -154,7 +154,7 @@ export function instantiateUnit(
       : (attachment.rotate90 ? 1 : 0);
     const rotateQuarter = normalizePartAttachmentRotate(
       part ?? {
-        id: component,
+        id: -1,
         name: component,
         layer: "functional",
         baseComponent: component,

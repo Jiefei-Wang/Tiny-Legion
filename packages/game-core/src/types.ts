@@ -170,7 +170,7 @@ export interface PartDesignerProperties {
 }
 
 export interface PartDefinition {
-  id: string;
+  id: number;
   name: string;
   layer: "functional" | "structure";
   baseComponent: ComponentId;
@@ -184,14 +184,14 @@ export interface PartDefinition {
 }
 
 export interface StructureCellTemplate {
-  partId: string;
+  partId: number;
   x?: number;
   y?: number;
 }
 
 export interface AttachmentTemplate {
   component: ComponentId;
-  partId?: string;
+  partId?: number;
   cell: number;
   x?: number;
   y?: number;
@@ -219,7 +219,7 @@ export interface UnitTemplate {
 
 export interface StructureCell {
   id: number;
-  partId: string;
+  partId: number;
   x: number;
   y: number;
   armor: number;
@@ -234,7 +234,7 @@ export interface StructureCell {
 export interface Attachment {
   id: number;
   component: ComponentId;
-  partId?: string;
+  partId?: number;
   cell: number;
   x: number;
   y: number;

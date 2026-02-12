@@ -1,5 +1,5 @@
 {
-  "id": "precision-beam",
+  "id": 17,
   "name": "Precision Beam",
   "layer": "functional",
   "baseComponent": "precisionBeam",

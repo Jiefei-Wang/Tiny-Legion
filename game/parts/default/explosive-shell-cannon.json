@@ -1,5 +1,5 @@
 {
-  "id": "explosive-shell",
+  "id": 7,
   "name": "Explosive Shell Cannon",
   "layer": "functional",
   "baseComponent": "explosiveShell",

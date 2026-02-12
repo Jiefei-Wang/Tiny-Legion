@@ -112,6 +112,8 @@ Current implementation includes dedicated in-app editor tabs where the player ca
 - Developer-only Part Designer is available in the top-level `Part Editor` tab.
 - Top-bar `Debug Options` -> `Part Designer` is a shortcut that switches directly to the `Part Editor` tab.
 - Part `Open` window supports direct open, one-click `Copy`, and `Delete` for file-backed entries.
+- Part IDs are internal positive integers; Part Editor no longer exposes manual ID input.
+- Creating a new part or copying a part auto-allocates the next available integer ID.
 - Part Designer edits a **single reusable part definition** (not a full unit template).
 - Part Designer integrates layer mode into the `Base Component` selector via a `structure-layer` option (no separate layer control).
 - `Open Part` now shows each row with explicit `[layer]`; structure defaults are explicit file-backed material parts (`material-basic`, `material-reinforced`, `material-ceramic`, `material-reactive`, `material-combined`).
@@ -266,6 +268,7 @@ Display layer provides optional visual mesh/sprite styling and silhouette polish
 - Runtime part catalog merge order:
   1. file-backed defaults (`game/parts/default`),
   2. user part overrides (`game/parts/user`).
+- Part save filenames are derived from part name (illegal filename characters removed); runtime identity remains integer `id`.
 - Part Designer default values for `new part` and `base component switch` come from dedicated config defaults (component/material balance config), not from implicit built-in catalog entries.
 
 ---

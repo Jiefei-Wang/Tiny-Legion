@@ -1,9 +1,9 @@
 {
-  "id": "control",
-  "name": "Control Unit",
+  "id": 20,
+  "name": "Tracking Missile Pod",
   "layer": "functional",
-  "baseComponent": "control",
-  "directional": false,
+  "baseComponent": "trackingMissile",
+  "directional": true,
   "anchor": {
     "x": 0,
     "y": 0
@@ -17,8 +17,8 @@
       "needsStructureBehind": true,
       "isAttachPoint": false,
       "isAnchorPoint": true,
-      "isShootingPoint": false,
-      "takesDamage": false
+      "isShootingPoint": true,
+      "takesDamage": true
     }
   ],
   "placement": {
@@ -30,16 +30,18 @@
     "requireEmptyFunctionalOffsets": []
   },
   "properties": {
-    "category": "functional",
-    "subcategory": "control",
+    "category": "weapon",
+    "subcategory": "tracking",
     "isEngine": false,
-    "isWeapon": false,
+    "isWeapon": true,
     "isLoader": false,
     "isArmor": false,
+    "weaponType": "tracking",
     "hasCoreTuning": false
   },
   "tags": [
     "default",
-    "core"
+    "weapon",
+    "tracking"
   ]
 }

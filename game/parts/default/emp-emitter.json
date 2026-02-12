@@ -1,5 +1,5 @@
 {
-  "id": "emp-emitter",
+  "id": 4,
   "name": "EMP Emitter",
   "layer": "functional",
   "baseComponent": "empEmitter",

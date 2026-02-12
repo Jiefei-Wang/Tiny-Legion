@@ -66,7 +66,7 @@ export function getStructureMaterialDefaults(materialId: MaterialId): {
   };
 }
 
-export function createDefaultPartDraft(partId: string, partName: string): PartDefinition {
+export function createDefaultPartDraft(partId: number, partName: string): PartDefinition {
   const defaults = getPartPropertyDefaults("control");
   return {
     id: partId,

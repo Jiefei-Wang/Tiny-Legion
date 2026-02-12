@@ -1,5 +1,5 @@
 {
-  "id": "engine-m",
+  "id": 5,
   "name": "Engine M",
   "layer": "functional",
   "baseComponent": "engineM",

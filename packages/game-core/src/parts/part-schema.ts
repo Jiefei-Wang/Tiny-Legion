@@ -122,13 +122,42 @@ function normalizeOffsets(value: unknown): Array<{ x: number; y: number }> {
   return result;
 }
 
-function normalizePartId(raw: string): string {
-  return raw
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9-]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .replace(/-+/g, "-") || "part";
+const DEFAULT_PART_ID_BY_COMPONENT: Record<ComponentId, number> = {
+  ammo: 1,
+  cannonLoader: 2,
+  control: 3,
+  empEmitter: 4,
+  engineM: 5,
+  engineS: 6,
+  explosiveShell: 7,
+  heavyCannon: 8,
+  jetEngine: 9,
+  missileLoader: 16,
+  precisionBeam: 17,
+  propeller: 18,
+  rapidGun: 19,
+  trackingMissile: 20,
+};
+
+const DEFAULT_MATERIAL_PART_ID: Record<MaterialId, number> = {
+  basic: 11,
+  ceramic: 12,
+  combined: 13,
+  reactive: 14,
+  reinforced: 15,
+};
+
+function normalizePartId(raw: unknown, fallback: number): number {
+  if (typeof raw === "number" && Number.isInteger(raw) && raw >= 1) {
+    return raw;
+  }
+  if (typeof raw === "string") {
+    const parsed = Number.parseInt(raw.trim(), 10);
+    if (Number.isInteger(parsed) && parsed >= 1) {
+      return parsed;
+    }
+  }
+  return fallback;
 }
 
 function getLegacyFootprintOffsets(component: ComponentId): Array<{ x: number; y: number }> {
@@ -146,7 +175,7 @@ function getLegacyFootprintOffsets(component: ComponentId): Array<{ x: number; y
 function createImplicitStructurePartDefinition(component: ComponentId): PartDefinition {
   const stats = COMPONENTS[component];
   return {
-    id: `${component}-structure`,
+    id: DEFAULT_PART_ID_BY_COMPONENT[component],
     name: `${component}-structure`,
     layer: "structure",
     baseComponent: component,
@@ -193,7 +222,7 @@ function createImplicitStructurePartDefinition(component: ComponentId): PartDefi
 function createImplicitStructureMaterialPartDefinition(materialId: MaterialId): PartDefinition {
   const material = MATERIALS[materialId];
   return {
-    id: `material-${materialId}`,
+    id: DEFAULT_MATERIAL_PART_ID[materialId],
     name: material.label,
     layer: "structure",
     baseComponent: "control",
@@ -264,7 +293,7 @@ export function createImplicitPartDefinition(component: ComponentId): PartDefini
     ? [stats.propulsion.platform]
     : [];
   return {
-    id: component,
+    id: DEFAULT_PART_ID_BY_COMPONENT[component],
     name: component,
     layer: "functional",
     baseComponent: component,
@@ -312,11 +341,11 @@ export function createDefaultPartDefinitions(): PartDefinition[] {
   }
   const componentParts = Object.keys(COMPONENTS)
     .map((id) => createImplicitPartDefinition(id as ComponentId))
-    .sort((a, b) => a.id.localeCompare(b.id));
+    .sort((a, b) => a.id - b.id);
   const materialParts = (Object.keys(MATERIALS) as MaterialId[])
     .map((id) => createImplicitStructureMaterialPartDefinition(id))
-    .sort((a, b) => a.id.localeCompare(b.id));
-  const parts = [...componentParts, ...materialParts].sort((a, b) => a.id.localeCompare(b.id));
+    .sort((a, b) => a.id - b.id);
+  const parts = [...componentParts, ...materialParts].sort((a, b) => a.id - b.id);
   defaultCatalogCache = parts;
   return parts.map((part) => clonePartDefinition(part));
 }
@@ -344,15 +373,15 @@ export function resolveStructureMaterialGasCost(
   if (byMaterial) {
     return resolvePartGasCost(byMaterial);
   }
-  const byId = catalog.find((part) => part.id === `material-${materialId}`);
+  const byId = catalog.find((part) => part.id === DEFAULT_MATERIAL_PART_ID[materialId]);
   if (byId) {
     return resolvePartGasCost(byId);
   }
   return getDefaultMaterialGasCost(materialId);
 }
 
-export function buildPartCatalogMap(parts: ReadonlyArray<PartDefinition>): Map<string, PartDefinition> {
-  const map = new Map<string, PartDefinition>();
+export function buildPartCatalogMap(parts: ReadonlyArray<PartDefinition>): Map<number, PartDefinition> {
+  const map = new Map<number, PartDefinition>();
   for (const part of parts) {
     map.set(part.id, part);
   }
@@ -360,18 +389,18 @@ export function buildPartCatalogMap(parts: ReadonlyArray<PartDefinition>): Map<s
 }
 
 export function mergePartCatalogs(baseParts: ReadonlyArray<PartDefinition>, incomingParts: ReadonlyArray<PartDefinition>): PartDefinition[] {
-  const map = new Map<string, PartDefinition>();
+  const map = new Map<number, PartDefinition>();
   for (const part of baseParts) {
     map.set(part.id, clonePartDefinition(part));
   }
   for (const part of incomingParts) {
     map.set(part.id, clonePartDefinition(part));
   }
-  return Array.from(map.values()).sort((a, b) => a.id.localeCompare(b.id));
+  return Array.from(map.values()).sort((a, b) => a.id - b.id);
 }
 
 export function resolvePartDefinitionForAttachment(
-  attachment: { partId?: string; component?: ComponentId },
+  attachment: { partId?: number; component?: ComponentId },
   partCatalog?: ReadonlyArray<PartDefinition>,
 ): PartDefinition | null {
   const defaults = createDefaultPartDefinitions();
@@ -380,9 +409,6 @@ export function resolvePartDefinitionForAttachment(
 
   if (attachment.partId && catalogMap.has(attachment.partId)) {
     return clonePartDefinition(catalogMap.get(attachment.partId) as PartDefinition);
-  }
-  if (attachment.component && catalogMap.has(attachment.component)) {
-    return clonePartDefinition(catalogMap.get(attachment.component) as PartDefinition);
   }
   if (attachment.component && isComponentId(attachment.component)) {
     return createImplicitPartDefinition(attachment.component);
@@ -491,9 +517,11 @@ export function parsePartDefinition(input: unknown): PartDefinition | null {
     return null;
   }
 
-  const idRaw = typeof data.id === "string" ? data.id : String(data.id ?? "");
-  const id = normalizePartId(idRaw || baseComponent);
-  const name = typeof data.name === "string" && data.name.trim().length > 0 ? data.name.trim() : id;
+  const id = normalizePartId(data.id, -1);
+  if (id < 1) {
+    return null;
+  }
+  const name = typeof data.name === "string" && data.name.trim().length > 0 ? data.name.trim() : `part-${id}`;
   const layer = data.layer === "structure" ? "structure" : "functional";
 
   const anchorRecord = data.anchor && typeof data.anchor === "object" ? (data.anchor as Record<string, unknown>) : {};

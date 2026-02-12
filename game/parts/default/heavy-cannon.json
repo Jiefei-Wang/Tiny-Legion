@@ -1,5 +1,5 @@
 {
-  "id": "heavy-cannon",
+  "id": 8,
   "name": "Heavy Cannon",
   "layer": "functional",
   "baseComponent": "heavyCannon",

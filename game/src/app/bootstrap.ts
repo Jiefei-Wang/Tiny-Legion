@@ -476,7 +476,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
   const EDITOR_DISPLAY_KINDS: DisplayAttachmentTemplate["kind"][] = ["panel", "stripe", "glass"];
   type EditorFunctionalSlot = {
     component: ComponentId;
-    partId?: string;
+    partId?: number;
     rotateQuarter: 0 | 1 | 2 | 3;
     groupId: number;
     isAnchor: boolean;
@@ -503,7 +503,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
   } | null;
   let editorLayer: "structure" | "functional" | "display" = "structure";
   let editorDeleteMode = false;
-  let editorSelection = "basic";
+  let editorSelection: string | number = "";
   let editorPlaceByCenter = true;
   let editorGridCols = 10;
   let editorGridRows = 10;
@@ -538,18 +538,18 @@ export function bootstrap(options: BootstrapOptions = {}): void {
   let battleViewDragStartClientY = 0;
   let battleViewDragLastClientX = 0;
   let battleViewDragLastClientY = 0;
-  let editorStructureSlots: Array<string | null> = new Array<string | null>(EDITOR_GRID_MAX_SIZE).fill(null);
+  let editorStructureSlots: Array<number | null> = new Array<number | null>(EDITOR_GRID_MAX_SIZE).fill(null);
   let editorFunctionalSlots: EditorFunctionalSlot[] = new Array<EditorFunctionalSlot>(EDITOR_GRID_MAX_SIZE).fill(null);
   let editorDisplaySlots: Array<DisplayAttachmentTemplate["kind"] | null> = new Array<DisplayAttachmentTemplate["kind"] | null>(EDITOR_GRID_MAX_SIZE).fill(null);
   let editorTemplateDialogOpen = false;
   let editorTemplateDialogSelectedId: string | null = null;
   let partDesignerDialogOpen = false;
-  let partDesignerSelectedId: string | null = null;
+  let partDesignerSelectedId: number | null = null;
   let partDesignerOpenFilter: PartOpenFilter = "all";
   let partDesignerTool: PartDesignerTool = "select";
   const STRUCTURE_LAYER_BASE_OPTION = "__structure_layer__";
   let partDesignerDraft: PartDefinition = (() => {
-    const draft = clonePartDefinition(createDefaultPartDraft("custom-part", "Custom Part"));
+    const draft = clonePartDefinition(createDefaultPartDraft(1000, "Custom Part"));
     draft.anchor = { x: 0, y: 0 };
     draft.boxes = [];
     return draft;
@@ -2003,10 +2003,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
           if (part.layer !== "structure") {
             return false;
           }
-          if (part.properties?.materialId === materialId) {
-            return true;
-          }
-          return part.id === materialId || part.id === `material-${materialId}`;
+          return part.properties?.materialId === materialId;
         });
         if (!materialPart) {
           continue;
@@ -2275,23 +2272,12 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     return next;
   };
 
-  const slugifyPartId = (rawName: string): string => {
-    const base = rawName
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, "-")
-      .replace(/^-+|-+$/g, "")
-      .replace(/-+/g, "-");
-    return base || "custom-part";
-  };
-
-  const makeUniquePartId = (baseId: string): string => {
-    const used = new Set<string>(parts.map((part) => part.id));
+  const makeUniquePartId = (): number => {
+    const used = new Set<number>(parts.map((part) => part.id));
     used.delete(partDesignerDraft.id);
-    let next = baseId;
-    let index = 2;
+    let next = 1;
     while (used.has(next)) {
-      next = `${baseId}-${index}`;
-      index += 1;
+      next += 1;
     }
     return next;
   };
@@ -2306,7 +2292,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
   const makeCopyPart = (source: PartDefinition): PartDefinition => {
     const copy = clonePartDefinition(source);
     copy.name = `${source.name}-copy`;
-    copy.id = makeUniquePartId(slugifyPartId(copy.name));
+    copy.id = makeUniquePartId();
     return copy;
   };
 
@@ -2327,7 +2313,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     return result;
   };
 
-  const resolveStructurePartById = (partId: string | null | undefined): PartDefinition | null => {
+  const resolveStructurePartById = (partId: number | null | undefined): PartDefinition | null => {
     if (!partId) {
       return null;
     }
@@ -2335,7 +2321,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     return part && part.layer === "structure" ? part : null;
   };
 
-  const getStructurePartStats = (partId: string | null | undefined): {
+  const getStructurePartStats = (partId: number | null | undefined): {
     mass: number;
     armor: number;
     hp: number;
@@ -2354,7 +2340,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     };
   };
 
-  const getDefaultStructurePartId = (): string | null => {
+  const getDefaultStructurePartId = (): number | null => {
     const first = parts.find((part) => part.layer === "structure");
     return first?.id ?? null;
   };
@@ -2366,22 +2352,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     if (part.properties?.materialId) {
       return part.properties.materialId;
     }
-    if (part.id === "material-basic" || part.id === "basic") {
-      return "basic";
-    }
-    if (part.id === "material-reinforced" || part.id === "reinforced") {
-      return "reinforced";
-    }
-    if (part.id === "material-ceramic" || part.id === "ceramic") {
-      return "ceramic";
-    }
-    if (part.id === "material-reactive" || part.id === "reactive") {
-      return "reactive";
-    }
-    if (part.id === "material-combined" || part.id === "combined") {
-      return "combined";
-    }
-    return null;
+    return "basic";
   };
 
   const getMaterialDefaultsForPart = (part: PartDefinition): {
@@ -2656,7 +2627,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
   };
 
   type EditorCatalogItem = {
-    value: string;
+    value: string | number;
     title: string;
     subtitle: string;
     detail: string;
@@ -2717,12 +2688,19 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     return { x: offsetY, y: -offsetX };
   };
 
-  const getPartById = (partId: string): PartDefinition | null => {
+  const getPartById = (partId: number): PartDefinition | null => {
     return parts.find((part) => part.id === partId) ?? null;
   };
 
-  const resolvePartForSelection = (selection: string): PartDefinition | null => {
-    const byId = getPartById(selection);
+  const resolvePartForSelection = (selection: string | number): PartDefinition | null => {
+    if (typeof selection === "number") {
+      const byId = getPartById(selection);
+      if (byId) {
+        return byId;
+      }
+      return null;
+    }
+    const byId = getPartById(Number.parseInt(selection, 10));
     if (byId) {
       return byId;
     }
@@ -2908,7 +2886,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     const oldFunctional = editorFunctionalSlots.slice();
     const oldDisplay = editorDisplaySlots.slice();
 
-    const nextStructure = new Array<string | null>(EDITOR_GRID_MAX_SIZE).fill(null);
+    const nextStructure = new Array<number | null>(EDITOR_GRID_MAX_SIZE).fill(null);
     const nextFunctional = new Array<EditorFunctionalSlot>(EDITOR_GRID_MAX_SIZE).fill(null);
     const nextDisplay = new Array<DisplayAttachmentTemplate["kind"] | null>(EDITOR_GRID_MAX_SIZE).fill(null);
 
@@ -2973,9 +2951,9 @@ export function bootstrap(options: BootstrapOptions = {}): void {
           return {
             value: part.id,
             title: part.name,
-            subtitle: part.id,
+            subtitle: String(part.id),
             detail: `Mass ${stats.mass.toFixed(2)} | Armor ${stats.armor.toFixed(2)} | HP ${stats.hp.toFixed(0)} | Recover ${stats.recoverPerSecond.toFixed(1)}/s`,
-            thumb: part.id.slice(0, 2).toUpperCase(),
+            thumb: String(part.id).slice(0, 2).toUpperCase(),
           };
         });
     }
@@ -2983,13 +2961,13 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       const functionalParts = parts.filter((part) => part.layer === "functional" && isPartCompatibleWithUnitType(part, editorDraft.type));
       const hasExplicitByBase = new Set<ComponentId>();
       for (const part of functionalParts) {
-        const isImplicitFallback = (part.tags ?? []).includes("implicit") && part.id === part.baseComponent;
+        const isImplicitFallback = (part.tags ?? []).includes("implicit");
         if (!isImplicitFallback) {
           hasExplicitByBase.add(part.baseComponent);
         }
       }
       return functionalParts.filter((part) => {
-        const isImplicitFallback = (part.tags ?? []).includes("implicit") && part.id === part.baseComponent;
+        const isImplicitFallback = (part.tags ?? []).includes("implicit");
         if (!isImplicitFallback) {
           return true;
         }
@@ -3005,7 +2983,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
           title: part.name,
           subtitle: `${stats.type}/${part.baseComponent}`,
           detail: `Base ${part.baseComponent} | Boxes ${footprint.length} | StructSpace ${hasStructureSpace ? "yes" : "no"} | Damageable ${hasDamageableBox ? "yes" : "no"}${rotateHint}`,
-          thumb: part.id.slice(0, 2).toUpperCase(),
+          thumb: String(part.id).slice(0, 2).toUpperCase(),
         };
       });
     }
@@ -3035,7 +3013,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     const slotToCell = new Map<number, number>();
     const structure = editorStructureSlots
       .map((partId, slotIndex) => ({ partId, slotIndex }))
-      .filter((entry): entry is { partId: string; slotIndex: number } => entry.partId !== null)
+      .filter((entry): entry is { partId: number; slotIndex: number } => entry.partId !== null)
       .sort((a, b) => a.slotIndex - b.slotIndex);
 
     editorDraft.structure = structure.map((entry, index) => {
@@ -3047,7 +3025,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     editorDraft.attachments = editorFunctionalSlots
       .map((entry, slotIndex) => ({ entry, slotIndex }))
       .filter((item): item is {
-        entry: { component: ComponentId; partId?: string; rotateQuarter: 0 | 1 | 2 | 3; groupId: number; isAnchor: boolean };
+        entry: { component: ComponentId; partId?: number; rotateQuarter: 0 | 1 | 2 | 3; groupId: number; isAnchor: boolean };
         slotIndex: number;
       } => item.entry !== null && item.entry.isAnchor && slotToCell.has(item.slotIndex))
       .map((entry) => ({
@@ -3255,7 +3233,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
   };
 
   const loadTemplateIntoEditorSlots = (template: UnitTemplate): void => {
-    editorStructureSlots = new Array<string | null>(EDITOR_GRID_MAX_SIZE).fill(null);
+    editorStructureSlots = new Array<number | null>(EDITOR_GRID_MAX_SIZE).fill(null);
     editorFunctionalSlots = new Array<EditorFunctionalSlot>(EDITOR_GRID_MAX_SIZE).fill(null);
     editorDisplaySlots = new Array<DisplayAttachmentTemplate["kind"] | null>(EDITOR_GRID_MAX_SIZE).fill(null);
 
@@ -3323,7 +3301,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
   };
 
   const getEditorMaterialBreakdown = (): string => {
-    const counts = new Map<string, number>();
+    const counts = new Map<number, number>();
     for (const cell of editorDraft.structure) {
       counts.set(cell.partId, (counts.get(cell.partId) ?? 0) + 1);
     }
@@ -3796,7 +3774,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
           addLog(`No structure cell at row ${row + 1}, col ${col + 1}`, "warn");
         }
       } else {
-        const structurePart = resolveStructurePartById(editorSelection);
+        const structurePart = typeof editorSelection === "number" ? resolveStructurePartById(editorSelection) : null;
         if (structurePart) {
           editorStructureSlots[slot] = structurePart.id;
         }
@@ -4381,9 +4359,6 @@ export function bootstrap(options: BootstrapOptions = {}): void {
           <label class="small">Part Name <input id="partName" value="${partDesignerDraft.name}" /></label>
         </div>
         <div class="row">
-          <label class="small">Part ID <input id="partId" value="${partDesignerDraft.id}" /></label>
-        </div>
-        <div class="row">
           <label class="small">Base Component
             <select id="partBaseComponent">${baseComponentOptions}</select>
           </label>
@@ -4530,7 +4505,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
   };
 
   const upgradeTemplateMaterials = (material: "reinforced" | "combined"): void => {
-    const upgradedPartId = material === "combined" ? "material-combined" : "material-reinforced";
+    const upgradedPartId = material === "combined" ? 13 : 15;
     for (const template of templates) {
       for (const cell of template.structure) {
         cell.partId = upgradedPartId;
@@ -5213,7 +5188,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     });
 
     getOptionalElement<HTMLButtonElement>("#btnClearGrid")?.addEventListener("click", () => {
-      editorStructureSlots = new Array<string | null>(EDITOR_GRID_MAX_SIZE).fill(null);
+      editorStructureSlots = new Array<number | null>(EDITOR_GRID_MAX_SIZE).fill(null);
       editorFunctionalSlots = new Array<EditorFunctionalSlot>(EDITOR_GRID_MAX_SIZE).fill(null);
       editorDisplaySlots = new Array<DisplayAttachmentTemplate["kind"] | null>(EDITOR_GRID_MAX_SIZE).fill(null);
       recalcEditorDraftFromSlots();
@@ -5300,8 +5275,9 @@ export function bootstrap(options: BootstrapOptions = {}): void {
 
     document.querySelectorAll<HTMLButtonElement>("button[data-part-open-select]").forEach((button) => {
       button.addEventListener("click", () => {
-        const partId = button.getAttribute("data-part-open-select");
-        if (!partId) {
+        const partIdRaw = button.getAttribute("data-part-open-select");
+        const partId = partIdRaw ? Number.parseInt(partIdRaw, 10) : Number.NaN;
+        if (!Number.isInteger(partId)) {
           return;
         }
         const source = parts.find((part) => part.id === partId);
@@ -5320,8 +5296,9 @@ export function bootstrap(options: BootstrapOptions = {}): void {
 
     document.querySelectorAll<HTMLButtonElement>("button[data-part-open-copy]").forEach((button) => {
       button.addEventListener("click", () => {
-        const partId = button.getAttribute("data-part-open-copy");
-        if (!partId) {
+        const partIdRaw = button.getAttribute("data-part-open-copy");
+        const partId = partIdRaw ? Number.parseInt(partIdRaw, 10) : Number.NaN;
+        if (!Number.isInteger(partId)) {
           return;
         }
         const source = parts.find((part) => part.id === partId);
@@ -5339,8 +5316,9 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     });
     document.querySelectorAll<HTMLButtonElement>("button[data-part-open-delete]").forEach((button) => {
       button.addEventListener("click", async () => {
-        const partId = button.getAttribute("data-part-open-delete");
-        if (!partId) {
+        const partIdRaw = button.getAttribute("data-part-open-delete");
+        const partId = partIdRaw ? Number.parseInt(partIdRaw, 10) : Number.NaN;
+        if (!Number.isInteger(partId)) {
           return;
         }
         const source = parts.find((part) => part.id === partId);
@@ -5394,12 +5372,6 @@ export function bootstrap(options: BootstrapOptions = {}): void {
 
     getOptionalElement<HTMLInputElement>("#partName")?.addEventListener("input", (event) => {
       partDesignerDraft.name = (event.currentTarget as HTMLInputElement).value.trim() || "Custom Part";
-      updateSelectedInfo();
-    });
-
-    getOptionalElement<HTMLInputElement>("#partId")?.addEventListener("input", (event) => {
-      const raw = (event.currentTarget as HTMLInputElement).value;
-      partDesignerDraft.id = makeUniquePartId(slugifyPartId(raw || partDesignerDraft.name || "custom-part"));
       updateSelectedInfo();
     });
 
@@ -5810,7 +5782,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
 
     getOptionalElement<HTMLButtonElement>("#btnNewPartDraft")?.addEventListener("click", () => {
       const newName = "Custom Part";
-      const nextId = makeUniquePartId(slugifyPartId(newName));
+      const nextId = makeUniquePartId();
       partDesignerDraft = createDefaultPartDraft(nextId, newName);
       partDesignerDraft.anchor = { x: 0, y: 0 };
       partDesignerDraft.boxes = [];
@@ -6071,7 +6043,12 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     if (!value) {
       return;
     }
-    editorSelection = value;
+    if (editorLayer === "display") {
+      editorSelection = value;
+    } else {
+      const numeric = Number.parseInt(value, 10);
+      editorSelection = Number.isInteger(numeric) ? numeric : value;
+    }
     hideEditorTooltip();
     ensureEditorSelectionForLayer();
     renderPanels();

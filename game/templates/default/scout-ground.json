@@ -6,31 +6,31 @@
   "gasCostOverride": 22,
   "structure": [
     {
-      "partId": "material-basic"
+      "partId": 11
     },
     {
-      "partId": "material-basic"
+      "partId": 11
     },
     {
-      "partId": "material-basic"
+      "partId": 11
     }
   ],
   "attachments": [
     {
       "component": "control",
-      "partId": "control",
+      "partId": 3,
       "cell": 1,
       "rotateQuarter": 0
     },
     {
       "component": "engineS",
-      "partId": "engine-s",
+      "partId": 6,
       "cell": 0,
       "rotateQuarter": 0
     },
     {
       "component": "rapidGun",
-      "partId": "rapid-gun",
+      "partId": 19,
       "cell": 2,
       "rotateQuarter": 0
     }

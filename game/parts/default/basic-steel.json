@@ -1,6 +1,6 @@
 {
-  "id": "material-ceramic",
-  "name": "Ceramic",
+  "id": 11,
+  "name": "Basic Steel",
   "layer": "structure",
   "baseComponent": "control",
   "directional": false,
@@ -31,16 +31,16 @@
     "requireEmptyFunctionalOffsets": []
   },
   "stats": {
-    "gasCost": 6,
-    "mass": 9
+    "gasCost": 4,
+    "mass": 10
   },
   "properties": {
     "category": "structure",
     "subcategory": "material",
-    "materialArmor": 1.2,
-    "materialRecoverPerSecond": 2,
-    "materialColor": "#a8d1e6",
-    "hp": 120,
+    "materialArmor": 1,
+    "materialRecoverPerSecond": 2.2,
+    "materialColor": "#95a4b8",
+    "hp": 110,
     "isEngine": false,
     "isWeapon": false,
     "isLoader": false,

@@ -1,5 +1,5 @@
 {
-  "id": "rapid-gun",
+  "id": 19,
   "name": "Rapid Gun",
   "layer": "functional",
   "baseComponent": "rapidGun",
@@ -31,6 +31,8 @@
     "requireEmptyFunctionalOffsets": []
   },
   "stats": {
+    "recoil": 4,
+    "damage": 10,
     "shootAngleDeg": 360,
     "projectileSpeed": 500
   },

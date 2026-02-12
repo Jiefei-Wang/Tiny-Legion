@@ -459,9 +459,56 @@ function partStorePlugin() {
     }
   };
 
-  const safeId = (raw: string): string | null => {
-    const id = raw.trim();
-    return /^[a-z0-9-]+$/.test(id) ? id : null;
+  const safeId = (raw: string): number | null => {
+    const id = Number.parseInt(raw.trim(), 10);
+    return Number.isInteger(id) && id >= 1 ? id : null;
+  };
+
+  const toSafePartFileStem = (rawName: string): string => {
+    const stem = rawName
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .replace(/-+/g, "-");
+    return stem.length > 0 ? stem : "part";
+  };
+
+  const findPartFileById = (dirPath: string, id: number): string | null => {
+    ensureDir(dirPath);
+    const files = readdirSync(dirPath).filter((name) => name.endsWith(".json"));
+    for (const fileName of files) {
+      const filePath = resolve(dirPath, fileName);
+      try {
+        const raw = readFileSync(filePath, "utf8");
+        const parsed = JSON.parse(raw);
+        const normalized = parsePartDefinition(parsed);
+        if (normalized?.id === id) {
+          return filePath;
+        }
+      } catch {
+        continue;
+      }
+    }
+    return null;
+  };
+
+  const resolveTargetPartFilePath = (dirPath: string, part: NonNullable<ReturnType<typeof parsePartDefinition>>): string => {
+    const safeStem = toSafePartFileStem(part.name);
+    const preferredPath = resolve(dirPath, `${safeStem}.json`);
+    if (!existsSync(preferredPath)) {
+      return preferredPath;
+    }
+    try {
+      const existingRaw = readFileSync(preferredPath, "utf8");
+      const existingParsed = JSON.parse(existingRaw);
+      const existingNormalized = parsePartDefinition(existingParsed);
+      if (existingNormalized?.id === part.id) {
+        return preferredPath;
+      }
+    } catch {
+      // If existing file cannot be parsed, avoid overwriting it.
+    }
+    return resolve(dirPath, `${safeStem}-${part.id}.json`);
   };
 
   const readPartsInDir = (dirPath: string): Array<NonNullable<ReturnType<typeof parsePartDefinition>>> => {
@@ -520,8 +567,8 @@ function partStorePlugin() {
         ensureDir(defaultDir);
 
         if (req.method === "DELETE") {
-          const filePath = resolve(defaultDir, `${id}.json`);
-          if (existsSync(filePath)) {
+          const filePath = findPartFileById(defaultDir, id);
+          if (filePath && existsSync(filePath)) {
             unlinkSync(filePath);
           }
           res.setHeader("content-type", "application/json");
@@ -542,8 +589,12 @@ function partStorePlugin() {
               res.end("invalid part payload");
               return;
             }
-            const filePath = resolve(defaultDir, `${id}.json`);
-            writeFileSync(filePath, `${JSON.stringify(normalized, null, 2)}\n`, "utf8");
+            const existingPath = findPartFileById(defaultDir, normalized.id);
+            const targetPath = resolveTargetPartFilePath(defaultDir, normalized);
+            if (existingPath && existingPath !== targetPath && existsSync(existingPath)) {
+              unlinkSync(existingPath);
+            }
+            writeFileSync(targetPath, `${JSON.stringify(normalized, null, 2)}\n`, "utf8");
             res.setHeader("content-type", "application/json");
             res.end(JSON.stringify({ ok: true }));
           } catch {
@@ -576,8 +627,8 @@ function partStorePlugin() {
         ensureDir(userDir);
 
         if (req.method === "DELETE") {
-          const filePath = resolve(userDir, `${id}.json`);
-          if (existsSync(filePath)) {
+          const filePath = findPartFileById(userDir, id);
+          if (filePath && existsSync(filePath)) {
             unlinkSync(filePath);
           }
           res.setHeader("content-type", "application/json");
@@ -598,8 +649,12 @@ function partStorePlugin() {
               res.end("invalid part payload");
               return;
             }
-            const filePath = resolve(userDir, `${id}.json`);
-            writeFileSync(filePath, `${JSON.stringify(normalized, null, 2)}\n`, "utf8");
+            const existingPath = findPartFileById(userDir, normalized.id);
+            const targetPath = resolveTargetPartFilePath(userDir, normalized);
+            if (existingPath && existingPath !== targetPath && existsSync(existingPath)) {
+              unlinkSync(existingPath);
+            }
+            writeFileSync(targetPath, `${JSON.stringify(normalized, null, 2)}\n`, "utf8");
             res.setHeader("content-type", "application/json");
             res.end(JSON.stringify({ ok: true }));
           } catch {

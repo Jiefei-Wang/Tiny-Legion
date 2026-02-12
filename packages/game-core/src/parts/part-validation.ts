@@ -27,8 +27,8 @@ export function validatePartDefinitionDetailed(part: PartDefinition): PartValida
   const errors: string[] = [];
   const warnings: string[] = [];
 
-  if (!part.id || !/^[a-z0-9-]+$/.test(part.id)) {
-    errors.push("part id must match [a-z0-9-]+.");
+  if (!Number.isInteger(part.id) || part.id < 1) {
+    errors.push("part id must be a positive integer.");
   }
   if (!part.name || part.name.trim().length < 2) {
     errors.push("part name is too short.");

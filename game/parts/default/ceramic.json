@@ -1,6 +1,6 @@
 {
-  "id": "material-reinforced",
-  "name": "Reinforced",
+  "id": 12,
+  "name": "Ceramic",
   "layer": "structure",
   "baseComponent": "control",
   "directional": false,
@@ -31,16 +31,16 @@
     "requireEmptyFunctionalOffsets": []
   },
   "stats": {
-    "gasCost": 5,
-    "mass": 13
+    "gasCost": 6,
+    "mass": 9
   },
   "properties": {
     "category": "structure",
     "subcategory": "material",
-    "materialArmor": 1.3,
-    "materialRecoverPerSecond": 1.9,
-    "materialColor": "#8ca3bd",
-    "hp": 150,
+    "materialArmor": 1.2,
+    "materialRecoverPerSecond": 2,
+    "materialColor": "#a8d1e6",
+    "hp": 120,
     "isEngine": false,
     "isWeapon": false,
     "isLoader": false,

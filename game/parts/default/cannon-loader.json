@@ -1,5 +1,5 @@
 {
-  "id": "cannon-loader",
+  "id": 2,
   "name": "Cannon Loader",
   "layer": "functional",
   "baseComponent": "cannonLoader",

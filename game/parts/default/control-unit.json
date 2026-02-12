@@ -1,8 +1,8 @@
 {
-  "id": "ammo",
-  "name": "Ammo Rack",
+  "id": 3,
+  "name": "Control Unit",
   "layer": "functional",
-  "baseComponent": "ammo",
+  "baseComponent": "control",
   "directional": false,
   "anchor": {
     "x": 0,
@@ -18,7 +18,7 @@
       "isAttachPoint": false,
       "isAnchorPoint": true,
       "isShootingPoint": false,
-      "takesDamage": true
+      "takesDamage": false
     }
   ],
   "placement": {
@@ -31,7 +31,7 @@
   },
   "properties": {
     "category": "functional",
-    "subcategory": "ammo",
+    "subcategory": "control",
     "isEngine": false,
     "isWeapon": false,
     "isLoader": false,
@@ -40,7 +40,6 @@
   },
   "tags": [
     "default",
-    "support",
-    "volatile"
+    "core"
   ]
 }
