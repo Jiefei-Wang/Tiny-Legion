@@ -256,7 +256,7 @@ Display layer provides optional visual mesh/sprite styling and silhouette polish
 - On startup, game loads templates from both folders (user templates override same-id defaults).
 - Template parse/validation/merge rules are shared in `packages/game-core/src/templates/template-schema.ts` so game UI and arena tooling use identical template behavior.
 - File-backed template load normalizes placement and loader coverage, and normalized JSON is written back to disk so editor, headless checks, and battle runtime read the same corrected shape.
-- Loader auto-injection is part of persisted template normalization; injected loaders are placed on available structure cells to avoid overlapping existing functional footprints when possible.
+- Loader auto-injection is part of persisted template normalization; injected loaders are placed on available structure cells to avoid overlapping existing functional footprints and existing attachment anchor cells when possible.
 - Detailed template validation severity logic is isolated in `packages/game-core/src/templates/template-validation.ts`.
 - Headless smoke includes default-template validation to ensure all system default templates are warning/error free.
 

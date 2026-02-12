@@ -273,6 +273,7 @@ function ensureLoaderCoverage(
 ): UnitTemplate["attachments"] {
   const catalog = resolveCatalog(partCatalog);
   const next = template.attachments.map((attachment) => ({ ...attachment }));
+  const occupiedAnchorKeys = new Set<string>();
   const weaponClasses = new Set(
     next
       .map((attachment) => COMPONENTS[attachment.component])
@@ -281,6 +282,11 @@ function ensureLoaderCoverage(
   );
   const supportedClasses = new Set<string>();
   for (const attachment of next) {
+    if (attachment.x !== undefined && attachment.y !== undefined) {
+      occupiedAnchorKeys.add(`xy:${attachment.x},${attachment.y}`);
+    } else {
+      occupiedAnchorKeys.add(`cell:${attachment.cell}`);
+    }
     const stats = COMPONENTS[attachment.component];
     if (stats.type !== "loader" || !stats.loader) {
       continue;
@@ -344,6 +350,12 @@ function ensureLoaderCoverage(
       const structureCell = template.structure[cellIndex];
       const baseX = structureCell?.x;
       const baseY = structureCell?.y;
+      const candidateAnchorKey = baseX !== undefined && baseY !== undefined
+        ? `xy:${baseX},${baseY}`
+        : `cell:${cellIndex}`;
+      if (occupiedAnchorKeys.has(candidateAnchorKey)) {
+        continue;
+      }
       const candidateKeys = loaderFootprint
         .filter((offset) => offset.occupiesFunctionalSpace || offset.occupiesStructureSpace)
         .map((offset) => {
@@ -381,6 +393,12 @@ function ensureLoaderCoverage(
       y: anchor.y,
       keys: fallbackKeys,
     };
+    const targetAnchorKey = target.x !== undefined && target.y !== undefined
+      ? `xy:${target.x},${target.y}`
+      : `cell:${target.cell}`;
+    if (occupiedAnchorKeys.has(targetAnchorKey)) {
+      return;
+    }
 
     next.push({
       component: loaderPart.baseComponent,
@@ -394,6 +412,7 @@ function ensureLoaderCoverage(
     for (const key of target.keys) {
       occupiedKeys.add(key);
     }
+    occupiedAnchorKeys.add(targetAnchorKey);
 
     const loaderStats = COMPONENTS[loaderPart.baseComponent];
     if (loaderStats.type === "loader" && loaderStats.loader) {
