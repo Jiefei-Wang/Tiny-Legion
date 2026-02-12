@@ -538,6 +538,9 @@ export function bootstrap(options: BootstrapOptions = {}): void {
   let editorRightClickDeletePending = false;
   let editorRightClickDeleteMouseX = 0;
   let editorRightClickDeleteMouseY = 0;
+  let editorHoverMouseX = 0;
+  let editorHoverMouseY = 0;
+  let editorHoverActive = false;
   let battleViewOffsetX = 0;
   let battleViewOffsetY = 0;
   let battleViewScale = 1;
@@ -2724,6 +2727,112 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     return null;
   };
 
+  const getPartNameInitials = (name: string): string => {
+    const tokens = name.match(/[A-Za-z0-9]+/g) ?? [];
+    if (tokens.length <= 0) {
+      return "?";
+    }
+    return tokens.map((token) => token.slice(0, 1).toUpperCase()).join("");
+  };
+
+  const getFunctionalShortLabel = (part: PartDefinition | null): string => {
+    if (!part) {
+      return "?.?";
+    }
+    return `${part.id}.${getPartNameInitials(part.name)}`;
+  };
+
+  const getEditorSlotFromCanvasPoint = (
+    mouseX: number,
+    mouseY: number,
+  ): {
+    slot: number;
+    row: number;
+    col: number;
+  } | null => {
+    const grid = getEditorGridRect();
+    const relX = mouseX - grid.x;
+    const relY = mouseY - grid.y;
+    if (relX < 0 || relY < 0 || relX >= grid.cell * editorGridCols || relY >= grid.cell * editorGridRows) {
+      return null;
+    }
+    const col = Math.floor(relX / grid.cell);
+    const row = Math.floor(relY / grid.cell);
+    return { slot: row * editorGridCols + col, row, col };
+  };
+
+  const resolvePlacementAnchorSlotByTargetSlot = (
+    targetSlot: number,
+    part: PartDefinition,
+    rotateQuarter: 0 | 1 | 2 | 3,
+  ): number | null => {
+    if (!editorPlaceByCenter) {
+      return targetSlot;
+    }
+    const centerCells = getPartFootprintOffsets(part, normalizePartAttachmentRotate(part, rotateQuarter));
+    let minX = 0;
+    let maxX = 0;
+    let minY = 0;
+    let maxY = 0;
+    if (centerCells.length > 0) {
+      minX = centerCells[0]?.x ?? 0;
+      maxX = centerCells[0]?.x ?? 0;
+      minY = centerCells[0]?.y ?? 0;
+      maxY = centerCells[0]?.y ?? 0;
+    }
+    for (const cell of centerCells) {
+      minX = Math.min(minX, cell.x);
+      maxX = Math.max(maxX, cell.x);
+      minY = Math.min(minY, cell.y);
+      maxY = Math.max(maxY, cell.y);
+    }
+    const centerOffsetX = Math.round((minX + maxX) * 0.5);
+    const centerOffsetY = Math.round((minY + maxY) * 0.5);
+    const clickCoord = slotToCoord(targetSlot);
+    return coordToSlot(clickCoord.x - centerOffsetX, clickCoord.y - centerOffsetY);
+  };
+
+  const resolveFunctionalPlacementAttempt = (
+    targetSlot: number,
+    part: PartDefinition,
+    rotateQuarter: 0 | 1 | 2 | 3,
+  ): {
+    ok: true;
+    anchorSlot: number;
+    placement: {
+      slots: Array<{
+        slot: number;
+        occupiesStructureSpace: boolean;
+        occupiesFunctionalSpace: boolean;
+        needsStructureBehind: boolean;
+        isAttachPoint: boolean;
+        isShootingPoint: boolean;
+        takesDamage: boolean;
+        takesFunctionalDamage: boolean;
+        offsetX: number;
+        offsetY: number;
+      }>;
+      anchorCoord: { x: number; y: number };
+    };
+  } | {
+    ok: false;
+    reason: string;
+  } => {
+    const anchorSlot = resolvePlacementAnchorSlotByTargetSlot(targetSlot, part, rotateQuarter);
+    if (anchorSlot === null) {
+      return { ok: false, reason: "Centered placement is out of editor bounds" };
+    }
+    const placement = getFootprintSlots(anchorSlot, part, rotateQuarter);
+    if (!placement || placement.slots.length <= 0) {
+      return { ok: false, reason: "Part footprint out of editor bounds" };
+    }
+    const check = validateFunctionalPlacement(part, rotateQuarter, anchorSlot, placement.slots, placement.anchorCoord);
+    if (!check.ok) {
+      return { ok: false, reason: check.reason ?? "Invalid component placement" };
+    }
+    return { ok: true, anchorSlot, placement };
+  };
+
   const getFootprintSlots = (
     anchorSlot: number,
     part: PartDefinition,
@@ -3641,6 +3750,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         const x = grid.x + col * grid.cell;
         const y = grid.y + row * grid.cell;
         const structurePartId = editorStructureSlots[slot];
+        const structurePart = resolveStructurePartById(structurePartId);
         const structureColor = structurePartId ? getStructurePartStats(structurePartId).color : "rgba(39, 56, 76, 0.42)";
 
         context.fillStyle = structureColor;
@@ -3650,15 +3760,24 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         context.strokeStyle = structurePartId ? "rgba(224, 236, 251, 0.72)" : "rgba(121, 148, 180, 0.35)";
         context.lineWidth = 1;
         context.strokeRect(x + 1, y + 1, grid.cell - 2, grid.cell - 2);
+        if (structurePart) {
+          context.fillStyle = "#f3fbff";
+          context.font = "8px Trebuchet MS";
+          context.fillText(structurePart.name, x + 4, y + 10, Math.max(8, grid.cell - 8));
+        }
 
         const functional = editorFunctionalSlots[slot];
         if (functional) {
           context.fillStyle = "#f0b39f";
           context.fillRect(x + 6, y + 6, 12, 12);
           if (functional.isAnchor) {
+            const part = resolvePartDefinitionForAttachment(
+              { partId: functional.partId, component: functional.component },
+              parts,
+            );
             context.fillStyle = "#fff5ef";
             context.font = "9px Trebuchet MS";
-            context.fillText(functional.component.slice(0, 2).toUpperCase(), x + 6, y + 30);
+            context.fillText(getFunctionalShortLabel(part), x + 4, y + grid.cell - 6, Math.max(12, grid.cell - 8));
           }
           if (functional.isAnchor && COMPONENTS[functional.component].directional) {
             const part = resolvePartDefinitionForAttachment(
@@ -3714,12 +3833,61 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       }
     }
 
-    const preview = getEditorCombatPreview();
-    const legend = `Wpn by class R:${preview.weaponCounts["rapid-fire"]} H:${preview.weaponCounts["heavy-shot"]} E:${preview.weaponCounts.explosive} T:${preview.weaponCounts.tracking} B:${preview.weaponCounts["beam-precision"]} C:${preview.weaponCounts["control-utility"]}`;
-    const speedText = `Achievable speed: ${preview.achievableSpeed.toFixed(1)}`;
-    const liftText = preview.liftAccel === null
+    if (editorHoverActive && !editorDeleteMode) {
+      const hover = getEditorSlotFromCanvasPoint(editorHoverMouseX, editorHoverMouseY);
+      if (hover) {
+        const slotX = grid.x + hover.col * grid.cell;
+        const slotY = grid.y + hover.row * grid.cell;
+        if (editorLayer === "structure") {
+          const structurePart = typeof editorSelection === "number" ? resolveStructurePartById(editorSelection) : null;
+          if (structurePart) {
+            context.globalAlpha = 0.5;
+            context.fillStyle = getStructurePartStats(structurePart.id).color;
+            context.fillRect(slotX + 2, slotY + 2, grid.cell - 4, grid.cell - 4);
+            context.globalAlpha = 1;
+          }
+        } else if (editorLayer === "display") {
+          if (editorStructureSlots[hover.slot] && EDITOR_DISPLAY_KINDS.includes(editorSelection as DisplayAttachmentTemplate["kind"])) {
+            context.globalAlpha = 0.5;
+            context.fillStyle = "#98c8ff";
+            context.fillRect(slotX + grid.cell - 16, slotY + 6, 10, 10);
+            context.globalAlpha = 1;
+          }
+        } else {
+          const part = resolvePartForSelection(editorSelection);
+          if (part) {
+            const rotateQuarter = isDirectionalPart(part) ? editorWeaponRotateQuarter : 0;
+            const attempt = resolveFunctionalPlacementAttempt(hover.slot, part, rotateQuarter);
+            if (attempt.ok) {
+              context.globalAlpha = 0.5;
+              context.fillStyle = "#f0b39f";
+              for (const footprint of attempt.placement.slots) {
+                const footprintCol = footprint.slot % editorGridCols;
+                const footprintRow = Math.floor(footprint.slot / editorGridCols);
+                const cellX = grid.x + footprintCol * grid.cell;
+                const cellY = grid.y + footprintRow * grid.cell;
+                context.fillRect(cellX + 6, cellY + 6, 12, 12);
+              }
+              const anchorCol = attempt.anchorSlot % editorGridCols;
+              const anchorRow = Math.floor(attempt.anchorSlot / editorGridCols);
+              const anchorX = grid.x + anchorCol * grid.cell;
+              const anchorY = grid.y + anchorRow * grid.cell;
+              context.fillStyle = "#fff5ef";
+              context.font = "9px Trebuchet MS";
+              context.fillText(getFunctionalShortLabel(part), anchorX + 4, anchorY + grid.cell - 6, Math.max(12, grid.cell - 8));
+              context.globalAlpha = 1;
+            }
+          }
+        }
+      }
+    }
+
+    const combatPreview = getEditorCombatPreview();
+    const legend = `Wpn by class R:${combatPreview.weaponCounts["rapid-fire"]} H:${combatPreview.weaponCounts["heavy-shot"]} E:${combatPreview.weaponCounts.explosive} T:${combatPreview.weaponCounts.tracking} B:${combatPreview.weaponCounts["beam-precision"]} C:${combatPreview.weaponCounts["control-utility"]}`;
+    const speedText = `Achievable speed: ${combatPreview.achievableSpeed.toFixed(1)}`;
+    const liftText = combatPreview.liftAccel === null
       ? "Lift: n/a (ground unit)"
-      : `Lift: ${preview.liftAccel.toFixed(1)} / ${AIR_HOLD_GRAVITY.toFixed(1)} ${preview.liftAccel >= AIR_HOLD_GRAVITY ? "(hold)" : "(insufficient)"}`;
+      : `Lift: ${combatPreview.liftAccel.toFixed(1)} / ${AIR_HOLD_GRAVITY.toFixed(1)} ${combatPreview.liftAccel >= AIR_HOLD_GRAVITY ? "(hold)" : "(insufficient)"}`;
     const panelX = 16;
     const panelY = drawCanvas.height - 70;
     context.fillStyle = "rgba(19, 30, 44, 0.94)";
@@ -3816,15 +3984,11 @@ export function bootstrap(options: BootstrapOptions = {}): void {
   };
 
   const applyEditorCellAction = (mouseX: number, mouseY: number, forceDelete = false): void => {
-    const grid = getEditorGridRect();
-    const relX = mouseX - grid.x;
-    const relY = mouseY - grid.y;
-    if (relX < 0 || relY < 0 || relX >= grid.cell * editorGridCols || relY >= grid.cell * editorGridRows) {
+    const hit = getEditorSlotFromCanvasPoint(mouseX, mouseY);
+    if (!hit) {
       return;
     }
-    const col = Math.floor(relX / grid.cell);
-    const row = Math.floor(relY / grid.cell);
-    const slot = row * editorGridCols + col;
+    const { row, col, slot } = hit;
     const deleteRequested = forceDelete || editorDeleteMode;
 
     if (isPartEditorScreen()) {
@@ -3881,52 +4045,16 @@ export function bootstrap(options: BootstrapOptions = {}): void {
           return;
         }
         const rotateQuarter = isDirectionalPart(part) ? editorWeaponRotateQuarter : 0;
-
-        let anchorSlot = slot;
-        if (editorPlaceByCenter) {
-          const centerCells = getPartFootprintOffsets(part, normalizePartAttachmentRotate(part, rotateQuarter));
-          let minX = 0;
-          let maxX = 0;
-          let minY = 0;
-          let maxY = 0;
-          if (centerCells.length > 0) {
-            minX = centerCells[0]?.x ?? 0;
-            maxX = centerCells[0]?.x ?? 0;
-            minY = centerCells[0]?.y ?? 0;
-            maxY = centerCells[0]?.y ?? 0;
-          }
-          for (const cell of centerCells) {
-            minX = Math.min(minX, cell.x);
-            maxX = Math.max(maxX, cell.x);
-            minY = Math.min(minY, cell.y);
-            maxY = Math.max(maxY, cell.y);
-          }
-          const centerOffsetX = Math.round((minX + maxX) * 0.5);
-          const centerOffsetY = Math.round((minY + maxY) * 0.5);
-          const clickCoord = slotToCoord(slot);
-          const centeredAnchorSlot = coordToSlot(clickCoord.x - centerOffsetX, clickCoord.y - centerOffsetY);
-          if (centeredAnchorSlot === null) {
-            addLog("Centered placement is out of editor bounds", "warn");
-            return;
-          }
-          anchorSlot = centeredAnchorSlot;
-        }
-
-        const placement = getFootprintSlots(anchorSlot, part, rotateQuarter);
-        if (!placement || placement.slots.length <= 0) {
-          addLog("Part footprint out of editor bounds", "warn");
-          return;
-        }
-        const check = validateFunctionalPlacement(part, rotateQuarter, anchorSlot, placement.slots, placement.anchorCoord);
-        if (!check.ok) {
-          addLog(check.reason ?? "Invalid component placement", "warn");
+        const attempt = resolveFunctionalPlacementAttempt(slot, part, rotateQuarter);
+        if (!attempt.ok) {
+          addLog(attempt.reason, "warn");
           return;
         }
         if (part.baseComponent === "control") {
           editorFunctionalSlots = editorFunctionalSlots.map((entry) => (entry?.component === "control" ? null : entry));
         }
         const occupiedGroupIds = new Set(
-          placement.slots
+          attempt.placement.slots
             .map((occupiedSlot) => editorFunctionalSlots[occupiedSlot.slot]?.groupId ?? null)
             .filter((groupId): groupId is number => groupId !== null),
         );
@@ -3940,13 +4068,13 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         }
         const groupId = editorFunctionalGroupSeq;
         editorFunctionalGroupSeq += 1;
-        for (const occupiedSlot of placement.slots) {
+        for (const occupiedSlot of attempt.placement.slots) {
           editorFunctionalSlots[occupiedSlot.slot] = {
             component: part.baseComponent,
             partId: part.id,
             rotateQuarter,
             groupId,
-            isAnchor: occupiedSlot.slot === anchorSlot,
+            isAnchor: occupiedSlot.slot === attempt.anchorSlot,
           };
         }
       }
@@ -6332,6 +6460,9 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     if (isEditorScreen()) {
       const targetCanvas = activeEditorCanvas();
       const { x, y } = getPointerOnCanvas(event, targetCanvas);
+      editorHoverMouseX = x;
+      editorHoverMouseY = y;
+      editorHoverActive = true;
       if (event.button === 0) {
         editorRightClickDeletePending = false;
         applyEditorCellAction(x, y);
@@ -6400,12 +6531,18 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       editorDragActive = false;
       editorDragMoved = false;
       editorRightClickDeletePending = false;
+      editorHoverActive = false;
     }
     battle.handlePointerUp();
   });
 
   canvasViewport.addEventListener("mousemove", (event) => {
     if (isEditorScreen()) {
+      const targetCanvas = activeEditorCanvas();
+      const pointer = getPointerOnCanvas(event, targetCanvas);
+      editorHoverMouseX = pointer.x;
+      editorHoverMouseY = pointer.y;
+      editorHoverActive = !editorDragActive;
       if (editorDragActive) {
         const dx = event.clientX - editorDragLastClientX;
         const dy = event.clientY - editorDragLastClientY;

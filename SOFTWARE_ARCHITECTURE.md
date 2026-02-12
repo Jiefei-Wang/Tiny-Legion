@@ -433,6 +433,8 @@ Editor UX implementation details:
 - Battle, Template Editor, and Part Editor now each render to dedicated canvases (`#battleCanvas`, `#templateEditorCanvas`, `#partEditorCanvas`) layered in the shared viewport container.
 - Template Editor and Part Editor canvas overlays include the currently opened template/part name at top-left.
 - Editor viewport controls use right-click click-to-delete and right-click drag for panning, plus mouse wheel zoom; battle keeps right-drag pan and wheel zoom.
+- Template Editor shows a 50% alpha hover ghost for selected parts only when the current mouse-target placement is valid.
+- Template Editor labels structure part names near the top of each occupied structure cell and labels functional anchors near the bottom using `partId + "." + part-name initials` (for example `18.P`, `16.ML`).
 - Template Editor right-click delete prioritizes functional removal at a cell before structure removal on subsequent click.
 - If no valid existing template/part is currently opened, editor entry starts with an empty grid draft instead of auto-opening a fallback catalog entry.
 - Part Editor uses a persistent box-property brush so erased/recreated boxes can reuse the latest per-box property configuration without re-toggling each field.

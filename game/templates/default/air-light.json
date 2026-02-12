@@ -1,9 +1,23 @@
 {
   "id": "air-light",
-  "name": "Skylance Jet",
+  "name": "Skylance",
   "type": "air",
-  "gasCost": 48,
   "structure": [
+    {
+      "partId": 11,
+      "x": -1,
+      "y": -1
+    },
+    {
+      "partId": 11,
+      "x": -3,
+      "y": 0
+    },
+    {
+      "partId": 11,
+      "x": -2,
+      "y": 0
+    },
     {
       "partId": 11,
       "x": -1,
@@ -21,31 +35,67 @@
     },
     {
       "partId": 11,
+      "x": -3,
+      "y": 1
+    },
+    {
+      "partId": 11,
+      "x": -2,
+      "y": 1
+    },
+    {
+      "partId": 11,
+      "x": -1,
+      "y": 1
+    },
+    {
+      "partId": 11,
       "x": 0,
+      "y": 1
+    },
+    {
+      "partId": 11,
+      "x": 1,
       "y": 1
     }
   ],
   "attachments": [
     {
+      "component": "propeller",
+      "partId": 18,
+      "cell": 0,
+      "x": -1,
+      "y": -1,
+      "rotateQuarter": 0
+    },
+    {
+      "component": "cannonLoader",
+      "partId": 2,
+      "cell": 1,
+      "x": -3,
+      "y": 0,
+      "rotateQuarter": 0
+    },
+    {
       "component": "control",
       "partId": 3,
-      "cell": 1,
+      "cell": 3,
+      "x": -1,
+      "y": 0,
+      "rotateQuarter": 0
+    },
+    {
+      "component": "missileLoader",
+      "partId": 16,
+      "cell": 4,
       "x": 0,
       "y": 0,
       "rotateQuarter": 0
     },
     {
-      "component": "rapidGun",
-      "partId": 19,
-      "cell": 2,
-      "x": 1,
-      "y": 0,
-      "rotateQuarter": 0
-    },
-    {
-      "component": "jetEngine",
-      "partId": 9,
-      "cell": 3,
+      "component": "heavyCannon",
+      "partId": 8,
+      "cell": 9,
       "x": 0,
       "y": 1,
       "rotateQuarter": 0
@@ -54,27 +104,27 @@
   "display": [
     {
       "kind": "panel",
-      "cell": 0,
-      "x": -1,
+      "cell": 2,
+      "x": -2,
       "y": 0
     },
     {
       "kind": "glass",
-      "cell": 1,
-      "x": 0,
+      "cell": 3,
+      "x": -1,
       "y": 0
     },
     {
       "kind": "panel",
-      "cell": 2,
-      "x": 1,
+      "cell": 4,
+      "x": 0,
       "y": 0
     },
     {
       "kind": "stripe",
-      "cell": 3,
-      "x": 0,
-      "y": 1
+      "cell": 5,
+      "x": 1,
+      "y": 0
     }
   ]
 }

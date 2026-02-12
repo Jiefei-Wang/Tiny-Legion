@@ -90,6 +90,8 @@ Current implementation includes dedicated in-app editor tabs where the player ca
 - Functional placement supports `center place on click` mode in template editor (developer/user toggle).
 - Editor canvas uses a resizable grid up to `10x10` with right-drag panning.
 - Editor viewport input now supports right-click delete/erase on the targeted cell/box; right-click drag still pans (click vs drag), and mouse-wheel zoom is supported in both Template Editor and Part Editor.
+- Template Editor shows a 50% alpha placement ghost under the mouse for the currently selected part when the hovered placement is valid.
+- Template Editor labels structure part names at cell top and functional anchor parts at cell bottom using `partId + "." + initials` (for example, `18.P` and `16.ML`).
 - In Template Editor, right-click delete is staged per cell: delete functional first; if no functional remains, delete structure (and attached display) on the next click.
 - Battle, Template Editor, and Part Editor each render to their own canvas while sharing the same viewport window.
 - Template Editor and Part Editor canvas overlays show the current template/part name at top-left.
