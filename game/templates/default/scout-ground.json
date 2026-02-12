@@ -6,13 +6,13 @@
   "gasCostOverride": 22,
   "structure": [
     {
-      "material": "basic"
+      "partId": "material-basic"
     },
     {
-      "material": "basic"
+      "partId": "material-basic"
     },
     {
-      "material": "basic"
+      "partId": "material-basic"
     }
   ],
   "attachments": [

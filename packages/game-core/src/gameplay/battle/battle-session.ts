@@ -13,7 +13,6 @@ import {
   BATTLE_SALVAGE_REFUND_FACTOR,
 } from "../../config/balance/battlefield.ts";
 import { COMPONENTS } from "../../config/balance/weapons.ts";
-import { MATERIALS } from "../../config/balance/materials.ts";
 import {
   AI_GRAVITY_CORRECTION_CLAMP,
   AI_GRAVITY_CORRECTION_STEP,
@@ -2839,7 +2838,7 @@ export class BattleSession {
         continue;
       }
       const offset = this.getCellOffsetWorld(unit, cell.id, cellSize);
-      const materialColor = MATERIALS[cell.material].color;
+      const materialColor = cell.color;
       this.state.debris.push({
         x: unit.x + offset.x,
         y: unit.y + offset.y,

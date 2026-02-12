@@ -538,7 +538,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
   let battleViewDragStartClientY = 0;
   let battleViewDragLastClientX = 0;
   let battleViewDragLastClientY = 0;
-  let editorStructureSlots: Array<MaterialId | null> = new Array<MaterialId | null>(EDITOR_GRID_MAX_SIZE).fill(null);
+  let editorStructureSlots: Array<string | null> = new Array<string | null>(EDITOR_GRID_MAX_SIZE).fill(null);
   let editorFunctionalSlots: EditorFunctionalSlot[] = new Array<EditorFunctionalSlot>(EDITOR_GRID_MAX_SIZE).fill(null);
   let editorDisplaySlots: Array<DisplayAttachmentTemplate["kind"] | null> = new Array<DisplayAttachmentTemplate["kind"] | null>(EDITOR_GRID_MAX_SIZE).fill(null);
   let editorTemplateDialogOpen = false;
@@ -2327,6 +2327,38 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     return result;
   };
 
+  const resolveStructurePartById = (partId: string | null | undefined): PartDefinition | null => {
+    if (!partId) {
+      return null;
+    }
+    const part = parts.find((entry) => entry.id === partId);
+    return part && part.layer === "structure" ? part : null;
+  };
+
+  const getStructurePartStats = (partId: string | null | undefined): {
+    mass: number;
+    armor: number;
+    hp: number;
+    recoverPerSecond: number;
+    color: string;
+  } => {
+    const part = resolveStructurePartById(partId);
+    return {
+      mass: Math.max(0, part?.stats?.mass ?? MATERIALS.basic.mass),
+      armor: Math.max(0, part?.properties?.materialArmor ?? MATERIALS.basic.armor),
+      hp: Math.max(1, part?.properties?.hp ?? MATERIALS.basic.hp),
+      recoverPerSecond: Math.max(0, part?.properties?.materialRecoverPerSecond ?? MATERIALS.basic.recoverPerSecond),
+      color: (typeof part?.properties?.materialColor === "string" && /^#[0-9a-fA-F]{6}$/.test(part.properties.materialColor))
+        ? part.properties.materialColor
+        : MATERIALS.basic.color,
+    };
+  };
+
+  const getDefaultStructurePartId = (): string | null => {
+    const first = parts.find((part) => part.layer === "structure");
+    return first?.id ?? null;
+  };
+
   const resolveMaterialIdFromStructurePart = (part: PartDefinition): MaterialId | null => {
     if (part.layer !== "structure") {
       return null;
@@ -2353,7 +2385,6 @@ export function bootstrap(options: BootstrapOptions = {}): void {
   };
 
   const getMaterialDefaultsForPart = (part: PartDefinition): {
-    materialId: MaterialId;
     materialArmor: number;
     materialRecoverPerSecond: number;
     materialColor: string;
@@ -2392,7 +2423,6 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       properties: {
         category: part.properties?.category ?? metaDefaults.category,
         subcategory: part.properties?.subcategory ?? metaDefaults.subcategory,
-        materialId: part.properties?.materialId ?? materialDefaults?.materialId,
         materialArmor: part.properties?.materialArmor ?? materialDefaults?.materialArmor,
         materialRecoverPerSecond: part.properties?.materialRecoverPerSecond ?? materialDefaults?.materialRecoverPerSecond,
         materialColor: part.properties?.materialColor ?? materialDefaults?.materialColor,
@@ -2878,7 +2908,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     const oldFunctional = editorFunctionalSlots.slice();
     const oldDisplay = editorDisplaySlots.slice();
 
-    const nextStructure = new Array<MaterialId | null>(EDITOR_GRID_MAX_SIZE).fill(null);
+    const nextStructure = new Array<string | null>(EDITOR_GRID_MAX_SIZE).fill(null);
     const nextFunctional = new Array<EditorFunctionalSlot>(EDITOR_GRID_MAX_SIZE).fill(null);
     const nextDisplay = new Array<DisplayAttachmentTemplate["kind"] | null>(EDITOR_GRID_MAX_SIZE).fill(null);
 
@@ -2936,24 +2966,18 @@ export function bootstrap(options: BootstrapOptions = {}): void {
 
   const getEditorCatalogItems = (): EditorCatalogItem[] => {
     if (editorLayer === "structure") {
-      const seenMaterial = new Set<MaterialId>();
-      const items: EditorCatalogItem[] = [];
-      for (const part of parts) {
-        const materialId = resolveMaterialIdFromStructurePart(part);
-        if (!materialId || seenMaterial.has(materialId)) {
-          continue;
-        }
-        seenMaterial.add(materialId);
-        const stats = MATERIALS[materialId];
-        items.push({
-          value: materialId,
-          title: part.name,
-          subtitle: `${materialId}/${part.id}`,
-          detail: `Mass ${stats.mass.toFixed(2)} | Armor ${stats.armor.toFixed(2)} | HP ${stats.hp.toFixed(0)} | Recover ${stats.recoverPerSecond.toFixed(1)}/s`,
-          thumb: materialId.slice(0, 2).toUpperCase(),
+      return parts
+        .filter((part) => part.layer === "structure")
+        .map((part) => {
+          const stats = getStructurePartStats(part.id);
+          return {
+            value: part.id,
+            title: part.name,
+            subtitle: part.id,
+            detail: `Mass ${stats.mass.toFixed(2)} | Armor ${stats.armor.toFixed(2)} | HP ${stats.hp.toFixed(0)} | Recover ${stats.recoverPerSecond.toFixed(1)}/s`,
+            thumb: part.id.slice(0, 2).toUpperCase(),
+          };
         });
-      }
-      return items;
     }
     if (editorLayer === "functional") {
       const functionalParts = parts.filter((part) => part.layer === "functional" && isPartCompatibleWithUnitType(part, editorDraft.type));
@@ -3010,14 +3034,14 @@ export function bootstrap(options: BootstrapOptions = {}): void {
   const recalcEditorDraftFromSlots = (): void => {
     const slotToCell = new Map<number, number>();
     const structure = editorStructureSlots
-      .map((material, slotIndex) => ({ material, slotIndex }))
-      .filter((entry): entry is { material: MaterialId; slotIndex: number } => entry.material !== null)
+      .map((partId, slotIndex) => ({ partId, slotIndex }))
+      .filter((entry): entry is { partId: string; slotIndex: number } => entry.partId !== null)
       .sort((a, b) => a.slotIndex - b.slotIndex);
 
     editorDraft.structure = structure.map((entry, index) => {
       slotToCell.set(entry.slotIndex, index);
       const coord = slotToCoord(entry.slotIndex);
-      return { material: entry.material, x: coord.x, y: coord.y };
+      return { partId: entry.partId, x: coord.x, y: coord.y };
     });
 
     editorDraft.attachments = editorFunctionalSlots
@@ -3231,7 +3255,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
   };
 
   const loadTemplateIntoEditorSlots = (template: UnitTemplate): void => {
-    editorStructureSlots = new Array<MaterialId | null>(EDITOR_GRID_MAX_SIZE).fill(null);
+    editorStructureSlots = new Array<string | null>(EDITOR_GRID_MAX_SIZE).fill(null);
     editorFunctionalSlots = new Array<EditorFunctionalSlot>(EDITOR_GRID_MAX_SIZE).fill(null);
     editorDisplaySlots = new Array<DisplayAttachmentTemplate["kind"] | null>(EDITOR_GRID_MAX_SIZE).fill(null);
 
@@ -3246,7 +3270,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       if (slot === undefined || slot === null) {
         continue;
       }
-      editorStructureSlots[slot] = template.structure[cellIndex]?.material ?? "basic";
+      editorStructureSlots[slot] = template.structure[cellIndex]?.partId ?? getDefaultStructurePartId();
       cellToSlot.set(cellIndex, slot);
     }
 
@@ -3299,11 +3323,11 @@ export function bootstrap(options: BootstrapOptions = {}): void {
   };
 
   const getEditorMaterialBreakdown = (): string => {
-    const counts = new Map<MaterialId, number>();
+    const counts = new Map<string, number>();
     for (const cell of editorDraft.structure) {
-      counts.set(cell.material, (counts.get(cell.material) ?? 0) + 1);
+      counts.set(cell.partId, (counts.get(cell.partId) ?? 0) + 1);
     }
-    const tags = Array.from(counts.entries()).map(([material, count]) => `${material} x${count}`);
+    const tags = Array.from(counts.entries()).map(([partId, count]) => `${partId} x${count}`);
     return tags.length > 0 ? tags.join(", ") : "none";
   };
 
@@ -3313,7 +3337,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
   } => {
     let totalMass = 0;
     for (const cell of editorDraft.structure) {
-      totalMass += MATERIALS[cell.material].mass;
+      totalMass += getStructurePartStats(cell.partId).mass;
     }
     let totalPower = 0;
     let weightedSpeedCap = 0;
@@ -3562,13 +3586,14 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         const slot = row * editorGridCols + col;
         const x = grid.x + col * grid.cell;
         const y = grid.y + row * grid.cell;
-        const material = editorStructureSlots[slot];
+        const structurePartId = editorStructureSlots[slot];
+        const structureColor = structurePartId ? getStructurePartStats(structurePartId).color : "rgba(39, 56, 76, 0.42)";
 
-        context.fillStyle = material ? MATERIALS[material].color : "rgba(39, 56, 76, 0.42)";
-        context.globalAlpha = material ? 0.82 : 1;
+        context.fillStyle = structureColor;
+        context.globalAlpha = structurePartId ? 0.82 : 1;
         context.fillRect(x + 2, y + 2, grid.cell - 4, grid.cell - 4);
         context.globalAlpha = 1;
-        context.strokeStyle = material ? "rgba(224, 236, 251, 0.72)" : "rgba(121, 148, 180, 0.35)";
+        context.strokeStyle = structurePartId ? "rgba(224, 236, 251, 0.72)" : "rgba(121, 148, 180, 0.35)";
         context.lineWidth = 1;
         context.strokeRect(x + 1, y + 1, grid.cell - 2, grid.cell - 2);
 
@@ -3770,8 +3795,11 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         if (!hadStructure) {
           addLog(`No structure cell at row ${row + 1}, col ${col + 1}`, "warn");
         }
-      } else if (editorSelection in MATERIALS) {
-        editorStructureSlots[slot] = editorSelection as MaterialId;
+      } else {
+        const structurePart = resolveStructurePartById(editorSelection);
+        if (structurePart) {
+          editorStructureSlots[slot] = structurePart.id;
+        }
       }
       recalcEditorDraftFromSlots();
       return;
@@ -4379,15 +4407,6 @@ export function bootstrap(options: BootstrapOptions = {}): void {
           <span class="small">Delete value to reset to default gas calculation.</span>
         </div>
         ${isStructureLayerMode ? `<div class="row">
-          <label class="small">Material
-            <select id="partMaterialId">
-              <option value="basic" ${partProps.materialId === "basic" ? "selected" : ""}>basic steel</option>
-              <option value="reinforced" ${partProps.materialId === "reinforced" ? "selected" : ""}>reinforced</option>
-              <option value="ceramic" ${partProps.materialId === "ceramic" ? "selected" : ""}>ceramic</option>
-              <option value="reactive" ${partProps.materialId === "reactive" ? "selected" : ""}>reactive</option>
-              <option value="combined" ${partProps.materialId === "combined" ? "selected" : ""}>combined mk1</option>
-            </select>
-          </label>
           <label class="small">Armor <input id="partMaterialArmor" type="number" step="0.01" value="${partProps.materialArmor ?? ""}" /></label>
           <label class="small">Recover/s <input id="partMaterialRecoverPerSecond" type="number" step="0.05" value="${partProps.materialRecoverPerSecond ?? ""}" /></label>
           <label class="small">Color <input id="partMaterialColor" value="${partProps.materialColor ?? ""}" placeholder="#95a4b8" /></label>
@@ -4511,9 +4530,10 @@ export function bootstrap(options: BootstrapOptions = {}): void {
   };
 
   const upgradeTemplateMaterials = (material: "reinforced" | "combined"): void => {
+    const upgradedPartId = material === "combined" ? "material-combined" : "material-reinforced";
     for (const template of templates) {
       for (const cell of template.structure) {
-        cell.material = material;
+        cell.partId = upgradedPartId;
       }
       if (typeof template.gasCostOverride === "number") {
         template.gasCostOverride += material === "combined" ? 8 : 4;
@@ -5193,7 +5213,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     });
 
     getOptionalElement<HTMLButtonElement>("#btnClearGrid")?.addEventListener("click", () => {
-      editorStructureSlots = new Array<MaterialId | null>(EDITOR_GRID_MAX_SIZE).fill(null);
+      editorStructureSlots = new Array<string | null>(EDITOR_GRID_MAX_SIZE).fill(null);
       editorFunctionalSlots = new Array<EditorFunctionalSlot>(EDITOR_GRID_MAX_SIZE).fill(null);
       editorDisplaySlots = new Array<DisplayAttachmentTemplate["kind"] | null>(EDITOR_GRID_MAX_SIZE).fill(null);
       recalcEditorDraftFromSlots();
@@ -5438,11 +5458,9 @@ export function bootstrap(options: BootstrapOptions = {}): void {
           loaderStoreCapacity: undefined,
           loaderMinBurstInterval: undefined,
         };
-        const materialId = (partDesignerDraft.properties?.materialId ?? "basic") as MaterialId;
-        const material = MATERIALS[materialId] ?? MATERIALS.basic;
+        const material = MATERIALS.basic;
         partDesignerDraft.properties = {
           ...(partDesignerDraft.properties ?? {}),
-          materialId,
           materialArmor: partDesignerDraft.properties?.materialArmor ?? material.armor,
           materialRecoverPerSecond: partDesignerDraft.properties?.materialRecoverPerSecond ?? material.recoverPerSecond,
           materialColor: partDesignerDraft.properties?.materialColor ?? material.color,
@@ -5521,26 +5539,6 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         hp: Number.isFinite(numeric) ? numeric : undefined,
       };
       updateSelectedInfo();
-    });
-    getOptionalElement<HTMLSelectElement>("#partMaterialId")?.addEventListener("change", (event) => {
-      const value = (event.currentTarget as HTMLSelectElement).value as MaterialId;
-      if (!(value in MATERIALS)) {
-        return;
-      }
-      const base = MATERIALS[value];
-      partDesignerDraft.properties = {
-        ...(partDesignerDraft.properties ?? {}),
-        materialId: value,
-        materialArmor: base.armor,
-        materialRecoverPerSecond: base.recoverPerSecond,
-        materialColor: base.color,
-        hp: base.hp,
-      };
-      partDesignerDraft.stats = {
-        ...(partDesignerDraft.stats ?? {}),
-        mass: base.mass,
-      };
-      renderPanels();
     });
     getOptionalElement<HTMLInputElement>("#partMaterialArmor")?.addEventListener("input", (event) => {
       const raw = (event.currentTarget as HTMLInputElement).value.trim();

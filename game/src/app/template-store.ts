@@ -18,7 +18,7 @@ function serializeTemplateForStore(template: UnitTemplate): Record<string, unkno
     name: template.name,
     type: template.type,
     ...(typeof template.gasCostOverride === "number" ? { gasCost: Math.max(0, Math.floor(template.gasCostOverride)) } : {}),
-    structure: template.structure.map((cell) => ({ material: cell.material, x: cell.x, y: cell.y })),
+    structure: template.structure.map((cell) => ({ partId: cell.partId, x: cell.x, y: cell.y })),
     attachments: template.attachments.map((attachment) => ({
       component: attachment.component,
       partId: attachment.partId,

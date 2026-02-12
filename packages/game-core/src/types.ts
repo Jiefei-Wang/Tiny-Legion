@@ -184,7 +184,7 @@ export interface PartDefinition {
 }
 
 export interface StructureCellTemplate {
-  material: MaterialId;
+  partId: string;
   x?: number;
   y?: number;
 }
@@ -219,9 +219,12 @@ export interface UnitTemplate {
 
 export interface StructureCell {
   id: number;
-  material: MaterialId;
+  partId: string;
   x: number;
   y: number;
+  armor: number;
+  mass: number;
+  color: string;
   strain: number;
   breakThreshold: number;
   recoverPerSecond: number;

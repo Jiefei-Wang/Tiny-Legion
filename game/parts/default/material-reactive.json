@@ -37,7 +37,6 @@
   "properties": {
     "category": "structure",
     "subcategory": "material",
-    "materialId": "reactive",
     "materialArmor": 1.55,
     "materialRecoverPerSecond": 1.7,
     "materialColor": "#d0bb90",

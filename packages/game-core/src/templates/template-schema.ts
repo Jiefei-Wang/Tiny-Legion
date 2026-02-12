@@ -1,5 +1,4 @@
 import { COMPONENTS } from "../config/balance/weapons.ts";
-import { MATERIALS } from "../config/balance/materials.ts";
 import {
   createDefaultPartDefinitions,
   getPartFootprintOffsets,
@@ -7,11 +6,10 @@ import {
   normalizePartAttachmentRotate,
   resolvePartGasCost,
   rotateOffsetByQuarter,
-  resolveStructureMaterialGasCost,
   resolvePartDefinitionForAttachment,
 } from "../parts/part-schema.ts";
 import { validateTemplateDetailed } from "./template-validation.ts";
-import type { ComponentId, DisplayAttachmentTemplate, MaterialId, PartDefinition, UnitTemplate, UnitType } from "../types.ts";
+import type { ComponentId, DisplayAttachmentTemplate, PartDefinition, UnitTemplate, UnitType } from "../types.ts";
 
 export { validateTemplateDetailed } from "./template-validation.ts";
 
@@ -39,10 +37,6 @@ function resolveCatalog(partCatalog?: ReadonlyArray<PartDefinition>): PartDefini
 
 function isUnitType(value: unknown): value is UnitType {
   return value === "ground" || value === "air";
-}
-
-function isMaterialId(value: unknown): value is MaterialId {
-  return typeof value === "string" && value in MATERIALS;
 }
 
 function isComponentId(value: unknown): value is ComponentId {
@@ -75,10 +69,11 @@ export function computeTemplateGasCost(
   const catalog = resolveCatalog(partCatalog);
   let total = 0;
   for (const cell of template.structure) {
-    if (!isMaterialId(cell.material)) {
+    const part = resolvePartDefinitionForAttachment({ partId: cell.partId }, catalog);
+    if (!part || part.layer !== "structure") {
       continue;
     }
-    total += resolveStructureMaterialGasCost(cell.material, catalog);
+    total += resolvePartGasCost(part);
   }
   for (const attachment of template.attachments) {
     const part = resolvePartDefinitionForAttachment(
@@ -422,7 +417,7 @@ export function cloneTemplate(template: UnitTemplate): UnitTemplate {
     type: template.type,
     gasCost: template.gasCost,
     gasCostOverride: template.gasCostOverride,
-    structure: template.structure.map((cell) => ({ material: cell.material, x: cell.x, y: cell.y })),
+    structure: template.structure.map((cell) => ({ partId: cell.partId, x: cell.x, y: cell.y })),
     attachments: template.attachments.map((attachment) => ({
       component: attachment.component,
       partId: attachment.partId,
@@ -469,15 +464,19 @@ export function parseTemplate(input: unknown, options: ParseTemplateOptions = {}
   const structure: UnitTemplate["structure"] = [];
   for (const rawCell of data.structure) {
     if (!rawCell || typeof rawCell !== "object") {
-      continue;
+      return null;
     }
     const record = rawCell as Record<string, unknown>;
-    const material = record.material;
-    if (!isMaterialId(material)) {
-      continue;
+    const partId = typeof record.partId === "string" ? record.partId.trim() : "";
+    if (partId.length <= 0) {
+      return null;
+    }
+    const part = resolvePartDefinitionForAttachment({ partId }, partCatalog);
+    if (!part || part.layer !== "structure") {
+      return null;
     }
     structure.push({
-      material,
+      partId,
       x: readOptionalInt(record.x),
       y: readOptionalInt(record.y),
     });

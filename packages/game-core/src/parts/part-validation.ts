@@ -232,9 +232,6 @@ export function validatePartDefinitionDetailed(part: PartDefinition): PartValida
   if (part.properties?.isArmor === true && part.properties.hp === undefined) {
     warnings.push("is_armor is enabled but hp is not set.");
   }
-  if (part.layer === "structure" && !part.properties?.materialId) {
-    warnings.push("structure part should define properties.materialId.");
-  }
   if (
     part.properties?.hasCoreTuning === true
     && part.stats?.mass === undefined

@@ -1,4 +1,3 @@
-import { MATERIALS } from "../../config/balance/materials.ts";
 import { COMPONENTS } from "../../config/balance/weapons.ts";
 import { nextUid } from "../../core/ids/uid.ts";
 import {
@@ -28,7 +27,7 @@ export function createInitialTemplates(): UnitTemplate[] {
       type: "ground",
       gasCost: 22,
       gasCostOverride: 22,
-      structure: [{ material: "basic" }, { material: "basic" }, { material: "basic" }],
+      structure: [{ partId: "material-basic" }, { partId: "material-basic" }, { partId: "material-basic" }],
       attachments: [
         { component: "control", cell: 1 },
         { component: "engineS", cell: 0 },
@@ -42,11 +41,11 @@ export function createInitialTemplates(): UnitTemplate[] {
       gasCost: 38,
       gasCostOverride: 38,
       structure: [
-        { material: "basic" },
-        { material: "basic" },
-        { material: "basic" },
-        { material: "basic" },
-        { material: "basic" },
+        { partId: "material-basic" },
+        { partId: "material-basic" },
+        { partId: "material-basic" },
+        { partId: "material-basic" },
+        { partId: "material-basic" },
       ],
       attachments: [
         { component: "control", cell: 2 },
@@ -63,10 +62,10 @@ export function createInitialTemplates(): UnitTemplate[] {
       gasCost: 48,
       gasCostOverride: 48,
       structure: [
-        { material: "basic", x: -1, y: 0 },
-        { material: "basic", x: 0, y: 0 },
-        { material: "basic", x: 1, y: 0 },
-        { material: "basic", x: 0, y: 1 },
+        { partId: "material-basic", x: -1, y: 0 },
+        { partId: "material-basic", x: 0, y: 0 },
+        { partId: "material-basic", x: 1, y: 0 },
+        { partId: "material-basic", x: 0, y: 1 },
       ],
       attachments: [
         { component: "control", cell: 1, x: 0, y: 0 },
@@ -82,12 +81,12 @@ export function createInitialTemplates(): UnitTemplate[] {
       gasCost: 54,
       gasCostOverride: 54,
       structure: [
-        { material: "basic", x: -1, y: 0 },
-        { material: "basic", x: 0, y: 0 },
-        { material: "basic", x: 1, y: 0 },
-        { material: "basic", x: -1, y: 1 },
-        { material: "basic", x: 0, y: 1 },
-        { material: "basic", x: 1, y: 1 },
+        { partId: "material-basic", x: -1, y: 0 },
+        { partId: "material-basic", x: 0, y: 0 },
+        { partId: "material-basic", x: 1, y: 0 },
+        { partId: "material-basic", x: -1, y: 1 },
+        { partId: "material-basic", x: 0, y: 1 },
+        { partId: "material-basic", x: 1, y: 1 },
       ],
       attachments: [
         { component: "control", cell: 4, x: 0, y: 1 },
@@ -112,21 +111,37 @@ export function instantiateUnit(
     return null;
   }
 
+  const partCatalog = resolveCatalog(options.partCatalog);
   const structure = template.structure.map((cell, index) => {
-    const material = MATERIALS[cell.material];
+    const part = resolvePartDefinitionForAttachment({ partId: cell.partId }, partCatalog);
+    if (!part || part.layer !== "structure") {
+      return null;
+    }
+    const breakThreshold = Math.max(1, part.properties?.hp ?? 100);
+    const recoverPerSecond = Math.max(0, part.properties?.materialRecoverPerSecond ?? 0);
+    const armor = Math.max(0, part.properties?.materialArmor ?? 0);
+    const mass = Math.max(0, part.stats?.mass ?? 0);
+    const color = (typeof part.properties?.materialColor === "string" && /^#[0-9a-fA-F]{6}$/.test(part.properties.materialColor))
+      ? part.properties.materialColor
+      : "#95a4b8";
     return {
       id: index,
-      material: cell.material,
+      partId: cell.partId,
       x: cell.x ?? index,
       y: cell.y ?? 0,
+      armor,
+      mass,
+      color,
       strain: 0,
-      breakThreshold: material.hp,
-      recoverPerSecond: material.recoverPerSecond,
+      breakThreshold,
+      recoverPerSecond,
       destroyed: false,
     };
-  });
+  }).filter((entry): entry is NonNullable<typeof entry> => entry !== null);
+  if (structure.length !== template.structure.length) {
+    return null;
+  }
 
-  const partCatalog = resolveCatalog(options.partCatalog);
   const attachments = template.attachments.map((attachment, index) => {
     const part = resolvePartDefinitionForAttachment(
       { partId: attachment.partId, component: attachment.component },

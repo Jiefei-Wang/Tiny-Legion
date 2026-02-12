@@ -37,7 +37,6 @@
   "properties": {
     "category": "structure",
     "subcategory": "material",
-    "materialId": "basic",
     "materialArmor": 0,
     "materialRecoverPerSecond": 2.2,
     "materialColor": "#95a4b8",

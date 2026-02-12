@@ -1,5 +1,4 @@
 import { COMPONENTS } from "../config/balance/weapons.ts";
-import { MATERIALS } from "../config/balance/materials.ts";
 import { AIR_HOLD_GRAVITY, AIR_THRUST_ACCEL_SCALE } from "../config/balance/battlefield.ts";
 import {
   createDefaultPartDefinitions,
@@ -9,7 +8,7 @@ import {
   rotateOffsetByQuarter,
   resolvePartDefinitionForAttachment,
 } from "../parts/part-schema.ts";
-import type { DisplayAttachmentTemplate, MaterialId, PartDefinition, UnitTemplate, UnitType } from "../types.ts";
+import type { DisplayAttachmentTemplate, PartDefinition, UnitTemplate, UnitType } from "../types.ts";
 
 export type TemplateValidationResult = {
   errors: string[];
@@ -30,10 +29,6 @@ function resolveCatalog(partCatalog?: ReadonlyArray<PartDefinition>): PartDefini
 
 function isUnitType(value: unknown): value is UnitType {
   return value === "ground" || value === "air";
-}
-
-function isMaterialId(value: unknown): value is MaterialId {
-  return typeof value === "string" && value in MATERIALS;
 }
 
 function isDisplayKind(value: unknown): value is DisplayAttachmentTemplate["kind"] {
@@ -61,10 +56,11 @@ function unique(items: string[]): string[] {
 function computeAirLiftAccel(template: UnitTemplate, partCatalog: ReadonlyArray<PartDefinition>): number {
   let mass = 0;
   for (const cell of template.structure) {
-    if (!isMaterialId(cell.material)) {
+    const part = resolvePartDefinitionForAttachment({ partId: cell.partId }, partCatalog);
+    if (!part || part.layer !== "structure") {
       continue;
     }
-    mass += MATERIALS[cell.material].mass;
+    mass += Math.max(0, part.stats?.mass ?? 0);
   }
   for (const attachment of template.attachments) {
     const part = resolvePartDefinitionForAttachment({ partId: attachment.partId, component: attachment.component }, partCatalog);
@@ -143,8 +139,9 @@ export function validateTemplateDetailed(
   }
 
   for (const cell of template.structure) {
-    if (!isMaterialId(cell.material)) {
-      errors.push("invalid structure material");
+    const part = resolvePartDefinitionForAttachment({ partId: cell.partId }, partCatalog);
+    if (!part || part.layer !== "structure") {
+      errors.push("invalid structure partId");
     }
     if ((cell.x !== undefined && !Number.isInteger(cell.x)) || (cell.y !== undefined && !Number.isInteger(cell.y))) {
       errors.push("structure coordinates must be integers");

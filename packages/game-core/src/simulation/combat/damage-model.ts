@@ -1,4 +1,3 @@
-import { MATERIALS } from "../../config/balance/materials.ts";
 import { COMPONENTS } from "../../config/balance/weapons.ts";
 import { canOperate } from "../units/control-unit-rules.ts";
 import { aliveStructureCells, destroyCell } from "../units/structure-grid.ts";
@@ -33,8 +32,7 @@ export function applyHitToUnit(
   const targetCell = impactedCellId !== null
     ? ordered.find((cell) => cell.id === impactedCellId) ?? (impactSide >= 0 ? ordered[ordered.length - 1] : ordered[0])
     : (impactSide >= 0 ? ordered[ordered.length - 1] : ordered[0]);
-  const material = MATERIALS[targetCell.material];
-  const damageAfterArmor = incomingDamage - Math.max(0, material.armor);
+  const damageAfterArmor = incomingDamage - Math.max(0, targetCell.armor);
   const effectiveDamage = damageAfterArmor <= 0 ? 1 : damageAfterArmor;
   targetCell.strain += effectiveDamage;
 

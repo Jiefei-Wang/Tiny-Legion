@@ -417,8 +417,9 @@ Editor UX implementation details:
 - Active layer (`structure`, `functional`, `display`) is switched from right-panel controls above the part palette.
 - Template editor functional palette uses part catalog entries (not only hardcoded component IDs).
 - Template editor functional palette applies template-type compatibility filtering: `air`-tagged parts are hidden on ground templates, `ground`-tagged parts are hidden on air templates, and untagged parts remain shared.
-- Template editor structure palette is also part-catalog driven (file-backed structure-material parts mapped to selectable materials), not a direct `MATERIALS` enumeration.
-- Template gas cost is computed from part gas values by default (material structure parts + functional parts), with optional per-template explicit gas override.
+- Template editor structure palette is part-catalog driven and keyed by structure `part.id` (no material-bucket dedupe).
+- Template structure schema uses `partId` per cell (not `material`), and template gas cost is computed from structure-part + functional-part gas values by default, with optional per-template explicit gas override.
+- Template parsing is strict for structure cells: invalid or missing structure `partId` fails parsing (no legacy `material` fallback path).
 - Part Designer supports optional `stats.gasCost` override per part; deleting the field reverts to default gas calculation from base component/material defaults.
 - Editor `Open` window lists all templates; clicking a template row opens it directly, and right-aligned `Copy` / `Delete` actions clone (`-copy` suffix) or remove file-backed entries.
 - Editor has `Save` (persist to user templates) and `Save to Default` (persist to default templates); both paths run the same template normalization before writing JSON.

@@ -6,72 +6,72 @@
   "gasCostOverride": 140,
   "structure": [
     {
-      "material": "ceramic",
+      "partId": "material-ceramic",
       "x": -2,
       "y": -2
     },
     {
-      "material": "ceramic",
+      "partId": "material-ceramic",
       "x": -1,
       "y": -2
     },
     {
-      "material": "ceramic",
+      "partId": "material-ceramic",
       "x": 0,
       "y": -2
     },
     {
-      "material": "basic",
+      "partId": "material-basic",
       "x": -2,
       "y": -1
     },
     {
-      "material": "basic",
+      "partId": "material-basic",
       "x": -1,
       "y": -1
     },
     {
-      "material": "basic",
+      "partId": "material-basic",
       "x": 0,
       "y": -1
     },
     {
-      "material": "reactive",
+      "partId": "material-reactive",
       "x": 1,
       "y": -1
     },
     {
-      "material": "basic",
+      "partId": "material-basic",
       "x": -2,
       "y": 0
     },
     {
-      "material": "basic",
+      "partId": "material-basic",
       "x": -1,
       "y": 0
     },
     {
-      "material": "basic",
+      "partId": "material-basic",
       "x": 0,
       "y": 0
     },
     {
-      "material": "reactive",
+      "partId": "material-reactive",
       "x": 1,
       "y": 0
     },
     {
-      "material": "ceramic",
+      "partId": "material-ceramic",
       "x": -2,
       "y": 1
     },
     {
-      "material": "ceramic",
+      "partId": "material-ceramic",
       "x": -1,
       "y": 1
     },
     {
-      "material": "ceramic",
+      "partId": "material-ceramic",
       "x": 0,
       "y": 1
     }

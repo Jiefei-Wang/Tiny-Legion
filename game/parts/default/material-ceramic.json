@@ -37,7 +37,6 @@
   "properties": {
     "category": "structure",
     "subcategory": "material",
-    "materialId": "ceramic",
     "materialArmor": 1.2,
     "materialRecoverPerSecond": 2,
     "materialColor": "#a8d1e6",

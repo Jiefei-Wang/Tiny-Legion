@@ -75,7 +75,7 @@ Current implementation includes dedicated in-app editor tabs where the player ca
 - Switch between `Structure`, `Functional`, and `Display` layers from the right-side panel.
 - Use a resizable editor grid (up to `10x10`) for placement/removal by cell.
 - Choose parts/components from a layer-specific side palette (placeholder image cards + hover info).
-- Template Editor structure palette is sourced from file-backed structure-material part definitions (via part catalog), not directly from raw material config enumeration.
+- Template Editor structure palette is sourced from file-backed structure parts (via part catalog) by `part.id` (no material-bucket dedupe).
 - Template Editor functional palette now applies unit-type compatibility filtering: parts tagged `air` only show for air templates, parts tagged `ground` only show for ground templates, and untagged parts remain available to both.
 - Toggle delete mode to remove items on the active layer.
 - Open any existing template from an `Open` window, create a template copy using one-click `Copy` (`-copy` postfix), or `Delete` file-backed entries from the same list.
@@ -105,6 +105,7 @@ Current implementation includes dedicated in-app editor tabs where the player ca
   - `Error`: severe issues (for example missing control module, air unit cannot hold altitude).
   - `Warning`: spawn-allowed but suboptimal setup (for example no engine for ground unit, no weapon).
 - Runtime deployment/spawn gate: templates with any `Error` are blocked from spawning in battle.
+- Template schema is strict for structure cells: each cell must provide `partId` that resolves to a `layer: "structure"` part. Legacy `material` fields are not accepted.
 
 ### 4.0 Developer Part Designer (Part Editor)
 
