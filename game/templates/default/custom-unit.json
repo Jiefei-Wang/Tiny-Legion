@@ -2,8 +2,6 @@
   "id": "custom-unit",
   "name": "battle tank",
   "type": "ground",
-  "gasCost": 140,
-  "gasCostOverride": 140,
   "structure": [
     {
       "partId": 12,

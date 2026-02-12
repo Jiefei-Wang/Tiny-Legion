@@ -556,13 +556,18 @@ export function parseTemplate(input: unknown, options: ParseTemplateOptions = {}
   const injectLoaders = options.injectLoaders ?? true;
   const sanitizePlacement = options.sanitizePlacement ?? true;
 
-  const gasCostOverride = typeof data.gasCost === "number" ? Math.max(0, Math.floor(data.gasCost)) : undefined;
+  const explicitGasCostOverride = typeof data.gasCostOverride === "number" && Number.isFinite(data.gasCostOverride)
+    ? Math.max(0, Math.floor(data.gasCostOverride))
+    : undefined;
+  const legacyGasCost = typeof data.gasCost === "number" && Number.isFinite(data.gasCost)
+    ? Math.max(0, Math.floor(data.gasCost))
+    : undefined;
   const template: UnitTemplate = {
     id: data.id.trim(),
     name: data.name.trim(),
     type: data.type,
-    gasCost: gasCostOverride ?? 0,
-    gasCostOverride,
+    gasCost: 0,
+    gasCostOverride: undefined,
     structure,
     attachments,
     display,
@@ -575,7 +580,11 @@ export function parseTemplate(input: unknown, options: ParseTemplateOptions = {}
   const loaderNormalized = injectLoaders
     ? { ...placementNormalized, attachments: ensureLoaderCoverage(placementNormalized, partCatalog) }
     : placementNormalized;
-  loaderNormalized.gasCost = loaderNormalized.gasCostOverride ?? computeTemplateGasCost(loaderNormalized, partCatalog);
+  const computedGasCost = computeTemplateGasCost(loaderNormalized, partCatalog);
+  const resolvedGasOverride = explicitGasCostOverride ??
+    (legacyGasCost !== undefined && legacyGasCost !== computedGasCost ? legacyGasCost : undefined);
+  loaderNormalized.gasCostOverride = resolvedGasOverride;
+  loaderNormalized.gasCost = resolvedGasOverride ?? computedGasCost;
   return loaderNormalized;
 }
 

@@ -18,7 +18,8 @@
       "isAttachPoint": false,
       "isAnchorPoint": true,
       "isShootingPoint": false,
-      "takesDamage": false
+      "takesDamage": false,
+      "takesFunctionalDamage": false
     }
   ],
   "placement": {
@@ -28,6 +29,10 @@
     "requireStructureOnStructureOccupiedBoxes": true,
     "requireEmptyStructureOffsets": [],
     "requireEmptyFunctionalOffsets": []
+  },
+  "stats": {
+    "power": 100,
+    "maxSpeed": 300
   },
   "properties": {
     "category": "functional",

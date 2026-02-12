@@ -3,7 +3,6 @@
   "name": "Scout Buggy",
   "type": "ground",
   "gasCost": 22,
-  "gasCostOverride": 22,
   "structure": [
     {
       "partId": 11

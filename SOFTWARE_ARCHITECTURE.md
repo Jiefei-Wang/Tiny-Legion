@@ -236,6 +236,7 @@ Map node metadata supports test-only battle tuning via optional fields on `MapNo
 - Test Arena UI controls for enemy count / battlefield size / zoom apply on input commit (`Enter` or blur) without extra apply buttons.
 - Test Arena enemy-spawn selection uses a checkbox dropdown allowlist; selected template IDs are applied to `BattleSession` enemy auto-spawn candidate filtering (manual spawn uses its own direct template selector).
 - Test Arena Unit tab includes an auto-spawn mirror toggle that spawns the same auto-selected template on the player side whenever the enemy auto-spawner creates a unit.
+- Test Arena Unit tab includes a `Clear all units` action that removes all currently active units from the running Test Arena session.
 - Test Arena AI control supports side-level composed-model selection (full `{ target, movement, shoot }` bundle) plus a `2 x 3` component grid fallback for custom per-module composition.
 - Dropdown inventory is populated from:
   - built-in module presets,
@@ -420,6 +421,7 @@ Editor UX implementation details:
 - Template editor functional palette applies template-type compatibility filtering: `air`-tagged parts are hidden on ground templates, `ground`-tagged parts are hidden on air templates, and untagged parts remain shared.
 - Template editor structure palette is part-catalog driven and keyed by structure `part.id` (no material-bucket dedupe).
 - Template structure schema uses `partId` per cell (not `material`), and template gas cost is computed from structure-part + functional-part gas values by default, with optional per-template explicit gas override.
+- Template persistence only writes `gasCost` when an explicit override is set; normalized computed gas remains runtime-derived so later part edits still auto-refresh total gas.
 - Template parsing is strict for structure cells: invalid or missing structure `partId` fails parsing (no legacy `material` fallback path).
 - Part Designer supports optional `stats.gasCost` override per part; deleting the field reverts to default gas calculation from base component/material defaults.
 - Editor `Open` window lists all templates; clicking a template row opens it directly, and right-aligned `Copy` / `Delete` actions clone (`-copy` suffix) or remove file-backed entries.

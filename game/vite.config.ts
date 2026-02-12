@@ -292,6 +292,26 @@ function templateStorePlugin() {
     return mergePartCatalogs(fromDefault, fromUser);
   };
 
+  const serializeTemplateForStore = (
+    template: NonNullable<ReturnType<typeof parseTemplate>>,
+  ): Record<string, unknown> => ({
+    id: template.id,
+    name: template.name,
+    type: template.type,
+    ...(typeof template.gasCostOverride === "number" ? { gasCost: Math.max(0, Math.floor(template.gasCostOverride)) } : {}),
+    structure: template.structure.map((cell) => ({ partId: cell.partId, x: cell.x, y: cell.y })),
+    attachments: template.attachments.map((attachment) => ({
+      component: attachment.component,
+      partId: attachment.partId,
+      cell: attachment.cell,
+      x: attachment.x,
+      y: attachment.y,
+      rotateQuarter: attachment.rotateQuarter,
+      rotate90: attachment.rotate90,
+    })),
+    display: template.display?.map((item) => ({ kind: item.kind, cell: item.cell, x: item.x, y: item.y })) ?? [],
+  });
+
   const readTemplatesInDir = (dirPath: string): unknown[] => {
     ensureDir(dirPath);
     const files = readdirSync(dirPath).filter((name) => name.endsWith(".json"));
@@ -310,7 +330,7 @@ function templateStorePlugin() {
         if (!normalized) {
           continue;
         }
-        const normalizedRaw = `${JSON.stringify(normalized, null, 2)}\n`;
+        const normalizedRaw = `${JSON.stringify(serializeTemplateForStore(normalized), null, 2)}\n`;
         if (raw !== normalizedRaw) {
           writeFileSync(filePath, normalizedRaw, "utf8");
         }
@@ -375,7 +395,7 @@ function templateStorePlugin() {
               return;
             }
             const filePath = resolve(defaultDir, `${id}.json`);
-            writeFileSync(filePath, `${JSON.stringify(normalized, null, 2)}\n`, "utf8");
+            writeFileSync(filePath, `${JSON.stringify(serializeTemplateForStore(normalized), null, 2)}\n`, "utf8");
             res.setHeader("content-type", "application/json");
             res.end(JSON.stringify({ ok: true }));
           } catch {
@@ -435,7 +455,7 @@ function templateStorePlugin() {
               return;
             }
             const filePath = resolve(userDir, `${id}.json`);
-            writeFileSync(filePath, `${JSON.stringify(normalized, null, 2)}\n`, "utf8");
+            writeFileSync(filePath, `${JSON.stringify(serializeTemplateForStore(normalized), null, 2)}\n`, "utf8");
             res.setHeader("content-type", "application/json");
             res.end(JSON.stringify({ ok: true }));
           } catch {

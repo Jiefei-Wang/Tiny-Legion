@@ -283,6 +283,16 @@ export class BattleSession {
     return this.getAliveEnemyCount();
   }
 
+  public clearAllUnits(): number {
+    const removed = this.state.units.length;
+    if (removed <= 0) {
+      return 0;
+    }
+    this.state.units = [];
+    this.clearControlSelection();
+    return removed;
+  }
+
   public spawnEnemyTemplate(templateId: string): boolean {
     return this.arenaDeploy("enemy", templateId, { chargeGas: false, ignoreCap: true, ignoreLowGasThreshold: true });
   }

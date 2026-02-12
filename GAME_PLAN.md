@@ -45,7 +45,7 @@ Lose condition chain:
   - Contested
 - Includes a dedicated `Test Arena` top-level tab (parallel to `Battle`) for debug scenarios.
 - Test Arena overrides both battle bases to extremely high HP so base destruction does not end the test run.
-- Test Arena controls allow setting enemy count, battlefield simulation size (`W`/`H`), ground-zone height, display zoom percentage, selecting enemy auto-spawn templates from a checkbox dropdown, optionally mirroring those automatic spawns to the player side using the same template, and toggling controlled-unit invincibility (no HP loss, still collides and can be hit).
+- Test Arena controls allow setting enemy count, battlefield simulation size (`W`/`H`), ground-zone height, display zoom percentage, selecting enemy auto-spawn templates from a checkbox dropdown, optionally mirroring those automatic spawns to the player side using the same template, manually spawning an enemy template, clearing all currently active arena units, and toggling controlled-unit invincibility (no HP loss, still collides and can be hit).
 - Test Arena options panel is organized as collapsible tabs to save space: battle start/stop actions are always in the first row, `Unit` is expanded by default, `AI Selection` is collapsed by default, and `UI Configuration` is grouped in its own tab.
 - Test Arena AI presets are local JS/TS-only and run without external Python bridge/service dependencies.
 - Test Arena parameter inputs apply on `Enter` or input blur (no separate apply button).
@@ -97,6 +97,7 @@ Current implementation includes dedicated in-app editor tabs where the player ca
 - Battle rendering and hitboxes now honor stored structure/display/functional coordinates instead of compacting to a fixed index grid.
 - Template gas cost defaults to the sum of part gas values (structure material parts + functional parts).
 - Templates can still override gas cost explicitly; when override is absent, gas auto-recomputes from current part composition.
+- Template save payloads persist `gasCost` only when an explicit template gas override is set; computed gas is runtime-derived and not treated as an override.
 - Part Designer includes editable part gas override (`stats.gasCost`); clearing the value resets to default computed gas for that part family.
 - Save templates from editor to user storage (`Save`) or to default storage (`Save to Default`) and deploy them in battle.
 - Template Editor exposes optional gas override input; leaving it empty keeps gas auto-computed from part gas totals.

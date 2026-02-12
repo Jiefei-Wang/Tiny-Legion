@@ -10,15 +10,28 @@
   },
   "boxes": [
     {
-      "x": 0,
-      "y": 0,
+      "x": -1,
+      "y": -1,
       "occupiesStructureSpace": false,
-      "occupiesFunctionalSpace": false,
+      "occupiesFunctionalSpace": true,
       "needsStructureBehind": false,
-      "isAttachPoint": true,
-      "isAnchorPoint": true,
+      "isAttachPoint": false,
+      "isAnchorPoint": false,
       "isShootingPoint": false,
-      "takesDamage": false
+      "takesDamage": true,
+      "takesFunctionalDamage": true
+    },
+    {
+      "x": 0,
+      "y": -1,
+      "occupiesStructureSpace": false,
+      "occupiesFunctionalSpace": true,
+      "needsStructureBehind": false,
+      "isAttachPoint": false,
+      "isAnchorPoint": false,
+      "isShootingPoint": false,
+      "takesDamage": true,
+      "takesFunctionalDamage": true
     },
     {
       "x": 1,
@@ -29,69 +42,29 @@
       "isAttachPoint": false,
       "isAnchorPoint": false,
       "isShootingPoint": false,
-      "takesDamage": true
+      "takesDamage": true,
+      "takesFunctionalDamage": true
     },
     {
-      "x": 1,
+      "x": 0,
       "y": 0,
       "occupiesStructureSpace": false,
-      "occupiesFunctionalSpace": true,
+      "occupiesFunctionalSpace": false,
       "needsStructureBehind": false,
-      "isAttachPoint": false,
-      "isAnchorPoint": false,
+      "isAttachPoint": true,
+      "isAnchorPoint": true,
       "isShootingPoint": false,
-      "takesDamage": true
-    },
-    {
-      "x": 1,
-      "y": 1,
-      "occupiesStructureSpace": false,
-      "occupiesFunctionalSpace": true,
-      "needsStructureBehind": false,
-      "isAttachPoint": false,
-      "isAnchorPoint": false,
-      "isShootingPoint": false,
-      "takesDamage": true
+      "takesDamage": false,
+      "takesFunctionalDamage": false
     }
   ],
   "placement": {
-    "requireStructureOffsets": [
-      {
-        "x": 0,
-        "y": 1
-      }
-    ],
+    "requireStructureOffsets": [],
     "requireStructureBelowAnchor": true,
     "requireStructureOnFunctionalOccupiedBoxes": false,
     "requireStructureOnStructureOccupiedBoxes": true,
-    "requireEmptyStructureOffsets": [
-      {
-        "x": 1,
-        "y": -1
-      },
-      {
-        "x": 1,
-        "y": 0
-      },
-      {
-        "x": 1,
-        "y": 1
-      }
-    ],
-    "requireEmptyFunctionalOffsets": [
-      {
-        "x": 1,
-        "y": -1
-      },
-      {
-        "x": 1,
-        "y": 0
-      },
-      {
-        "x": 1,
-        "y": 1
-      }
-    ]
+    "requireEmptyStructureOffsets": [],
+    "requireEmptyFunctionalOffsets": []
   },
   "properties": {
     "category": "functional",

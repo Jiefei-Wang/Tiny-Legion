@@ -4017,6 +4017,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
               </select>
             </label>
             <button id="btnSpawnTestEnemy">Spawn</button>
+            <button id="btnClearTestArenaUnits" class="warn">Clear all units</button>
           </div>
           <div class="small">Checkbox dropdown controls automatic enemy spawn templates. Mirror toggle also auto spawns selected templates on player side.</div>
           <label class="small"><input id="testArenaInvinciblePlayer" type="checkbox" ${testArenaInvinciblePlayer ? "checked" : ""} /> Player controlled invincible</label>
@@ -4980,6 +4981,18 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       }
       const spawned = battle.spawnEnemyTemplate(selection);
       addLog(spawned ? `Spawned enemy: ${selection}.` : `Failed to spawn enemy: ${selection}.`, spawned ? "good" : "bad");
+      renderPanels();
+    });
+
+    getOptionalElement<HTMLButtonElement>("#btnClearTestArenaUnits")?.addEventListener("click", async () => {
+      if (!battle.getState().active || battle.getState().nodeId !== testArenaNode.id) {
+        await startTestArena();
+      }
+      const cleared = battle.clearAllUnits();
+      addLog(
+        cleared > 0 ? `Cleared ${cleared} unit(s) from Test Arena.` : "No units to clear in Test Arena.",
+        cleared > 0 ? "good" : "warn",
+      );
       renderPanels();
     });
 
