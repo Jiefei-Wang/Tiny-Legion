@@ -85,6 +85,8 @@ Current implementation includes dedicated in-app editor tabs where the player ca
 - Weapon functional parts store additive orientation (`rotateQuarter`, 0..3 in 90-degree steps).
 - Functional placement now uses part footprints from part catalog definitions (instead of hardcoded component-only footprints), and footprint rotation follows `rotateQuarter`.
 - Functional parts may declare `directional: true`; only directional parts show direction UI and use rotation controls. Parts without it are undirectional by default.
+- Effective facing for directional functional parts is computed as `part.direction` (default facing) + template `rotateQuarter` (user rotation). Template-editor direction arrows and propeller thrust/lift both use this combined facing.
+- For propellers, combined facing represents airflow/push direction; actual thrust (including lift contribution) is applied in the opposite direction.
 - Functional placement supports `center place on click` mode in template editor (developer/user toggle).
 - Editor canvas uses a resizable grid up to `10x10` with right-drag panning.
 - Editor viewport input now supports right-click delete/erase on the targeted cell/box; right-click drag still pans (click vs drag), and mouse-wheel zoom is supported in both Template Editor and Part Editor.

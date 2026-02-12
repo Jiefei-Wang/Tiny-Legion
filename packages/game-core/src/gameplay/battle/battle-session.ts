@@ -33,7 +33,7 @@ import { createBaselineCompositeAiController } from "../../ai/composite/baseline
 import { validateTemplateDetailed } from "../../templates/template-validation.ts";
 import { createDefaultPartDefinitions, mergePartCatalogs } from "../../parts/part-schema.ts";
 import type { BattleAiController, CombatDecision } from "../../ai/composite/composite-ai.ts";
-import type { BattleState, CommandResult, FireBlockDetail, FireRequest, KeyState, MapNode, PartDefinition, Side, UnitCommand, UnitInstance, UnitTemplate, WeaponClass } from "../../types.ts";
+import type { BattleState, CommandResult, FireBlockDetail, FireRequest, KeyState, MapNode, PartDefinition, PartDirection, Side, UnitCommand, UnitInstance, UnitTemplate, WeaponClass } from "../../types.ts";
 
 export interface BattleHooks {
   addLog: (text: string, tone?: "good" | "warn" | "bad" | "") => void;
@@ -1777,6 +1777,28 @@ export class BattleSession {
     return { x: 0, y: -1 };
   }
 
+  private getDirectionQuarter(direction: PartDirection | undefined): 0 | 1 | 2 | 3 {
+    if (direction === "down") {
+      return 1;
+    }
+    if (direction === "left") {
+      return 2;
+    }
+    if (direction === "up") {
+      return 3;
+    }
+    return 0;
+  }
+
+  private resolveAttachmentFacingQuarter(attachment: { partId?: number; rotateQuarter: number }): 0 | 1 | 2 | 3 {
+    const baseQuarter = this.getDirectionQuarter(
+      attachment.partId
+        ? this.partCatalog.find((part) => part.id === attachment.partId)?.direction
+        : undefined,
+    );
+    return ((baseQuarter + attachment.rotateQuarter) % 4 + 4) % 4 as 0 | 1 | 2 | 3;
+  }
+
   private computeDirectedAirAccel(unit: UnitInstance, dirX: number, dirY: number): number {
     const len = Math.hypot(dirX, dirY);
     if (len <= 1e-6) {
@@ -1799,8 +1821,10 @@ export class BattleSession {
         accel += baseAccel;
         continue;
       }
-      const propDir = this.getPropellerDirection(unit, attachment.rotateQuarter);
-      const dot = ux * propDir.x + uy * propDir.y;
+      const facingQuarter = this.resolveAttachmentFacingQuarter(attachment);
+      const propDir = this.getPropellerDirection(unit, facingQuarter);
+      // Propeller facing represents push/airflow direction; thrust is the opposite direction.
+      const dot = ux * (-propDir.x) + uy * (-propDir.y);
       const angleLimitDeg = stats.propulsion.thrustAngleDeg ?? 25;
       const cosLimit = Math.cos((angleLimitDeg * Math.PI) / 180);
       if (dot < cosLimit) {

@@ -2475,6 +2475,11 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       const functionalUsage = editorDraft.attachments.length;
       const errorSummary = validation.errors.length > 0 ? validation.errors.join(" | ") : "none";
       const warningSummary = validation.warnings.length > 0 ? validation.warnings.join(" | ") : "none";
+      const selectedDirectionalPart = resolvePartForSelection(editorSelection);
+      const selectedFacingQuarter = getDirectionalFacingQuarter(selectedDirectionalPart, editorWeaponRotateQuarter);
+      const selectedDirectionText = isCurrentEditorSelectionDirectional()
+        ? `Weapon direction: ${getRotationSymbol(selectedFacingQuarter)} (${selectedFacingQuarter * 90}deg)`
+        : "Weapon direction: n/a";
       const paletteCards = Array.from({ length: 30 }, (_, index) => {
         const item = catalog[index];
         if (!item) {
@@ -2508,7 +2513,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         </div>
         <div class="small">Structure: ${editorDraft.structure.length} | Functional: ${functionalUsage} | Display: ${displayCount}</div>
         <div class="small">Control Units: ${controlCount}</div>
-        <div class="small">${isCurrentEditorSelectionDirectional() ? `Weapon direction: ${getRotationSymbol()} (${editorWeaponRotateQuarter * 90}deg)` : "Weapon direction: n/a"}</div>
+        <div class="small">${selectedDirectionText}</div>
         <div class="small">Placement: ${editorPlaceByCenter ? "center-on-click" : "anchor-on-click"}</div>
         <div class="small">Material usage: ${materialUsage}</div>
         <div class="small bad">Errors (${validation.errors.length}): ${errorSummary}</div>
@@ -2917,14 +2922,35 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     recalcEditorDraftFromSlots();
   };
 
-  const getRotationSymbol = (): string => {
-    if (editorWeaponRotateQuarter === 0) {
+  const getDirectionQuarter = (direction: PartDirection | undefined): 0 | 1 | 2 | 3 => {
+    if (direction === "down") {
+      return 1;
+    }
+    if (direction === "left") {
+      return 2;
+    }
+    if (direction === "up") {
+      return 3;
+    }
+    return 0;
+  };
+
+  const getDirectionalFacingQuarter = (
+    part: PartDefinition | null,
+    rotateQuarter: 0 | 1 | 2 | 3,
+  ): 0 | 1 | 2 | 3 => {
+    const baseQuarter = getDirectionQuarter(part?.direction ?? "right");
+    return ((baseQuarter + rotateQuarter) % 4) as 0 | 1 | 2 | 3;
+  };
+
+  const getRotationSymbol = (rotateQuarter: 0 | 1 | 2 | 3): string => {
+    if (rotateQuarter === 0) {
       return "->";
     }
-    if (editorWeaponRotateQuarter === 1) {
+    if (rotateQuarter === 1) {
       return "v";
     }
-    if (editorWeaponRotateQuarter === 2) {
+    if (rotateQuarter === 2) {
       return "<-";
     }
     return "^";
@@ -3528,13 +3554,15 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     context.fillText("Left-click: place/delete | Right-click: delete (functional first) | Right-drag: pan | Mouse wheel: zoom | Origin: (0,0).", 18, 66);
 
     if (isCurrentEditorSelectionDirectional()) {
+      const selectedPart = resolvePartForSelection(editorSelection);
+      const facingQuarter = getDirectionalFacingQuarter(selectedPart, editorWeaponRotateQuarter);
       context.fillStyle = "rgba(28, 43, 61, 0.92)";
       context.fillRect(drawCanvas.width - 170, 14, 154, 40);
       context.strokeStyle = "rgba(139, 172, 206, 0.8)";
       context.strokeRect(drawCanvas.width - 170, 14, 154, 40);
       context.fillStyle = "#dbe8f6";
       context.font = "12px Trebuchet MS";
-      context.fillText(`Dir: ${getRotationSymbol()}`, drawCanvas.width - 160, 31);
+      context.fillText(`Dir: ${getRotationSymbol(facingQuarter)}`, drawCanvas.width - 160, 31);
       context.fillText(`Q ccw | E cw`, drawCanvas.width - 160, 47);
     }
 
@@ -3591,22 +3619,27 @@ export function bootstrap(options: BootstrapOptions = {}): void {
             context.fillText(functional.component.slice(0, 2).toUpperCase(), x + 6, y + 30);
           }
           if (functional.isAnchor && COMPONENTS[functional.component].directional) {
+            const part = resolvePartDefinitionForAttachment(
+              { partId: functional.partId, component: functional.component },
+              parts,
+            );
+            const facingQuarter = getDirectionalFacingQuarter(part, functional.rotateQuarter);
             context.strokeStyle = "#ffe1d4";
             context.lineWidth = 1.5;
             context.beginPath();
-            if (functional.rotateQuarter === 0) {
+            if (facingQuarter === 0) {
               context.moveTo(x + 18, y + 24);
               context.lineTo(x + 34, y + 24);
               context.lineTo(x + 30, y + 20);
               context.moveTo(x + 34, y + 24);
               context.lineTo(x + 30, y + 28);
-            } else if (functional.rotateQuarter === 1) {
+            } else if (facingQuarter === 1) {
               context.moveTo(x + 24, y + 18);
               context.lineTo(x + 24, y + 34);
               context.lineTo(x + 20, y + 30);
               context.moveTo(x + 24, y + 34);
               context.lineTo(x + 28, y + 30);
-            } else if (functional.rotateQuarter === 2) {
+            } else if (facingQuarter === 2) {
               context.moveTo(x + 34, y + 24);
               context.lineTo(x + 18, y + 24);
               context.lineTo(x + 22, y + 20);
@@ -4231,7 +4264,14 @@ export function bootstrap(options: BootstrapOptions = {}): void {
           <span class="small">Selected: ${editorSelection || "none"}</span>
         </div>
         <div class="row">
-          <span class="small">${isCurrentEditorSelectionDirectional() ? `Direction: ${editorWeaponRotateQuarter * 90}deg (${getRotationSymbol()})` : "Direction: n/a (undirectional component)"}</span>
+          <span class="small">${(() => {
+            if (!isCurrentEditorSelectionDirectional()) {
+              return "Direction: n/a (undirectional component)";
+            }
+            const selectedPart = resolvePartForSelection(editorSelection);
+            const facingQuarter = getDirectionalFacingQuarter(selectedPart, editorWeaponRotateQuarter);
+            return `Direction: ${facingQuarter * 90}deg (${getRotationSymbol(facingQuarter)})`;
+          })()}</span>
         </div>
         <div class="row">
           <button id="btnNewDraft">New Draft</button>

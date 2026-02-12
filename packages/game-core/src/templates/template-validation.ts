@@ -8,7 +8,7 @@ import {
   rotateOffsetByQuarter,
   resolvePartDefinitionForAttachment,
 } from "../parts/part-schema.ts";
-import type { DisplayAttachmentTemplate, PartDefinition, UnitTemplate, UnitType } from "../types.ts";
+import type { DisplayAttachmentTemplate, PartDefinition, PartDirection, UnitTemplate, UnitType } from "../types.ts";
 
 export type TemplateValidationResult = {
   errors: string[];
@@ -47,6 +47,19 @@ function getPropellerDirection(rotateQuarter: number): { x: number; y: number } 
     return { x: -1, y: 0 };
   }
   return { x: 0, y: -1 };
+}
+
+function getDirectionQuarter(direction: PartDirection | undefined): 0 | 1 | 2 | 3 {
+  if (direction === "down") {
+    return 1;
+  }
+  if (direction === "left") {
+    return 2;
+  }
+  if (direction === "up") {
+    return 3;
+  }
+  return 0;
 }
 
 function unique(items: string[]): string[] {
@@ -100,8 +113,10 @@ function computeAirLiftAccel(template: UnitTemplate, partCatalog: ReadonlyArray<
       boxes: [{ x: 0, y: 0 }],
       directional: stats.directional === true,
     }, rotateQuarterRaw);
-    const propDir = getPropellerDirection(rotateQuarter);
-    const dot = propDir.x * 0 + propDir.y * -1;
+    const facingQuarter = ((getDirectionQuarter(part?.direction ?? "right") + rotateQuarter) % 4 + 4) % 4;
+    const propDir = getPropellerDirection(facingQuarter);
+    // Propeller facing represents push/airflow direction; lift/thrust is opposite.
+    const dot = (-propDir.x) * 0 + (-propDir.y) * -1;
     const angleLimitDeg = stats.propulsion.thrustAngleDeg ?? 25;
     const cosLimit = Math.cos((angleLimitDeg * Math.PI) / 180);
     if (dot < cosLimit) {

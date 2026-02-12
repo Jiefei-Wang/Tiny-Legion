@@ -440,6 +440,7 @@ Editor UX implementation details:
 - Weapon functional entries may carry `rotateQuarter` metadata (0..3, each step = 90deg).
 - Heavy-shot weapons use grouped multi-cell occupancy in editor and rotate footprint with `rotateQuarter`.
 - Functional component rotation/rendering now keys off a `directional` property (default undirectional).
+- Directional facing uses additive composition: part-level default `direction` + runtime/template `rotateQuarter` (used by editor arrows and propeller directional thrust/lift).
 - Editor grid is user-resizable (up to 10x10) and supports mouse drag panning.
 - Template editor supports optional center-based placement (`center place on click`) for multi-cell part footprints.
 - Runtime unit instancing and battle rendering consume template coordinates, so visual shape and hit cell layout match editor placement.
