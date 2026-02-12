@@ -93,6 +93,7 @@ Current implementation includes dedicated in-app editor tabs where the player ca
 - In Template Editor, right-click delete is staged per cell: delete functional first; if no functional remains, delete structure (and attached display) on the next click.
 - Battle, Template Editor, and Part Editor each render to their own canvas while sharing the same viewport window.
 - Template Editor and Part Editor canvas overlays show the current template/part name at top-left.
+- Template Editor bottom-left combat preview shows `Achievable speed` and (for air templates) `Lift` vs hold-gravity threshold.
 - First opening of Template Editor/Part Editor without a valid existing selection starts from an empty editor grid.
 - Template Editor and Part Editor now keep independent pan/view memory; switching tabs restores each editor's last view.
 - Editor view defaults to centered origin (`0,0`) on first load and recenters only when loading a different template/part.

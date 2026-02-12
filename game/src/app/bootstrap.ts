@@ -1,5 +1,12 @@
 import { armyCap } from "../config/balance/commander.ts";
-import { BATTLEFIELD_HEIGHT, BATTLEFIELD_WIDTH, DEFAULT_GROUND_HEIGHT_RATIO, BATTLE_SALVAGE_REFUND_FACTOR } from "../config/balance/battlefield.ts";
+import {
+  AIR_HOLD_GRAVITY,
+  AIR_THRUST_ACCEL_SCALE,
+  BATTLEFIELD_HEIGHT,
+  BATTLEFIELD_WIDTH,
+  DEFAULT_GROUND_HEIGHT_RATIO,
+  BATTLE_SALVAGE_REFUND_FACTOR,
+} from "../config/balance/battlefield.ts";
 import { applyStrategicEconomyTick } from "../gameplay/map/garrison-upkeep.ts";
 import { createMapNodes } from "../gameplay/map/node-graph.ts";
 import { settleGarrison as settleNodeGarrison, setNodeOwner } from "../gameplay/map/occupation.ts";
@@ -3342,6 +3349,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
 
   const getEditorCombatPreview = (): {
     achievableSpeed: number;
+    liftAccel: number | null;
     weaponCounts: Record<"rapid-fire" | "heavy-shot" | "explosive" | "tracking" | "beam-precision" | "control-utility", number>;
   } => {
     let totalMass = 0;
@@ -3386,8 +3394,42 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       achievableSpeed = Math.max(0, Math.min(speedCap, rawSpeed));
     }
 
+    let liftAccel: number | null = null;
+    if (editorDraft.type === "air") {
+      liftAccel = 0;
+      const mass = Math.max(16, totalMass);
+      for (const attachment of editorDraft.attachments) {
+        const stats = COMPONENTS[attachment.component];
+        if (stats.type !== "engine" || stats.propulsion?.platform !== "air") {
+          continue;
+        }
+        const part = resolvePartDefinitionForAttachment({ partId: attachment.partId, component: attachment.component }, parts);
+        const enginePower = Math.max(0, part?.stats?.power ?? stats.power ?? 0);
+        const baseAccel = (enginePower / mass) * AIR_THRUST_ACCEL_SCALE;
+        if (stats.propulsion.mode === "omni") {
+          liftAccel += baseAccel;
+          continue;
+        }
+        const rotateQuarter = (attachment.rotateQuarter ?? 0) as 0 | 1 | 2 | 3;
+        const facingQuarter = getDirectionalFacingQuarter(part, rotateQuarter);
+        const pushDir = rotateOffsetByQuarter(1, 0, facingQuarter);
+        const thrustX = -pushDir.x;
+        const thrustY = -pushDir.y;
+        const dot = thrustX * 0 + thrustY * -1;
+        const angleLimitDeg = stats.propulsion.thrustAngleDeg ?? 25;
+        const cosLimit = Math.cos((angleLimitDeg * Math.PI) / 180);
+        if (dot < cosLimit) {
+          continue;
+        }
+        const inConeScale = Math.max(0, Math.min(1, (dot - cosLimit) / Math.max(1e-6, 1 - cosLimit)));
+        const sideBleed = Math.max(0, Math.min(0.18, (1 - Math.abs(dot)) * 0.18));
+        liftAccel += baseAccel * Math.max(inConeScale, sideBleed);
+      }
+    }
+
     return {
       achievableSpeed,
+      liftAccel,
       weaponCounts,
     };
   };
@@ -3675,16 +3717,20 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     const preview = getEditorCombatPreview();
     const legend = `Wpn by class R:${preview.weaponCounts["rapid-fire"]} H:${preview.weaponCounts["heavy-shot"]} E:${preview.weaponCounts.explosive} T:${preview.weaponCounts.tracking} B:${preview.weaponCounts["beam-precision"]} C:${preview.weaponCounts["control-utility"]}`;
     const speedText = `Achievable speed: ${preview.achievableSpeed.toFixed(1)}`;
+    const liftText = preview.liftAccel === null
+      ? "Lift: n/a (ground unit)"
+      : `Lift: ${preview.liftAccel.toFixed(1)} / ${AIR_HOLD_GRAVITY.toFixed(1)} ${preview.liftAccel >= AIR_HOLD_GRAVITY ? "(hold)" : "(insufficient)"}`;
     const panelX = 16;
-    const panelY = drawCanvas.height - 54;
+    const panelY = drawCanvas.height - 70;
     context.fillStyle = "rgba(19, 30, 44, 0.94)";
-    context.fillRect(panelX, panelY, 530, 38);
+    context.fillRect(panelX, panelY, 530, 54);
     context.strokeStyle = "rgba(128, 172, 206, 0.7)";
-    context.strokeRect(panelX, panelY, 530, 38);
+    context.strokeRect(panelX, panelY, 530, 54);
     context.fillStyle = "#dbe8f6";
     context.font = "12px Trebuchet MS";
     context.fillText(speedText, panelX + 8, panelY + 15);
-    context.fillText(legend, panelX + 8, panelY + 31);
+    context.fillText(liftText, panelX + 8, panelY + 31);
+    context.fillText(legend, panelX + 8, panelY + 47);
   };
 
   const applyPartDesignerCellAction = (slot: number, forceDelete: boolean): void => {
