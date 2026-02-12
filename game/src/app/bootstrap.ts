@@ -4452,8 +4452,8 @@ export function bootstrap(options: BootstrapOptions = {}): void {
           <button id="btnClearGrid">Clear Grid</button>
         </div>
         <div class="row">
-          <button id="btnSaveDraft">Save</button>
-          <button id="btnSaveDraftDefault">Save to Default</button>
+          <button id="btnSaveDraft">Save to User Space</button>
+          <button id="btnSaveDraftDefault">Save</button>
         </div>
       `;
     } else {
@@ -5460,6 +5460,31 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     });
     const saveEditorDraft = async (target: "user" | "default"): Promise<void> => {
       const snapshot = cloneTemplate(editorDraft);
+      const normalizedName = snapshot.name.trim().toLowerCase();
+      if (target === "user") {
+        if (normalizedName.length > 0) {
+          const defaultTemplates = await fetchDefaultTemplatesFromStore(parts);
+          const hasNameConflict = defaultTemplates.some((template) => template.name.trim().toLowerCase() === normalizedName);
+          if (hasNameConflict) {
+            const message = `Cannot save to user space: template name "${snapshot.name}" is reserved by a default template`;
+            addLog(message, "bad");
+            window.alert(message);
+            return;
+          }
+        }
+      }
+      if (target === "default" && normalizedName.length > 0) {
+        const userTemplates = await fetchUserTemplatesFromStore(parts);
+        const sameNameUserTemplates = userTemplates.filter((template) => template.name.trim().toLowerCase() === normalizedName);
+        for (const userTemplate of sameNameUserTemplates) {
+          const deleted = await deleteUserTemplateFromStore(userTemplate.id);
+          if (!deleted) {
+            addLog(`Failed to remove user template during default save: ${userTemplate.name} (${userTemplate.id})`, "bad");
+            return;
+          }
+          addLog(`Removed user template shadowed by default save: ${userTemplate.name} (${userTemplate.id})`, "warn");
+        }
+      }
       const validation = validateTemplateDetailed(snapshot, { partCatalog: parts });
       if (validation.errors.length > 0) {
         for (const issue of validation.errors) {

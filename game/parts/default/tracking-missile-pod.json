@@ -4,7 +4,7 @@
   "layer": "functional",
   "baseComponent": "trackingMissile",
   "directional": true,
-  "direction": "up",
+  "direction": "right",
   "anchor": {
     "x": 0,
     "y": 0
@@ -19,7 +19,20 @@
       "isAttachPoint": false,
       "isAnchorPoint": true,
       "isShootingPoint": true,
-      "takesDamage": true
+      "takesDamage": true,
+      "takesFunctionalDamage": true
+    },
+    {
+      "x": 1,
+      "y": 0,
+      "occupiesStructureSpace": false,
+      "occupiesFunctionalSpace": true,
+      "needsStructureBehind": true,
+      "isAttachPoint": false,
+      "isAnchorPoint": false,
+      "isShootingPoint": true,
+      "takesDamage": true,
+      "takesFunctionalDamage": true
     }
   ],
   "placement": {

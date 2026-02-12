@@ -4,7 +4,7 @@
   "layer": "functional",
   "baseComponent": "precisionBeam",
   "directional": true,
-  "direction": "up",
+  "direction": "right",
   "anchor": {
     "x": 0,
     "y": 0

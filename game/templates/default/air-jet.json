@@ -2,7 +2,6 @@
   "id": "air-jet",
   "name": "Skylance Jet",
   "type": "air",
-  "gasCost": 48,
   "structure": [
     {
       "partId": 11,
@@ -26,6 +25,14 @@
     }
   ],
   "attachments": [
+    {
+      "component": "jetEngine",
+      "partId": 9,
+      "cell": 0,
+      "x": -1,
+      "y": 0,
+      "rotateQuarter": 0
+    },
     {
       "component": "control",
       "partId": 3,
