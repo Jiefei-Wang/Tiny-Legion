@@ -2,7 +2,7 @@ import { COMPONENTS } from "../config/balance/weapons.ts";
 import { MATERIALS } from "../config/balance/materials.ts";
 import { normalizeRotateQuarter, getPartFootprintCells } from "./part-geometry.ts";
 import { validatePartDefinitionDetailed } from "./part-validation.ts";
-import type { ComponentId, MaterialId, PartDefinition, UnitType } from "../types.ts";
+import type { ComponentId, MaterialId, PartDefinition, PartDirection, UnitType } from "../types.ts";
 
 export { normalizeRotateQuarter, rotateOffsetByQuarter, getPartFootprintCells } from "./part-geometry.ts";
 export { validatePartDefinitionDetailed, validatePartDefinition } from "./part-validation.ts";
@@ -160,6 +160,20 @@ function normalizePartId(raw: unknown, fallback: number): number {
   return fallback;
 }
 
+function readOptionalPartDirection(value: unknown): PartDirection | undefined {
+  if (value === "up" || value === "right" || value === "down" || value === "left") {
+    return value;
+  }
+  return undefined;
+}
+
+function getDefaultPartDirection(baseComponent: ComponentId): PartDirection {
+  if (baseComponent === "propeller") {
+    return "down";
+  }
+  return "right";
+}
+
 function getLegacyFootprintOffsets(component: ComponentId): Array<{ x: number; y: number }> {
   const stats = COMPONENTS[component];
   const placementOffsets = stats.placement?.footprintOffsets;
@@ -180,6 +194,7 @@ function createImplicitStructurePartDefinition(component: ComponentId): PartDefi
     layer: "structure",
     baseComponent: component,
     directional: stats.directional === true,
+    direction: getDefaultPartDirection(component),
     anchor: { x: 0, y: 0 },
     boxes: [{
       x: 0,
@@ -227,6 +242,7 @@ function createImplicitStructureMaterialPartDefinition(materialId: MaterialId): 
     layer: "structure",
     baseComponent: "control",
     directional: false,
+    direction: "up",
     anchor: { x: 0, y: 0 },
     boxes: [{
       x: 0,
@@ -298,6 +314,7 @@ export function createImplicitPartDefinition(component: ComponentId): PartDefini
     layer: "functional",
     baseComponent: component,
     directional: stats.directional === true,
+    direction: getDefaultPartDirection(component),
     anchor: { x: 0, y: 0 },
     boxes,
     placement: {
@@ -423,6 +440,7 @@ export function clonePartDefinition(part: PartDefinition): PartDefinition {
     layer: part.layer,
     baseComponent: part.baseComponent,
     directional: part.directional,
+    direction: part.direction,
     anchor: { x: part.anchor.x, y: part.anchor.y },
     boxes: part.boxes.map((box) => ({
       x: box.x,
@@ -604,6 +622,7 @@ export function parsePartDefinition(input: unknown): PartDefinition | null {
     layer,
     baseComponent,
     directional: typeof data.directional === "boolean" ? data.directional : COMPONENTS[baseComponent].directional === true,
+    direction: readOptionalPartDirection(data.direction) ?? getDefaultPartDirection(baseComponent),
     anchor: { x: resolvedAnchor.x, y: resolvedAnchor.y },
     boxes: resolvedBoxes,
     placement: {

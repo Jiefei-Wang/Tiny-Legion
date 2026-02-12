@@ -169,12 +169,15 @@ export interface PartDesignerProperties {
   hasCoreTuning?: boolean;
 }
 
+export type PartDirection = "up" | "right" | "down" | "left";
+
 export interface PartDefinition {
   id: number;
   name: string;
   layer: "functional" | "structure";
   baseComponent: ComponentId;
   directional?: boolean;
+  direction?: PartDirection;
   anchor: { x: number; y: number };
   boxes: PartBoxTemplate[];
   placement?: PartPlacementTemplate;

@@ -481,7 +481,7 @@ Developer Part Designer UX:
 - Part definitions use integer IDs internally (`id` and all template/attachment `partId` references).
 - Part Editor does not expose editable ID input; new/copy flows auto-assign next available integer ID.
 - UI split:
-  - left panel edits part-level fields (`name`, `id`, `baseComponent`, `directional`) plus grouped controls:
+  - left panel edits part-level fields (`name`, `id`, `baseComponent`, `directional`, `direction`) plus grouped controls:
     - `Editor Meta` (`category` dropdown + `subcategory` text),
     - `Part Properties` (`tags` and checkbox-enabled groups for engine/weapon/loader/armor/core tuning with conditional parameter blocks),
     - weapon group exposes projectile + class-specific params (explosive/tracking/control-utility),

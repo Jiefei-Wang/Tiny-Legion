@@ -1,6 +1,13 @@
 import { COMPONENTS } from "../config/balance/weapons.ts";
 import { MATERIALS } from "../config/balance/materials.ts";
-import type { ComponentId, MaterialId, PartDefinition } from "../types.ts";
+import type { ComponentId, MaterialId, PartDefinition, PartDirection } from "../types.ts";
+
+export function getPartDirectionDefault(baseComponent: ComponentId): PartDirection {
+  if (baseComponent === "propeller") {
+    return "down";
+  }
+  return "right";
+}
 
 export function getPartPropertyDefaults(baseComponent: ComponentId): NonNullable<PartDefinition["properties"]> {
   const stats = COMPONENTS[baseComponent];
@@ -74,6 +81,7 @@ export function createDefaultPartDraft(partId: number, partName: string): PartDe
     layer: "functional",
     baseComponent: "control",
     directional: false,
+    direction: getPartDirectionDefault("control"),
     anchor: { x: 0, y: 0 },
     boxes: [{
       x: 0,

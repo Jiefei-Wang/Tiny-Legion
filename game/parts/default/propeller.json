@@ -4,6 +4,7 @@
   "layer": "functional",
   "baseComponent": "propeller",
   "directional": true,
+  "direction": "down",
   "anchor": {
     "x": 0,
     "y": 0

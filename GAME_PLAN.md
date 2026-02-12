@@ -131,6 +131,7 @@ Current implementation includes dedicated in-app editor tabs where the player ca
 - Part Designer per-cell box creation/deletion is driven by canvas clicks (left apply / right erase); the old `Create Box` and `Delete Box` buttons are removed from the right panel.
 - Each part definition includes:
   - `baseComponent` (runtime behavior family),
+  - `direction` (default facing: `up`/`right`/`down`/`left`; Part Editor defaults to `right`, with per-component overrides such as `propeller` defaulting to `down`),
   - developer metadata (`category`, `subcategory`, `tags`),
   - part-property groups (`is_engine`, `is_weapon`, `is_loader`, `is_armor`, core tuning) with scoped parameters:
     - engine: `engineType`, power/speed tuning,

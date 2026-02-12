@@ -4,6 +4,7 @@
   "layer": "functional",
   "baseComponent": "ammo",
   "directional": false,
+  "direction": "up",
   "anchor": {
     "x": 0,
     "y": 0

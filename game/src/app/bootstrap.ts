@@ -40,6 +40,7 @@ import {
 } from "./part-store.ts";
 import {
   createDefaultPartDraft,
+  getPartDirectionDefault,
   getPartMetadataDefaultsForLayer as getConfiguredPartMetadataDefaultsForLayer,
   getPartPropertyDefaults,
   getStructureMaterialDefaults,
@@ -54,6 +55,7 @@ import type {
   MapNode,
   MaterialId,
   MaterialStats,
+  PartDirection,
   PartDefinition,
   ScreenMode,
   TechState,
@@ -2429,7 +2431,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         selectedInfo.innerHTML = `
           <div><strong>Part Designer</strong></div>
           <div class="small">Part: ${partDesignerDraft.name} (${partDesignerDraft.id})</div>
-          <div class="small">Layer: ${partDesignerDraft.layer} | Base component: ${partDesignerDraft.baseComponent} | Directional: ${partDesignerDraft.directional ? "yes" : "no"}</div>
+          <div class="small">Layer: ${partDesignerDraft.layer} | Base component: ${partDesignerDraft.baseComponent} | Directional: ${partDesignerDraft.directional ? "yes" : "no"} | Direction: ${partDesignerDraft.direction ?? getPartDirectionDefault(partDesignerDraft.baseComponent)}</div>
           <div class="small">Boxes: ${partDesignerDraft.boxes.length} | Anchor: (${partDesignerDraft.anchor.x},${partDesignerDraft.anchor.y})</div>
           <div class="row">
             <label class="small">Tool
@@ -3172,6 +3174,9 @@ export function bootstrap(options: BootstrapOptions = {}): void {
 
   const loadPartIntoDesignerSlots = (part: PartDefinition): void => {
     partDesignerDraft = applyPartMetadataDefaults(clonePartDefinition(part));
+    if (!partDesignerDraft.direction) {
+      partDesignerDraft.direction = getPartDirectionDefault(partDesignerDraft.baseComponent);
+    }
     if (partDesignerDraft.layer === "functional") {
       partDesignerLastFunctionalBaseComponent = partDesignerDraft.baseComponent;
     }
@@ -3379,8 +3384,9 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     context.fillText(`Part: ${partDesignerDraft.name}`, 18, 26);
     context.fillText(`Part Designer | Grid ${editorGridCols}x${editorGridRows} | Tool ${partDesignerTool}`, 18, 46);
     context.fillText("Left-click: apply tool | Right-click: erase | Right-drag: pan | Mouse wheel: zoom.", 18, 66);
+    context.fillText(`Default direction: ${partDesignerDraft.direction ?? getPartDirectionDefault(partDesignerDraft.baseComponent)} (layout follows this orientation).`, 18, 86);
     context.fillStyle = validation.errors.length > 0 ? "#ffd1c1" : "#bde6c6";
-    context.fillText(`Errors ${validation.errors.length} | Warnings ${validation.warnings.length}`, 18, 86);
+    context.fillText(`Errors ${validation.errors.length} | Warnings ${validation.warnings.length}`, 18, 106);
 
     const lineCount = validation.errors.length + validation.warnings.length + 2;
     const issuesHeight = Math.max(34, 16 + Math.min(10, lineCount) * 14);
@@ -4364,6 +4370,14 @@ export function bootstrap(options: BootstrapOptions = {}): void {
             <select id="partBaseComponent">${baseComponentOptions}</select>
           </label>
           <label class="small"><input id="partDirectional" type="checkbox" ${partDesignerDraft.directional ? "checked" : ""} /> Directional</label>
+          <label class="small">Direction
+            <select id="partDirection">
+              <option value="up" ${(partDesignerDraft.direction ?? getPartDirectionDefault(partDesignerDraft.baseComponent)) === "up" ? "selected" : ""}>up</option>
+              <option value="right" ${(partDesignerDraft.direction ?? getPartDirectionDefault(partDesignerDraft.baseComponent)) === "right" ? "selected" : ""}>right</option>
+              <option value="down" ${(partDesignerDraft.direction ?? getPartDirectionDefault(partDesignerDraft.baseComponent)) === "down" ? "selected" : ""}>down</option>
+              <option value="left" ${(partDesignerDraft.direction ?? getPartDirectionDefault(partDesignerDraft.baseComponent)) === "left" ? "selected" : ""}>left</option>
+            </select>
+          </label>
         </div>
         ${!isStructureLayerMode ? `<div><strong>Editor Meta</strong></div>
         <div class="row">
@@ -5397,6 +5411,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         partDesignerDraft.layer = "structure";
         partDesignerDraft.baseComponent = partDesignerLastFunctionalBaseComponent;
         partDesignerDraft.directional = false;
+        partDesignerDraft.direction = getPartDirectionDefault(partDesignerDraft.baseComponent);
         partDesignerSlots = partDesignerSlots.map((entry) => {
           if (!entry) {
             return null;
@@ -5462,6 +5477,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         partDesignerDraft.layer = "functional";
         partDesignerDraft.baseComponent = value as ComponentId;
         partDesignerLastFunctionalBaseComponent = partDesignerDraft.baseComponent;
+        partDesignerDraft.direction = getPartDirectionDefault(partDesignerDraft.baseComponent);
       }
       if (partDesignerDraft.directional === undefined) {
         partDesignerDraft.directional = COMPONENTS[partDesignerDraft.baseComponent].directional === true;
@@ -5486,6 +5502,13 @@ export function bootstrap(options: BootstrapOptions = {}): void {
 
     getOptionalElement<HTMLInputElement>("#partDirectional")?.addEventListener("change", (event) => {
       partDesignerDraft.directional = (event.currentTarget as HTMLInputElement).checked;
+      renderPanels();
+    });
+    getOptionalElement<HTMLSelectElement>("#partDirection")?.addEventListener("change", (event) => {
+      const value = (event.currentTarget as HTMLSelectElement).value;
+      if (value === "up" || value === "right" || value === "down" || value === "left") {
+        partDesignerDraft.direction = value as PartDirection;
+      }
       renderPanels();
     });
 

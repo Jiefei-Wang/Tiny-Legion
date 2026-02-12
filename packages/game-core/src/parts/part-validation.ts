@@ -39,6 +39,15 @@ export function validatePartDefinitionDetailed(part: PartDefinition): PartValida
   if (!(part.baseComponent in COMPONENTS)) {
     errors.push("part baseComponent is invalid.");
   }
+  if (
+    part.direction !== undefined
+    && part.direction !== "up"
+    && part.direction !== "right"
+    && part.direction !== "down"
+    && part.direction !== "left"
+  ) {
+    errors.push("part direction must be one of: up, right, down, left.");
+  }
 
   if (!isFiniteInteger(part.anchor.x) || !isFiniteInteger(part.anchor.y)) {
     errors.push("part anchor coordinates must be integers.");
