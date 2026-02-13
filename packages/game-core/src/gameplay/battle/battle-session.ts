@@ -19,6 +19,7 @@ import {
   AI_GRAVITY_CORRECTION_STEP,
   GLOBAL_WEAPON_RANGE_MULTIPLIER,
   GROUND_FIRE_Y_TOLERANCE,
+  PROJECTILE_GRAVITY,
   PROJECTILE_SPEED,
   getAircraftAltitudeBonus,
 } from "../../config/balance/range.ts";
@@ -32,7 +33,7 @@ import { solveBallisticAim } from "../../ai/shooting/ballistic-aim.ts";
 import { createBaselineCompositeAiController } from "../../ai/composite/baseline-modules.ts";
 import { validateTemplateDetailed } from "../../templates/template-validation.ts";
 import { createDefaultPartDefinitions, mergePartCatalogs } from "../../parts/part-schema.ts";
-import type { BattleAiController, CombatDecision } from "../../ai/composite/composite-ai.ts";
+import type { BattleAiController, CombatDecision, WeaponFireAiInput } from "../../ai/composite/composite-ai.ts";
 import type { BattleState, CommandResult, FireBlockDetail, FireRequest, KeyState, MapNode, PartDefinition, PartDirection, Side, UnitCommand, UnitInstance, UnitTemplate, WeaponClass } from "../../types.ts";
 
 export interface BattleHooks {
@@ -692,6 +693,7 @@ export class BattleSession {
                 baseTarget,
                 canShootAtAngle: (componentId, dx, dy, shootAngleDegOverride) => this.canShootAtAngle(unit, componentId, dx, dy, shootAngleDegOverride),
                 getEffectiveWeaponRange: (baseRange) => this.getEffectiveWeaponRange(unit, baseRange),
+                getWeaponFireInput: (slot) => this.getWeaponFireInput(unit, slot),
               })
             : this.baselineController.decide({
                 unit,
@@ -701,6 +703,7 @@ export class BattleSession {
                 baseTarget,
                 canShootAtAngle: (componentId, dx, dy, shootAngleDegOverride) => this.canShootAtAngle(unit, componentId, dx, dy, shootAngleDegOverride),
                 getEffectiveWeaponRange: (baseRange) => this.getEffectiveWeaponRange(unit, baseRange),
+                getWeaponFireInput: (slot) => this.getWeaponFireInput(unit, slot),
               });
           command = this.aiDecisionToCommand(unit, decision);
         }
@@ -1485,23 +1488,16 @@ export class BattleSession {
     const resolvedHomingTargetId = shot.weaponClass === "tracking"
       ? (intendedTargetId ?? this.findClosestEnemyToPoint(unit.side, finalIntendedTargetX, finalIntendedTargetY)?.id ?? null)
       : null;
-    const weaponCellSize = Math.max(8, Math.min(14, unit.radius * 1.7 * 0.24));
-    const weaponOffset = attachment.shootingOffset
-      ? this.getCoordOffsetWorld(
-          unit,
-          attachment.x + attachment.shootingOffset.x,
-          attachment.y + attachment.shootingOffset.y,
-          weaponCellSize,
-        )
-      : this.getCellOffsetWorld(unit, attachment.cell, weaponCellSize);
-    const weaponOriginX = unit.x + weaponOffset.x;
-    const weaponOriginY = unit.y + weaponOffset.y;
+    const firepoint = this.getAttachmentFirepointWorld(unit, attachment);
+    const weaponOriginX = firepoint.x;
+    const weaponOriginY = firepoint.y;
     // Clamp angle directly (no dx/dy round-trip)
     const fireAngle = this.clampAndAdjustAngle(unit, attachment.component, safeAngle, attachment.stats?.shootAngleDeg);
     const spreadRad = (((Math.random() * 2) - 1) * shot.spreadDeg * Math.PI) / 180;
     const finalFireAngle = fireAngle + spreadRad;
     const ux = Math.cos(finalFireAngle);
     const uy = Math.sin(finalFireAngle);
+    const weaponCellSize = Math.max(8, Math.min(14, unit.radius * 1.7 * 0.24));
     const muzzleDistance = weaponCellSize * 0.55 + 2;
     const explosiveFuse = shot.explosive?.fuse ?? "impact";
     const explosiveIsBomb = shot.explosive?.deliveryMode === "bomb";
@@ -2456,6 +2452,52 @@ export class BattleSession {
 
   private hasAliveWeapons(unit: UnitInstance): boolean {
     return getAliveWeaponAttachments(unit).length > 0;
+  }
+
+  private getAttachmentFirepointWorld(
+    unit: UnitInstance,
+    attachment: UnitInstance["attachments"][number],
+  ): { x: number; y: number } {
+    const weaponCellSize = Math.max(8, Math.min(14, unit.radius * 1.7 * 0.24));
+    const weaponOffset = attachment.shootingOffset
+      ? this.getCoordOffsetWorld(
+          unit,
+          attachment.x + attachment.shootingOffset.x,
+          attachment.y + attachment.shootingOffset.y,
+          weaponCellSize,
+        )
+      : this.getCellOffsetWorld(unit, attachment.cell, weaponCellSize);
+    return {
+      x: unit.x + weaponOffset.x,
+      y: unit.y + weaponOffset.y,
+    };
+  }
+
+  private getWeaponFireInput(unit: UnitInstance, slot: number): WeaponFireAiInput | null {
+    if (slot < 0 || slot >= unit.weaponAttachmentIds.length) {
+      return null;
+    }
+    const attachmentId = unit.weaponAttachmentIds[slot];
+    const attachment = unit.attachments.find((entry) => entry.id === attachmentId && entry.alive);
+    if (!attachment) {
+      return null;
+    }
+    const stats = COMPONENTS[attachment.component];
+    if (stats.type !== "weapon" || stats.range === undefined || stats.damage === undefined) {
+      return null;
+    }
+    const baseRange = attachment.stats?.range ?? stats.range;
+    const firepoint = this.getAttachmentFirepointWorld(unit, attachment);
+    return {
+      componentId: attachment.component,
+      damage: attachment.stats?.damage ?? stats.damage,
+      shootAngleDeg: attachment.stats?.shootAngleDeg ?? stats.shootAngleDeg,
+      effectiveRange: this.getEffectiveWeaponRange(unit, baseRange),
+      projectileSpeed: attachment.stats?.projectileSpeed ?? stats.projectileSpeed ?? PROJECTILE_SPEED,
+      projectileGravity: attachment.stats?.projectileGravity ?? stats.projectileGravity ?? PROJECTILE_GRAVITY,
+      firepointX: firepoint.x,
+      firepointY: firepoint.y,
+    };
   }
 
   private isExternalAiEnabled(side: Side): boolean {

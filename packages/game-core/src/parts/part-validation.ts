@@ -63,6 +63,7 @@ export function validatePartDefinitionDetailed(part: PartDefinition): PartValida
   let hasDamageableBox = false;
   let hasAttachPoint = false;
   let hasShootingPoint = false;
+  let shootingPointCount = 0;
   let anchorCovered = false;
   let anchorPointCount = 0;
 
@@ -100,6 +101,7 @@ export function validatePartDefinitionDetailed(part: PartDefinition): PartValida
     }
     if (isShootingPoint) {
       hasShootingPoint = true;
+      shootingPointCount += 1;
     }
     if (takesDamage) {
       hasDamageableBox = true;
@@ -124,6 +126,9 @@ export function validatePartDefinitionDetailed(part: PartDefinition): PartValida
   }
   if (anchorPointCount > 1) {
     errors.push("part can define only one anchorPoint box.");
+  }
+  if (shootingPointCount > 1) {
+    errors.push("part can define only one shootingPoint box.");
   }
   if (!hasFunctionalOccupancy && !hasStructureOccupancy) {
     warnings.push("part has no occupancy; defaults will treat boxes as functional occupancy.");

@@ -16,9 +16,12 @@ export function solveBallisticAim(
   targetVx: number,
   targetVy: number,
   maxRange: number,
+  projectileSpeed: number = PROJECTILE_SPEED,
+  projectileGravity: number = PROJECTILE_GRAVITY,
 ): AimSolution | null {
   const MIN_T = 0.08;
-  const MAX_T = Math.min(2.0, clamp((maxRange / PROJECTILE_SPEED) * 1.12, 0.14, 2.0));
+  const safeProjectileSpeed = Math.max(1, projectileSpeed);
+  const MAX_T = Math.min(2.0, clamp((maxRange / safeProjectileSpeed) * 1.12, 0.14, 2.0));
   if (MAX_T <= MIN_T) {
     return null;
   }
@@ -29,8 +32,8 @@ export function solveBallisticAim(
     const dx = px - shooterX;
     const dy = py - shooterY;
     const vx = dx / t;
-    const vy = (dy - 0.5 * PROJECTILE_GRAVITY * t * t) / t;
-    return vx * vx + vy * vy - PROJECTILE_SPEED * PROJECTILE_SPEED;
+    const vy = (dy - 0.5 * projectileGravity * t * t) / t;
+    return vx * vx + vy * vy - safeProjectileSpeed * safeProjectileSpeed;
   };
 
   // Find the earliest feasible intercept time within TTL/range.
@@ -81,12 +84,12 @@ export function solveBallisticAim(
   if (directDistance > maxRange * 1.05) {
     return null;
   }
-  if (PROJECTILE_SPEED * t > maxRange * 1.08) {
+  if (safeProjectileSpeed * t > maxRange * 1.08) {
     return null;
   }
 
   const vx = (aimX - shooterX) / Math.max(0.001, t);
-  const vy = (aimY - shooterY - 0.5 * PROJECTILE_GRAVITY * t * t) / Math.max(0.001, t);
+  const vy = (aimY - shooterY - 0.5 * projectileGravity * t * t) / Math.max(0.001, t);
   const firingAngleRad = Math.atan2(vy, vx);
   return { x: aimX, y: aimY, firingAngleRad, leadTimeS: t };
 }

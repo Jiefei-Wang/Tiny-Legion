@@ -28,6 +28,7 @@ Implemented gameplay architecture highlights:
   - `src/ai/movement/threat-movement.ts`
   - `src/ai/shooting/weapon-ai-policy.ts`
 - Multi-weapon units with independent cooldown timers, per-slot manual-control toggles, and per-slot auto-fire toggles
+- AI shoot input contract includes per-slot resolved firepoint world coordinates plus resolved projectile speed/gravity from runtime weapon stats (with fallback), so aim solve and projectile spawn use consistent ballistics.
 - Player-controlled manual slots suppress auto-fire execution at runtime without mutating stored auto-fire flags
 - Top-level mode tabs include dedicated `Template Editor` and `Part Editor` entries (alongside `Base`/`Map`/`Battle`)
 - `Test Arena` is a dedicated top-level tab for debug battles (not part of the map node list)
@@ -197,8 +198,7 @@ arena/src/
 
 Notes:
 
-- Composite module families are decision-tree/rule based (`baseline-*` + `dt-*`), with no neural/ONNX runtime path.
-- Shoot module families now include `dt-shoot` and `dt-shoot-atan` (atan2-based correction features), both under the composite decision-tree path.
+- Arena composite controller now resolves all configured module families to baseline target/movement/shoot behavior at runtime (baseline-only execution path).
 - `run-composite-training.ts` performs phased headless compare/optimization over decision-tree module parameters.
 
 Arena-specific architecture notes:
@@ -427,6 +427,7 @@ Editor UX implementation details:
 - Template persistence only writes `gasCost` when an explicit override is set; normalized computed gas remains runtime-derived so later part edits still auto-refresh total gas.
 - Template parsing is strict for structure cells: invalid or missing structure `partId` fails parsing (no legacy `material` fallback path).
 - Part Designer supports optional `stats.gasCost` override per part; deleting the field reverts to default gas calculation from base component/material defaults.
+- Part Designer supports a unique per-part firepoint marker (`Fire point`) on box flags (max one per part); runtime uses it as muzzle spawn origin and AI receives that resolved world coordinate via battle AI input.
 - Editor `Open` window lists all templates; clicking a template row opens it directly, and right-aligned `Copy` / `Delete` actions clone (`-copy` suffix) or remove file-backed entries.
 - Editor has `Save` (persist to user templates) and `Save to Default` (persist to default templates); both paths run the same template normalization before writing JSON.
 - Template ID is internal integer/auto-managed for new and copied templates (no manual ID field in editor UI).

@@ -1,6 +1,17 @@
 import type { ComponentId } from "../../types.ts";
 import type { BattleState, UnitInstance } from "../../types.ts";
 
+export interface WeaponFireAiInput {
+  componentId: ComponentId;
+  damage: number;
+  shootAngleDeg?: number;
+  effectiveRange: number;
+  projectileSpeed: number;
+  projectileGravity: number;
+  firepointX: number;
+  firepointY: number;
+}
+
 export interface BattleAiInput {
   unit: UnitInstance;
   state: BattleState;
@@ -9,6 +20,7 @@ export interface BattleAiInput {
   baseTarget: { x: number; y: number };
   canShootAtAngle: (componentId: ComponentId, dx: number, dy: number, shootAngleDegOverride?: number) => boolean;
   getEffectiveWeaponRange: (baseRange: number) => number;
+  getWeaponFireInput: (slot: number) => WeaponFireAiInput | null;
 }
 
 export interface RankedTarget {

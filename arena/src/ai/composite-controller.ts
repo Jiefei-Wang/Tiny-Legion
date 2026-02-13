@@ -85,10 +85,14 @@ export const DT_SHOOT_ATAN_SCHEMA: ParamSchema = {
   "shoot.angleWeightYOverX2": { kind: "number", min: -1.8, max: 1.8, def: 0.0, sigma: 0.2 },
 };
 
+void DT_TARGET_SCHEMA;
+void DT_MOVEMENT_SCHEMA;
+void DT_SHOOT_SCHEMA;
+void DT_SHOOT_ATAN_SCHEMA;
+
 export function getModuleSchema(kind: ModuleKind): ParamSchema {
-  if (kind === "target") return DT_TARGET_SCHEMA;
-  if (kind === "movement") return DT_MOVEMENT_SCHEMA;
-  return DT_SHOOT_SCHEMA;
+  void kind;
+  return {};
 }
 
 function createDecisionTreeTargetAi(params: Params): TargetAiModule {
@@ -391,37 +395,24 @@ function createDecisionTreeShootAtanAi(params: Params): ShootAiModule {
   };
 }
 
+void createDecisionTreeTargetAi;
+void createDecisionTreeMovementAi;
+void createDecisionTreeShootAi;
+void createDecisionTreeShootAtanAi;
+
 function createTargetModule(spec: CompositeModuleSpec): TargetAiModule {
-  if (spec.familyId === "baseline-target") {
-    return createBaselineTargetAi();
-  }
-  if (spec.familyId === "dt-target") {
-    return createDecisionTreeTargetAi(spec.params ?? {});
-  }
-  throw new Error(`Unsupported target AI family: ${spec.familyId}`);
+  void spec;
+  return createBaselineTargetAi();
 }
 
 function createMovementModule(spec: CompositeModuleSpec): MovementAiModule {
-  if (spec.familyId === "baseline-movement") {
-    return createBaselineMovementAi();
-  }
-  if (spec.familyId === "dt-movement") {
-    return createDecisionTreeMovementAi(spec.params ?? {});
-  }
-  throw new Error(`Unsupported movement AI family: ${spec.familyId}`);
+  void spec;
+  return createBaselineMovementAi();
 }
 
 function createShootModule(spec: CompositeModuleSpec): ShootAiModule {
-  if (spec.familyId === "baseline-shoot") {
-    return createBaselineShootAi();
-  }
-  if (spec.familyId === "dt-shoot") {
-    return createDecisionTreeShootAi(spec.params ?? {});
-  }
-  if (spec.familyId === "dt-shoot-atan") {
-    return createDecisionTreeShootAtanAi(spec.params ?? {});
-  }
-  throw new Error(`Unsupported shoot AI family: ${spec.familyId}`);
+  void spec;
+  return createBaselineShootAi();
 }
 
 export function baselineCompositeConfig(): CompositeConfig {

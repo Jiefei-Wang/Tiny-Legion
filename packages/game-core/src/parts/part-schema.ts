@@ -580,7 +580,10 @@ export function parsePartDefinition(input: unknown): PartDefinition | null {
         needsStructureBehind: record.needsStructureBehind === true || record.needStructureBehind === true || record.requireStructureBehind === true,
         isAttachPoint: record.isAttachPoint === true || record.attachPoint === true,
         isAnchorPoint,
-        isShootingPoint: record.isShootingPoint === true || record.shootingPoint === true,
+        isShootingPoint: record.isShootingPoint === true
+          || record.shootingPoint === true
+          || record.firePoint === true
+          || record.isFirePoint === true,
         takesDamage: typeof record.takesDamage === "boolean" ? record.takesDamage : undefined,
         takesFunctionalDamage: typeof record.takesFunctionalDamage === "boolean" ? record.takesFunctionalDamage : undefined,
       };

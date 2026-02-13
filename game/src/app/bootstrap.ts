@@ -2462,7 +2462,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
           <div class="row">
             <label class="small"><input id="partBoxAttachPoint" type="checkbox" ${resolvedEntry.isAttachPoint ? "checked" : ""} ${selectedSlot === null ? "disabled" : ""} /> Attach point</label>
             <label class="small"><input id="partBoxAnchor" type="checkbox" ${selectedSlot !== null && partDesignerAnchorSlot === selectedSlot ? "checked" : ""} ${selectedSlot === null ? "disabled" : ""} /> Anchor point</label>
-            <label class="small"><input id="partBoxShootingPoint" type="checkbox" ${resolvedEntry.isShootingPoint ? "checked" : ""} ${selectedSlot === null ? "disabled" : ""} /> Shooting point</label>
+            <label class="small"><input id="partBoxShootingPoint" type="checkbox" ${resolvedEntry.isShootingPoint ? "checked" : ""} ${selectedSlot === null ? "disabled" : ""} /> Fire point (unique)</label>
           </div>
         `;
         return;
@@ -6327,6 +6327,16 @@ export function bootstrap(options: BootstrapOptions = {}): void {
           partDesignerAnchorSlot = null;
         }
       } else if (target.id === "partBoxShootingPoint") {
+        if (checked) {
+          for (let i = 0; i < partDesignerSlots.length; i += 1) {
+            const existing = partDesignerSlots[i];
+            if (!existing || i === slotIndex) {
+              continue;
+            }
+            existing.isShootingPoint = false;
+            partDesignerSlots[i] = existing;
+          }
+        }
         slot.isShootingPoint = checked;
       } else {
         return;

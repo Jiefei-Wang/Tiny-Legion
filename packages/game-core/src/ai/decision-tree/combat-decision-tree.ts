@@ -13,6 +13,7 @@ export function evaluateCombatDecisionTree(
   baseTarget: BattleAiInput["baseTarget"],
   canShootAtAngle: BattleAiInput["canShootAtAngle"],
   getEffectiveWeaponRange: BattleAiInput["getEffectiveWeaponRange"],
+  getWeaponFireInput: BattleAiInput["getWeaponFireInput"],
 ): CombatDecision {
   const decision = BASELINE_CONTROLLER.decide({
     unit,
@@ -22,6 +23,7 @@ export function evaluateCombatDecisionTree(
     baseTarget,
     canShootAtAngle,
     getEffectiveWeaponRange,
+    getWeaponFireInput,
   });
   return {
     ...decision,

@@ -142,6 +142,7 @@ Current implementation includes dedicated in-app editor tabs where the player ca
   - right panel edits per-box properties of the currently selected grid cell.
 - Part Designer box editing keeps a persistent box-property brush: right-click erase does not reset the next created box to defaults, so repeated left-click placements reuse the current box property profile.
 - Part Designer per-cell box creation/deletion is driven by canvas clicks (left apply / right erase); the old `Create Box` and `Delete Box` buttons are removed from the right panel.
+- Part Designer box flags include a unique `Fire point` marker (weapon muzzle spawn reference). Each part can define at most one fire point.
 - Each part definition includes:
   - `baseComponent` (runtime behavior family),
   - `direction` (default facing: `up`/`right`/`down`/`left`; Part Editor defaults to `right`, with per-component overrides such as `propeller` defaulting to `down`),
@@ -633,6 +634,7 @@ The current playable implementation already includes:
 - Ground-vehicle-fired non-tracking projectiles now auto-terminate after falling `200` Y-units below their firing Y origin only when the shot was fired above horizontal (`initialVy < 0`); downward-fired shots are excluded. Termination triggers blast when explosive data exists.
 - AI split into targeting, movement, and shooting modules with a shared composite interface in `packages/game-core/src/ai/composite/`.
 - Baseline combat AI now runs through `createCompositeAiController(...)` (target -> movement -> shoot), and the legacy decision-tree entrypoint is kept as a compatibility wrapper.
+- Baseline shoot AI now receives per-slot runtime fire inputs from battle runtime (`effectiveRange`, resolved projectile speed/gravity, and world-space firepoint), and no longer assumes a global projectile model.
 - Target module returns ranked targets (sorted by importance); movement consumes ranked targets + battlefield state; shooting consumes ranked targets + movement intent + weapon readiness.
 - AI shot-feedback correction now tracks each AI projectile's closest real-time miss vector (`dx`,`dy`) against its intended target id during flight and applies bounded vector correction on despawn.
 - Arena supports composite module wiring (`target/movement/shoot`) so each module can be replaced and compared independently.

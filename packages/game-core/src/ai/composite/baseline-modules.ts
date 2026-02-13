@@ -1,5 +1,4 @@
-import { GROUND_FIRE_Y_TOLERANCE, PROJECTILE_SPEED } from "../../config/balance/range.ts";
-import { COMPONENTS } from "../../config/balance/weapons.ts";
+import { GROUND_FIRE_Y_TOLERANCE } from "../../config/balance/range.ts";
 import { structureIntegrity } from "../../simulation/units/structure-grid.ts";
 import { clamp } from "../../simulation/physics/impulse-model.ts";
 import { computeMovementDecision } from "../movement/threat-movement.ts";
@@ -124,47 +123,49 @@ export function createBaselineShootAi(): ShootAiModule {
         if ((unit.weaponFireTimers[slot] ?? 0) > 0) {
           continue;
         }
-        const attachmentId = unit.weaponAttachmentIds[slot];
-        const attachment = unit.attachments.find((entry) => entry.id === attachmentId && entry.alive) ?? null;
-        if (!attachment) {
+        const weaponInput = input.getWeaponFireInput(slot);
+        if (!weaponInput) {
           continue;
         }
-        const stats = COMPONENTS[attachment.component];
-        if (stats.type !== "weapon" || stats.range === undefined || stats.damage === undefined) {
-          continue;
-        }
-        const effectiveRange = input.getEffectiveWeaponRange(attachment.stats?.range ?? stats.range);
+        const effectiveRange = weaponInput.effectiveRange;
         if (distanceToTarget > effectiveRange * 1.05) {
           blockedReason = "out-of-range";
           continue;
         }
         const solved = solveBallisticAim(
-          unit.x,
-          unit.y,
+          weaponInput.firepointX,
+          weaponInput.firepointY,
           correctedTargetX,
           correctedTargetY,
           leadVx,
           leadVy,
           effectiveRange,
+          weaponInput.projectileSpeed,
+          weaponInput.projectileGravity,
         );
         const leadTimeS = solved?.leadTimeS ?? 0;
-        const angleRad = solved?.firingAngleRad ?? Math.atan2(correctedTargetY - unit.y, correctedTargetX - unit.x);
+        const angleRad = solved?.firingAngleRad ?? Math.atan2(correctedTargetY - weaponInput.firepointY, correctedTargetX - weaponInput.firepointX);
         const aimDistance = solved
-          ? Math.max(90, Math.min(effectiveRange, PROJECTILE_SPEED * solved.leadTimeS))
+          ? Math.max(90, Math.min(effectiveRange, weaponInput.projectileSpeed * solved.leadTimeS))
           : Math.min(effectiveRange, Math.max(90, distanceToTarget));
         const baseAim = {
-          x: unit.x + Math.cos(angleRad) * aimDistance,
-          y: unit.y + Math.sin(angleRad) * aimDistance,
+          x: weaponInput.firepointX + Math.cos(angleRad) * aimDistance,
+          y: weaponInput.firepointY + Math.sin(angleRad) * aimDistance,
         };
-        const aim = adjustAimForWeaponPolicy(attachment.component, baseAim);
-        const angleAllowed = input.canShootAtAngle(attachment.component, aim.x - unit.x, aim.y - unit.y, attachment.stats?.shootAngleDeg);
+        const aim = adjustAimForWeaponPolicy(weaponInput.componentId, baseAim);
+        const angleAllowed = input.canShootAtAngle(
+          weaponInput.componentId,
+          aim.x - weaponInput.firepointX,
+          aim.y - weaponInput.firepointY,
+          weaponInput.shootAngleDeg,
+        );
         if (!angleAllowed) {
           blockedReason = "angle-locked";
           continue;
         }
         const rangeAlignment = 1 - Math.min(1, Math.abs(distanceToTarget - effectiveRange * 0.72) / Math.max(1, effectiveRange));
         const leadBonus = solved ? 1.15 : 0.62;
-        const score = stats.damage * 1.2 + rangeAlignment * 25 + leadBonus * 18;
+        const score = weaponInput.damage * 1.2 + rangeAlignment * 25 + leadBonus * 18;
         if (score > bestScore) {
           bestScore = score;
           best = {
