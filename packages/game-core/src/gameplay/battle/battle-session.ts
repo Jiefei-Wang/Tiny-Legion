@@ -11,6 +11,7 @@ import {
   AIR_THRUST_ACCEL_SCALE,
   GROUND_PROJECTILE_MAX_DROP_BELOW_FIRE_Y,
   BATTLE_SALVAGE_REFUND_FACTOR,
+  PENETRATION_ARMOR_SCALER,
 } from "../../config/balance/battlefield.ts";
 import { COMPONENTS } from "../../config/balance/weapons.ts";
 import {
@@ -846,12 +847,20 @@ export class BattleSession {
         if (!target.alive || !canOperate(target) || target.side === projectile.side) {
           continue;
         }
-        if (projectile.hitUnitIds.includes(target.id)) {
-          continue;
-        }
         if (target.type === "air") {
           const hitCellId = this.projectileHitsLiveCell(projectile, target, true);
           if (hitCellId !== null) {
+            const hitPartKey = `${target.id}:${hitCellId}`;
+            if (projectile.hitPartKeys.includes(hitPartKey)) {
+              continue;
+            }
+            const hitCell = target.structure.find((cell) => cell.id === hitCellId && !cell.destroyed);
+            if (!hitCell) {
+              continue;
+            }
+            const currentHp = Math.max(0, hitCell.breakThreshold - hitCell.strain);
+            const penetrationCost = (Math.max(0, hitCell.armor) * PENETRATION_ARMOR_SCALER) + currentHp;
+            projectile.remainingPenetration -= penetrationCost;
             const beforeDestroyed = new Set(target.structure.filter((cell) => cell.destroyed).map((cell) => cell.id));
             const beforeAliveAttachments = new Set(target.attachments.filter((attachment) => attachment.alive).map((attachment) => attachment.id));
             const wasAlive = target.alive;
@@ -859,7 +868,7 @@ export class BattleSession {
             if (!this.shouldIgnoreDamageForUnit(target)) {
               applyHitToUnit(target, projectile.damage, projectile.hitImpulse, impactSide, hitCellId);
             }
-            projectile.hitUnitIds.push(target.id);
+            projectile.hitPartKeys.push(hitPartKey);
             if (projectile.intendedTargetId === target.id) {
               projectile.hitIntendedTarget = true;
             }
@@ -879,7 +888,7 @@ export class BattleSession {
               projectile.ttl = -1;
               break;
             }
-            if (!projectile.allowAirPierce) {
+            if (projectile.remainingPenetration <= 0) {
               projectile.ttl = -1;
               break;
             }
@@ -889,6 +898,17 @@ export class BattleSession {
 
         const hitCellId = this.projectileHitsLiveCell(projectile, target, false);
         if (hitCellId !== null) {
+          const hitPartKey = `${target.id}:${hitCellId}`;
+          if (projectile.hitPartKeys.includes(hitPartKey)) {
+            continue;
+          }
+          const hitCell = target.structure.find((cell) => cell.id === hitCellId && !cell.destroyed);
+          if (!hitCell) {
+            continue;
+          }
+          const currentHp = Math.max(0, hitCell.breakThreshold - hitCell.strain);
+          const penetrationCost = (Math.max(0, hitCell.armor) * PENETRATION_ARMOR_SCALER) + currentHp;
+          projectile.remainingPenetration -= penetrationCost;
           const beforeDestroyed = new Set(target.structure.filter((cell) => cell.destroyed).map((cell) => cell.id));
           const beforeAliveAttachments = new Set(target.attachments.filter((attachment) => attachment.alive).map((attachment) => attachment.id));
           const wasAlive = target.alive;
@@ -896,13 +916,12 @@ export class BattleSession {
           if (!this.shouldIgnoreDamageForUnit(target)) {
             applyHitToUnit(target, projectile.damage, projectile.hitImpulse, impactSide, hitCellId);
           }
-          projectile.hitUnitIds.push(target.id);
+          projectile.hitPartKeys.push(hitPartKey);
           if (projectile.intendedTargetId === target.id) {
             projectile.hitIntendedTarget = true;
           }
           this.hooks.addLog(`Hit ${target.name} (ground) by projectile from ${projectile.sourceId}`, "warn");
           this.spawnBreakDebris(target, beforeDestroyed, beforeAliveAttachments, wasAlive);
-          projectile.ttl = -1;
           this.state.particles.push({
             x: projectile.x,
             y: target.y,
@@ -914,8 +933,13 @@ export class BattleSession {
           }
           if (projectile.explosiveFuse === "impact" && projectile.explosiveBlastRadius > 0) {
             this.applyExplosiveBlast(projectile, target.id);
+            projectile.ttl = -1;
+            break;
           }
-          break;
+          if (projectile.remainingPenetration <= 0) {
+            projectile.ttl = -1;
+            break;
+          }
         }
       }
 
@@ -1495,7 +1519,7 @@ export class BattleSession {
       vy: uy * projectileSpeed,
       traveledDistance: 0,
       maxDistance: effectiveRange,
-      hitUnitIds: [],
+      hitPartKeys: [],
       shooterWasAI: !manual,
       intendedTargetId,
       intendedTargetX: finalIntendedTargetX,
@@ -1524,6 +1548,7 @@ export class BattleSession {
       sourceWeaponAttachmentId: attachmentId,
       damage: shot.damage,
       hitImpulse: shot.impulse,
+      remainingPenetration: shot.penetration,
       r: Math.max(2, Math.sqrt(shot.damage) * 0.35),
     });
     if (requiresDedicatedLoader) {

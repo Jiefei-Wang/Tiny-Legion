@@ -176,6 +176,9 @@ export function validatePartDefinitionDetailed(part: PartDefinition): PartValida
   if (part.stats?.gasCost !== undefined && (!Number.isFinite(part.stats.gasCost) || part.stats.gasCost < 0)) {
     errors.push("part stats.gasCost must be >= 0.");
   }
+  if (part.stats?.penetration !== undefined && (!Number.isFinite(part.stats.penetration) || part.stats.penetration < 0)) {
+    errors.push("part stats.penetration must be >= 0.");
+  }
   if (part.stats?.loaderLoadMultiplier !== undefined && (!Number.isFinite(part.stats.loaderLoadMultiplier) || part.stats.loaderLoadMultiplier <= 0)) {
     errors.push("part stats.loaderLoadMultiplier must be > 0.");
   }

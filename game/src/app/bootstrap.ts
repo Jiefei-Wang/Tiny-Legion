@@ -4523,6 +4523,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         shootAngleDeg: baseStats.shootAngleDeg !== undefined ? String(baseStats.shootAngleDeg) : "none",
         projectileSpeed: baseStats.projectileSpeed !== undefined ? String(baseStats.projectileSpeed) : "none",
         projectileGravity: baseStats.projectileGravity !== undefined ? String(baseStats.projectileGravity) : "none",
+        penetration: baseStats.penetration !== undefined ? String(baseStats.penetration) : "0",
         spreadDeg: baseStats.spreadDeg !== undefined ? String(baseStats.spreadDeg) : "none",
         explosiveBlastRadius: baseStats.explosive?.blastRadius !== undefined ? String(baseStats.explosive.blastRadius) : "none",
         explosiveBlastDamage: baseStats.explosive?.blastDamage !== undefined ? String(baseStats.explosive.blastDamage) : "none",
@@ -4654,6 +4655,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         </div>
         <div class="row">
           <label class="small">Damage <input id="partDamage" type="number" step="1" value="${partDesignerDraft.stats?.damage ?? ""}" placeholder="${runtimePlaceholders.damage}" /></label>
+          <label class="small">Penetration <input id="partPenetration" type="number" step="1" min="0" value="${partDesignerDraft.stats?.penetration ?? ""}" placeholder="${runtimePlaceholders.penetration}" /></label>
           <label class="small">Range <input id="partRange" type="number" step="1" value="${partDesignerDraft.stats?.range ?? ""}" placeholder="${runtimePlaceholders.range}" /></label>
           <label class="small">Cooldown <input id="partCooldown" type="number" step="0.05" value="${partDesignerDraft.stats?.cooldown ?? ""}" placeholder="${runtimePlaceholders.cooldown}" /></label>
         </div>
@@ -5748,6 +5750,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
           shootAngleDeg: undefined,
           projectileSpeed: undefined,
           projectileGravity: undefined,
+          penetration: undefined,
           spreadDeg: undefined,
           explosiveDeliveryMode: undefined,
           explosiveBlastRadius: undefined,
@@ -5922,6 +5925,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
           shootAngleDeg: undefined,
           projectileSpeed: undefined,
           projectileGravity: undefined,
+          penetration: undefined,
           spreadDeg: undefined,
           explosiveDeliveryMode: undefined,
           explosiveBlastRadius: undefined,
@@ -6105,6 +6109,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     bindRuntimeInput("#partRecoil", "recoil");
     bindRuntimeInput("#partHitImpulse", "hitImpulse");
     bindRuntimeInput("#partDamage", "damage");
+    bindRuntimeInput("#partPenetration", "penetration");
     bindRuntimeInput("#partRange", "range");
     bindRuntimeInput("#partCooldown", "cooldown");
     bindRuntimeInput("#partShootAngle", "shootAngleDeg");

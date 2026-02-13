@@ -69,6 +69,7 @@ export interface ComponentStats {
   readonly shootAngleDeg?: number;
   readonly projectileSpeed?: number;
   readonly projectileGravity?: number;
+  readonly penetration?: number;
   readonly spreadDeg?: number;
   readonly explosive?: {
     readonly deliveryMode: ExplosiveDeliveryMode;
@@ -132,6 +133,7 @@ export interface PartStats {
   shootAngleDeg?: number;
   projectileSpeed?: number;
   projectileGravity?: number;
+  penetration?: number;
   spreadDeg?: number;
   explosiveDeliveryMode?: ExplosiveDeliveryMode;
   explosiveBlastRadius?: number;
@@ -327,7 +329,7 @@ export interface Projectile {
   vy: number;
   traveledDistance: number;
   maxDistance: number;
-  hitUnitIds: string[];
+  hitPartKeys: string[];
   shooterWasAI: boolean;
   intendedTargetId: string | null;
   intendedTargetX: number;
@@ -356,6 +358,7 @@ export interface Projectile {
   sourceWeaponAttachmentId: number | null;
   damage: number;
   hitImpulse: number;
+  remainingPenetration: number;
   r: number;
 }
 

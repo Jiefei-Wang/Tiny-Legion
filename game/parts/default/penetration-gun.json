@@ -1,6 +1,6 @@
 {
   "id": 19,
-  "name": "Rapid Gun",
+  "name": "penetration Gun",
   "layer": "functional",
   "baseComponent": "rapidGun",
   "directional": true,
@@ -34,8 +34,11 @@
   "stats": {
     "recoil": 4,
     "damage": 10,
+    "range": 500,
+    "cooldown": 0.1,
     "shootAngleDeg": 360,
-    "projectileSpeed": 500
+    "projectileSpeed": 500,
+    "penetration": 500
   },
   "properties": {
     "category": "weapon",

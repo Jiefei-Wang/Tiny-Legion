@@ -224,6 +224,7 @@ export function instantiateUnit(
             shootAngleDeg: part.stats.shootAngleDeg,
             projectileSpeed: part.stats.projectileSpeed,
             projectileGravity: part.stats.projectileGravity,
+            penetration: part.stats.penetration,
             spreadDeg: part.stats.spreadDeg,
             explosiveDeliveryMode: part.stats.explosiveDeliveryMode,
             explosiveBlastRadius: part.stats.explosiveBlastRadius,

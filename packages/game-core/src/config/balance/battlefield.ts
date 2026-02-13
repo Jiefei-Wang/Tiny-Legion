@@ -20,3 +20,4 @@ export const BATTLE_SALVAGE_REFUND_FACTOR = 0.6;
 
 // Combat constants
 export const IMPULSE_DAMAGE_STRESS_FACTOR = 2.2;
+export const PENETRATION_ARMOR_SCALER = 2;

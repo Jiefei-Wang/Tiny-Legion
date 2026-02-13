@@ -1,44 +1,9 @@
 {
   "id": "custom-unit",
-  "name": "battle tank",
+  "name": "Penetrate tank",
   "type": "ground",
   "structure": [
     {
-      "partId": 12,
-      "x": -2,
-      "y": -2
-    },
-    {
-      "partId": 12,
-      "x": -1,
-      "y": -2
-    },
-    {
-      "partId": 12,
-      "x": 0,
-      "y": -2
-    },
-    {
-      "partId": 11,
-      "x": -2,
-      "y": -1
-    },
-    {
-      "partId": 11,
-      "x": -1,
-      "y": -1
-    },
-    {
-      "partId": 11,
-      "x": 0,
-      "y": -1
-    },
-    {
-      "partId": 14,
-      "x": 1,
-      "y": -1
-    },
-    {
       "partId": 11,
       "x": -2,
       "y": 0
@@ -52,26 +17,6 @@
       "partId": 11,
       "x": 0,
       "y": 0
-    },
-    {
-      "partId": 14,
-      "x": 1,
-      "y": 0
-    },
-    {
-      "partId": 12,
-      "x": -2,
-      "y": 1
-    },
-    {
-      "partId": 12,
-      "x": -1,
-      "y": 1
-    },
-    {
-      "partId": 12,
-      "x": 0,
-      "y": 1
     }
   ],
   "attachments": [
@@ -80,15 +25,15 @@
       "partId": 5,
       "cell": 0,
       "x": -2,
-      "y": -2,
+      "y": 0,
       "rotateQuarter": 0
     },
     {
-      "component": "rapidGun",
-      "partId": 19,
+      "component": "control",
+      "partId": 3,
       "cell": 1,
       "x": -1,
-      "y": -2,
+      "y": 0,
       "rotateQuarter": 0
     },
     {
@@ -96,79 +41,7 @@
       "partId": 19,
       "cell": 2,
       "x": 0,
-      "y": -2,
-      "rotateQuarter": 0
-    },
-    {
-      "component": "cannonLoader",
-      "partId": 2,
-      "cell": 3,
-      "x": -2,
-      "y": -1,
-      "rotateQuarter": 0
-    },
-    {
-      "component": "control",
-      "partId": 3,
-      "cell": 4,
-      "x": -1,
-      "y": -1,
-      "rotateQuarter": 0
-    },
-    {
-      "component": "heavyCannon",
-      "partId": 8,
-      "cell": 5,
-      "x": 0,
-      "y": -1,
-      "rotateQuarter": 0
-    },
-    {
-      "component": "cannonLoader",
-      "partId": 2,
-      "cell": 7,
-      "x": -2,
       "y": 0,
-      "rotateQuarter": 0
-    },
-    {
-      "component": "engineS",
-      "partId": 6,
-      "cell": 8,
-      "x": -1,
-      "y": 0,
-      "rotateQuarter": 0
-    },
-    {
-      "component": "heavyCannon",
-      "partId": 8,
-      "cell": 9,
-      "x": 0,
-      "y": 0,
-      "rotateQuarter": 0
-    },
-    {
-      "component": "engineM",
-      "partId": 5,
-      "cell": 11,
-      "x": -2,
-      "y": 1,
-      "rotateQuarter": 0
-    },
-    {
-      "component": "rapidGun",
-      "partId": 19,
-      "cell": 12,
-      "x": -1,
-      "y": 1,
-      "rotateQuarter": 0
-    },
-    {
-      "component": "rapidGun",
-      "partId": 19,
-      "cell": 13,
-      "x": 0,
-      "y": 1,
       "rotateQuarter": 0
     }
   ],

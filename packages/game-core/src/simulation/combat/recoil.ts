@@ -35,6 +35,7 @@ export function applyRecoilForAttachment(
   weaponClass: NonNullable<(typeof COMPONENTS)[keyof typeof COMPONENTS]["weaponClass"]>;
   projectileSpeed: number;
   projectileGravity: number;
+  penetration: number;
   spreadDeg: number;
   explosive: (typeof COMPONENTS)[keyof typeof COMPONENTS]["explosive"] | null;
   trackingTurnRateDegPerSec: number;
@@ -50,6 +51,7 @@ export function applyRecoilForAttachment(
   const range = weaponAttachment.stats?.range ?? weapon.range;
   const cooldown = weaponAttachment.stats?.cooldown ?? weapon.cooldown;
   const spreadDeg = weaponAttachment.stats?.spreadDeg ?? weapon.spreadDeg;
+  const penetration = weaponAttachment.stats?.penetration ?? weapon.penetration ?? 0;
   const recoil = weaponAttachment.stats?.recoil ?? weapon.recoil;
   const hitImpulse = weaponAttachment.stats?.hitImpulse ?? weapon.hitImpulse;
   if (
@@ -86,6 +88,7 @@ export function applyRecoilForAttachment(
     weaponClass: weapon.weaponClass ?? "rapid-fire",
     projectileSpeed: weaponAttachment.stats?.projectileSpeed ?? weapon.projectileSpeed ?? PROJECTILE_SPEED,
     projectileGravity: weaponAttachment.stats?.projectileGravity ?? weapon.projectileGravity ?? PROJECTILE_GRAVITY,
+    penetration: Math.max(0, penetration),
     spreadDeg: spreadDeg ?? 0,
     explosive,
     trackingTurnRateDegPerSec: weaponAttachment.stats?.trackingTurnRateDegPerSec ?? weapon.tracking?.turnRateDegPerSec ?? 0,

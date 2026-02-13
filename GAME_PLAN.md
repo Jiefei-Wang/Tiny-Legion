@@ -393,6 +393,11 @@ No simple fixed hitpoint exchange for whole units. Damage emerges from impacts, 
 8. Connectivity rule: any structure cluster disconnected from the single control unit is destroyed immediately.
 9. Armor is applied as flat damage deduction per impacted cell: `damageAfterArmor = incomingDamage - cellArmor`, `effectiveDamage = damageAfterArmor <= 0 ? 1 : damageAfterArmor`.
 10. Hit impulse still applies physical response (knockback/vibration) even on low/fully mitigated hits.
+11. Projectile penetration is tracked separately from damage:
+   - each shot starts with weapon `penetration`,
+   - per-hit cost is `(cellArmor * PENETRATION_ARMOR_SCALER) + cellCurrentHPBeforeDamage`,
+   - projectile continues only while `remainingPenetration > 0`,
+   - penetration does not scale damage amount.
 
 Structure durability recovery:
 

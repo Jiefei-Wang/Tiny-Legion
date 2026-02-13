@@ -479,6 +479,7 @@ export function clonePartDefinition(part: PartDefinition): PartDefinition {
           shootAngleDeg: part.stats.shootAngleDeg,
           projectileSpeed: part.stats.projectileSpeed,
           projectileGravity: part.stats.projectileGravity,
+          penetration: part.stats.penetration,
           spreadDeg: part.stats.spreadDeg,
           explosiveDeliveryMode: part.stats.explosiveDeliveryMode,
           explosiveBlastRadius: part.stats.explosiveBlastRadius,
@@ -647,6 +648,7 @@ export function parsePartDefinition(input: unknown): PartDefinition | null {
       shootAngleDeg: readOptionalNumber(runtimeRecord.shootAngleDeg),
       projectileSpeed: readOptionalNumber(runtimeRecord.projectileSpeed),
       projectileGravity: readOptionalNumber(runtimeRecord.projectileGravity),
+      penetration: readOptionalNumber(runtimeRecord.penetration),
       spreadDeg: readOptionalNumber(runtimeRecord.spreadDeg),
       explosiveDeliveryMode: runtimeRecord.explosiveDeliveryMode === "shell" || runtimeRecord.explosiveDeliveryMode === "bomb"
         ? runtimeRecord.explosiveDeliveryMode

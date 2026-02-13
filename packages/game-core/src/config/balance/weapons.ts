@@ -94,6 +94,7 @@ export const COMPONENTS: Record<ComponentId, ComponentStats> = {
     shootAngleDeg: 118,
     projectileSpeed: 340,
     projectileGravity: PROJECTILE_GRAVITY,
+    penetration: 0,
     spreadDeg: 2.4,
   },
   heavyCannon: {
@@ -111,6 +112,7 @@ export const COMPONENTS: Record<ComponentId, ComponentStats> = {
     shootAngleDeg: 70,
     projectileSpeed: 270,
     projectileGravity: PROJECTILE_GRAVITY,
+    penetration: 0,
     spreadDeg: 0.5,
   },
   explosiveShell: {
@@ -128,6 +130,7 @@ export const COMPONENTS: Record<ComponentId, ComponentStats> = {
     shootAngleDeg: 60,
     projectileSpeed: 240,
     projectileGravity: PROJECTILE_GRAVITY,
+    penetration: 0,
     explosive: {
       deliveryMode: "shell",
       blastRadius: 74,
@@ -151,6 +154,7 @@ export const COMPONENTS: Record<ComponentId, ComponentStats> = {
     shootAngleDeg: 95,
     projectileSpeed: 230,
     projectileGravity: PROJECTILE_GRAVITY,
+    penetration: 0,
     tracking: {
       turnRateDegPerSec: 135,
     },
@@ -168,6 +172,7 @@ export const COMPONENTS: Record<ComponentId, ComponentStats> = {
     range: 340,
     cooldown: 0.85,
     shootAngleDeg: 105,
+    penetration: 0,
   },
   empEmitter: {
     mass: 9,
@@ -184,6 +189,7 @@ export const COMPONENTS: Record<ComponentId, ComponentStats> = {
     shootAngleDeg: 108,
     projectileSpeed: 260,
     projectileGravity: PROJECTILE_GRAVITY,
+    penetration: 0,
     control: {
       impairFactor: 0.55,
       duration: 1.8,
