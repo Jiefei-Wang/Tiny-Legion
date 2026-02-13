@@ -1,6 +1,6 @@
 {
   "id": "custom-unit",
-  "name": "Penetrate tank",
+  "name": "air defense vehicle",
   "type": "ground",
   "structure": [
     {

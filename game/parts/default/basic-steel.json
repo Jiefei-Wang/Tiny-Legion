@@ -38,7 +38,7 @@
   "properties": {
     "category": "structure",
     "subcategory": "material",
-    "materialArmor": 1,
+    "materialArmor": 5,
     "materialRecoverPerSecond": 2.2,
     "materialColor": "#95a4b8",
     "hp": 110,

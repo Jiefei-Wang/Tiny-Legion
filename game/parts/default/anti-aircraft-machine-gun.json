@@ -1,6 +1,6 @@
 {
   "id": 19,
-  "name": "penetration Gun",
+  "name": "anti-aircraft machine gun",
   "layer": "functional",
   "baseComponent": "rapidGun",
   "directional": true,
@@ -33,7 +33,7 @@
   },
   "stats": {
     "recoil": 4,
-    "damage": 10,
+    "damage": 8,
     "range": 500,
     "cooldown": 0.1,
     "shootAngleDeg": 360,
