@@ -429,7 +429,7 @@ Editor UX implementation details:
 - Part Designer supports optional `stats.gasCost` override per part; deleting the field reverts to default gas calculation from base component/material defaults.
 - Part Designer supports a unique per-part firepoint marker (`Fire point`) on box flags (max one per part); runtime uses it as muzzle spawn origin and AI receives that resolved world coordinate via battle AI input.
 - Editor `Open` window lists all templates; clicking a template row opens it directly, and right-aligned `Copy` / `Delete` actions clone (`-copy` suffix) or remove file-backed entries.
-- Editor has `Save` (persist to user templates) and `Save to Default` (persist to default templates); both paths run the same template normalization before writing JSON.
+- Template Editor has a single `Save` action that persists to default templates; save path runs template normalization before writing JSON.
 - Template ID is internal integer/auto-managed for new and copied templates (no manual ID field in editor UI).
 - When an opened template is renamed and saved, editor save flow assigns a new template ID and removes the previously opened template entry.
 - Editor templates persist coordinates per placed part (`x`,`y`, origin `(0,0)`; negatives allowed).

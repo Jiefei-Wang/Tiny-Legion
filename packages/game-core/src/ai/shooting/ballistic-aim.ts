@@ -21,7 +21,9 @@ export function solveBallisticAim(
 ): AimSolution | null {
   const MIN_T = 0.08;
   const safeProjectileSpeed = Math.max(1, projectileSpeed);
-  const MAX_T = Math.min(2.0, clamp((maxRange / safeProjectileSpeed) * 1.12, 0.14, 2.0));
+  // Allow longer intercept horizons for long-range shots; hard-capping at 2s
+  // underestimates gravity lead and causes far-shot misses.
+  const MAX_T = clamp((maxRange / safeProjectileSpeed) * 1.12, 0.14, 6.0);
   if (MAX_T <= MIN_T) {
     return null;
   }

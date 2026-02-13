@@ -109,9 +109,7 @@ Current implementation includes dedicated in-app editor tabs where the player ca
 - Templates can still override gas cost explicitly; when override is absent, gas auto-recomputes from current part composition.
 - Template save payloads persist `gasCost` only when an explicit template gas override is set; computed gas is runtime-derived and not treated as an override.
 - Part Designer includes editable part gas override (`stats.gasCost`); clearing the value resets to default computed gas for that part family.
-- Save templates from editor to user storage (`Save to User Space`) or to default storage (`Save`) and deploy them in battle.
-- User-space save is blocked when the template name matches any default template name.
-- When user-space save is blocked by default-name collision, editor shows a blocking prompt and writes the same message to runtime log.
+- Save templates from editor with a single `Save` action (default storage) and deploy them in battle.
 - Saving to default storage (`Save`) removes any user-storage templates with the same template name (case-insensitive), then writes the default template.
 - Template Editor exposes optional gas override input; leaving it empty keeps gas auto-computed from part gas totals.
 - Save is allowed even with validation issues.

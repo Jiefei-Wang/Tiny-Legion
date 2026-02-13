@@ -1,7 +1,8 @@
 import { existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
-import { createBaselineCompositeAiController } from "../src/ai/composite/baseline-modules.ts";
+import {
+  createBaselineCompositeAiController,
+} from "../src/ai/composite/baseline-modules.ts";
 import type { BattleAiController } from "../src/ai/composite/composite-ai.ts";
-import { BATTLEFIELD_HEIGHT, BATTLEFIELD_WIDTH } from "../src/config/balance/battlefield.ts";
 import { COMPONENTS } from "../src/config/balance/weapons.ts";
 import { BattleSession } from "../src/gameplay/battle/battle-session.ts";
 import { mergePartCatalogs, parsePartDefinition } from "../src/app/part-store.ts";
@@ -14,6 +15,14 @@ declare const process: { exit: (code?: number) => void; cwd: () => string };
 
 const dt = 1 / 60;
 const idleKeys: KeyState = { a: false, d: false, w: false, s: false, space: false };
+const REPRO_CANVAS_WIDTH = 8000;
+const REPRO_CANVAS_HEIGHT = 8000;
+const SWEEP_RADIUS = 2400;
+const MAX_TICKS_PRE_SHOT = 240;
+const MAX_TICKS_POST_SHOT = 1800;
+const SHOTS_PER_DEGREE = 1;
+const AIM_PASS_THRESHOLD_DEG = 0.75;
+const PLAN_PASS_THRESHOLD_DEG = 0.0001;
 
 function createMockCanvas(width: number, height: number): HTMLCanvasElement {
   const contextStub = {} as CanvasRenderingContext2D;
@@ -113,194 +122,397 @@ function loadRuntimeMergedTemplates(partCatalog: ReadonlyArray<PartDefinition>):
   return mergeTemplates(baseTemplates, mergeTemplates(defaults, users));
 }
 
-function countAliveWeapons(template: UnitTemplate): number {
-  let count = 0;
-  for (const attachment of template.attachments) {
-    const stats = COMPONENTS[attachment.component];
-    if (stats.type === "weapon") {
-      count += 1;
+function angleDeltaDeg(a: number, b: number): number {
+  const d = Math.atan2(Math.sin(a - b), Math.cos(a - b));
+  return Math.abs(d) * 180 / Math.PI;
+}
+
+function patchRapidGunRuntime(partCatalog: PartDefinition[]): () => void {
+  const rapidGun = (COMPONENTS as Record<string, any>).rapidGun;
+  const originalComponent = {
+    spreadDeg: rapidGun.spreadDeg,
+    range: rapidGun.range,
+    shootAngleDeg: rapidGun.shootAngleDeg,
+    projectileSpeed: rapidGun.projectileSpeed,
+  };
+  rapidGun.spreadDeg = 0;
+  rapidGun.range = 20000;
+  rapidGun.shootAngleDeg = 360;
+  rapidGun.projectileSpeed = 900;
+
+  const rapidGunParts = partCatalog.filter((part) => part.baseComponent === "rapidGun");
+  const originalPartStats = new Map<number, PartDefinition["stats"] | undefined>();
+  for (const part of rapidGunParts) {
+    originalPartStats.set(part.id, part.stats ? { ...part.stats } : undefined);
+    part.stats = {
+      ...(part.stats ?? {}),
+      spreadDeg: 0,
+      range: 20000,
+      shootAngleDeg: 360,
+      projectileSpeed: 900,
+    };
+  }
+
+  return () => {
+    rapidGun.spreadDeg = originalComponent.spreadDeg;
+    rapidGun.range = originalComponent.range;
+    rapidGun.shootAngleDeg = originalComponent.shootAngleDeg;
+    rapidGun.projectileSpeed = originalComponent.projectileSpeed;
+    for (const part of rapidGunParts) {
+      part.stats = originalPartStats.get(part.id);
     }
-  }
-  return count;
-}
-
-function pickTemplate(templates: ReadonlyArray<UnitTemplate>, preferredType: "air" | "ground"): UnitTemplate {
-  const byType = templates
-    .filter((template) => template.type === preferredType)
-    .filter((template) => countAliveWeapons(template) > 0)
-    .sort((a, b) => countAliveWeapons(b) - countAliveWeapons(a));
-  if (byType.length > 0) {
-    return byType[0]!;
-  }
-  const fallback = templates
-    .filter((template) => countAliveWeapons(template) > 0)
-    .sort((a, b) => countAliveWeapons(b) - countAliveWeapons(a))[0];
-  if (!fallback) {
-    throw new Error("No weaponized template found");
-  }
-  return fallback;
-}
-
-function pickTemplateById(templates: ReadonlyArray<UnitTemplate>, id: number): UnitTemplate | null {
-  return templates.find((template) => template.id === id) ?? null;
-}
-
-type ScenarioResult = {
-  label: string;
-  totalShots: number;
-  facingFlips: number;
-  shotSideFlips: number;
-  sampleShotDirections: string;
-  blockedNoPlanTicks: number;
-};
-
-function makePatchedController(deadZonePx: number): BattleAiController {
-  const base = createBaselineCompositeAiController();
-  const stickyFacing = new Map<string, 1 | -1>();
-  return {
-    decide: (input) => {
-      const decision = base.decide(input);
-      const remembered = stickyFacing.get(input.unit.id) ?? decision.facing;
-      const target = decision.debug.targetId
-        ? input.state.units.find((unit) => unit.id === decision.debug.targetId && unit.alive)
-        : null;
-      const dx = target ? target.x - input.unit.x : 0;
-      if (Math.abs(dx) <= deadZonePx) {
-        stickyFacing.set(input.unit.id, remembered);
-        return { ...decision, facing: remembered };
-      }
-      const nextFacing: 1 | -1 = dx >= 0 ? 1 : -1;
-      stickyFacing.set(input.unit.id, nextFacing);
-      return { ...decision, facing: nextFacing };
-    },
   };
 }
 
-function runScenario(
-  label: string,
-  enemyController: BattleAiController | undefined,
-  epsilon: number,
-  verticalOffset: number,
-): ScenarioResult {
-  const partCatalog = loadRuntimeMergedParts();
-  const templates = loadRuntimeMergedTemplates(partCatalog);
-  const shooterTemplate = pickTemplateById(templates, 1) ?? pickTemplate(templates, "ground");
-  const targetTemplate = pickTemplateById(templates, 5) ?? pickTemplate(templates, "air");
-  const canvas = createMockCanvas(BATTLEFIELD_WIDTH, BATTLEFIELD_HEIGHT);
+function createPassiveAi(): BattleAiController {
+  return {
+    decide: () => ({
+      facing: 1,
+      state: "engage",
+      movement: { ax: 0, ay: 0, shouldEvade: false },
+      firePlan: null,
+      debug: {
+        targetId: null,
+        decisionPath: "passive",
+        fireBlockedReason: "passive",
+      },
+    }),
+  };
+}
+
+type CaseResult = {
+  deg: number;
+  fired: boolean;
+  hit: boolean;
+  aimErrorDeg: number;
+  aimErrorToIntendedDeg: number;
+  minDistanceToTarget: number;
+  blockedReason: string | null;
+  planVsActualDeg: number;
+  leadTimeS: number;
+};
+
+type DamageSignature = {
+  totalStrain: number;
+  destroyedCells: number;
+};
+
+function captureDamageSignature(target: NonNullable<ReturnType<typeof instantiateUnit>>): DamageSignature {
+  let totalStrain = 0;
+  let destroyedCells = 0;
+  for (const cell of target.structure) {
+    totalStrain += cell.strain;
+    if (cell.destroyed) {
+      destroyedCells += 1;
+    }
+  }
+  return { totalStrain, destroyedCells };
+}
+
+function hasDamageDelta(before: DamageSignature, after: DamageSignature): boolean {
+  return after.destroyedCells > before.destroyedCells || (after.totalStrain - before.totalStrain) > 0.0001;
+}
+
+function runSingleDegreeCase(
+  templates: ReadonlyArray<UnitTemplate>,
+  partCatalog: ReadonlyArray<PartDefinition>,
+  deg: number,
+  options: {
+    resetAimCorrectionEachTick: boolean;
+    enemyController: BattleAiController;
+  },
+): CaseResult {
+  const shooterTemplate = templates.find((template) => template.id === 1) ?? templates[0];
+  const targetTemplate = templates.find((template) => template.type === "air") ?? templates[0];
+  if (!shooterTemplate || !targetTemplate) {
+    throw new Error("No templates available for repro");
+  }
+
+  const canvas = createMockCanvas(REPRO_CANVAS_WIDTH, REPRO_CANVAS_HEIGHT);
   const hooks = makeHooks();
-  const battle = new BattleSession(canvas, hooks, templates, {
+  const battle = new BattleSession(canvas, hooks, [...templates], {
     partCatalog,
     disableAutoEnemySpawns: true,
     disableEnemyMinimumPresence: true,
     disableDefaultStarters: true,
-    aiControllers: enemyController ? { enemy: enemyController } : undefined,
+    aiControllers: {
+      enemy: options.enemyController,
+      player: createPassiveAi(),
+    },
   });
-
   const node: MapNode = {
-    id: "sprinkler-repro",
-    name: "Sprinkler Repro",
+    id: "sprinkler-angle-repro",
+    name: "Sprinkler Angle Repro",
     owner: "neutral",
     garrison: false,
     reward: 0,
     defense: 1,
   };
   battle.start(node);
+
   const state = battle.getState();
-  const spawnedTarget = instantiateUnit(templates, targetTemplate.id, "player", BATTLEFIELD_WIDTH * 0.52, BATTLEFIELD_HEIGHT * 0.35, { partCatalog });
-  const spawnedShooter = instantiateUnit(templates, shooterTemplate.id, "enemy", BATTLEFIELD_WIDTH * 0.52, BATTLEFIELD_HEIGHT * 0.55, { partCatalog });
-  if (!spawnedTarget || !spawnedShooter) {
-    throw new Error("Failed to instantiate player target or enemy shooter");
+  const sx = REPRO_CANVAS_WIDTH * 0.5;
+  const sy = REPRO_CANVAS_HEIGHT * 0.5;
+  const rad = (deg * Math.PI) / 180;
+  const tx = sx + Math.cos(rad) * SWEEP_RADIUS;
+  const ty = sy + Math.sin(rad) * SWEEP_RADIUS;
+  const target = instantiateUnit(templates as UnitTemplate[], targetTemplate.id, "player", tx, ty, { partCatalog });
+  const shooter = instantiateUnit(templates as UnitTemplate[], shooterTemplate.id, "enemy", sx, sy, { partCatalog });
+  if (!target || !shooter) {
+    throw new Error(`Failed to instantiate case deg=${deg}`);
   }
-  state.units.push(spawnedTarget);
-  state.units.push(spawnedShooter);
-  const targetId = spawnedTarget.id;
-  const shooterId = spawnedShooter.id;
+  target.maxSpeed = 0;
+  target.accel = 0;
+  target.vx = 0;
+  target.vy = 0;
+  // Repro requirement: target durability should not end the sample early.
+  for (const cell of target.structure) {
+    cell.breakThreshold = 1_000_000_000;
+    cell.recoverPerSecond = 0;
+    cell.armor = 0;
+    cell.strain = 0;
+    cell.destroyed = false;
+  }
+  target.weaponAutoFire = target.weaponAutoFire.map(() => false);
+  shooter.maxSpeed = 0;
+  shooter.accel = 0;
+  shooter.vx = 0;
+  shooter.vy = 0;
+  state.units.push(target);
+  state.units.push(shooter);
 
-  const shotSigns: number[] = [];
-  const facingHistory: Array<1 | -1> = [];
-  let blockedNoPlanTicks = 0;
-  const ticks = 180;
-
-  for (let tick = 0; tick < ticks; tick += 1) {
-    const state = battle.getState();
-    const shooter = state.units.find((unit) => unit.id === shooterId);
-    const target = state.units.find((unit) => unit.id === targetId);
-    if (!shooter || !target) {
-      break;
+  const beforeDamage = captureDamageSignature(target);
+  let fired = false;
+  let aimErrorDeg = Number.POSITIVE_INFINITY;
+  let aimErrorToIntendedDeg = Number.POSITIVE_INFINITY;
+  let minDistanceToTarget = Number.POSITIVE_INFINITY;
+  let blockedReason: string | null = null;
+  let planVsActualDeg = Number.POSITIVE_INFINITY;
+  let leadTimeS = 0;
+  let hit = false;
+  let firstShotSourceWeaponAttachmentId: number | null = null;
+  let postShotTicks = 0;
+  for (let tick = 0; tick < MAX_TICKS_PRE_SHOT + MAX_TICKS_POST_SHOT; tick += 1) {
+    const before = battle.getState();
+    const beforeShooter = before.units.find((unit) => unit.id === shooter.id);
+    const beforeTarget = before.units.find((unit) => unit.id === target.id);
+    if (beforeShooter) {
+      beforeShooter.x = sx;
+      beforeShooter.y = sy;
+      beforeShooter.vx = 0;
+      beforeShooter.vy = 0;
+      beforeShooter.maxSpeed = 0;
+      beforeShooter.accel = 0;
+      if (options.resetAimCorrectionEachTick) {
+        beforeShooter.aiAimCorrectionX = 0;
+        beforeShooter.aiAimCorrectionY = 0;
+      }
     }
-
-    shooter.maxSpeed = 0;
-    shooter.accel = 0;
-    shooter.vx = 0;
-    shooter.vy = 0;
-    shooter.aiAimCorrectionX = 0;
-    shooter.aiAimCorrectionY = 0;
-    for (let i = 0; i < shooter.weaponFireTimers.length; i += 1) {
-      shooter.weaponFireTimers[i] = 0;
+    if (beforeTarget) {
+      beforeTarget.x = tx;
+      beforeTarget.y = ty;
+      beforeTarget.vx = 0;
+      beforeTarget.vy = 0;
+      beforeTarget.maxSpeed = 0;
+      beforeTarget.accel = 0;
     }
-    for (let i = 0; i < shooter.weaponAutoFire.length; i += 1) {
-      shooter.weaponAutoFire[i] = true;
-    }
-
-    target.maxSpeed = 0;
-    target.accel = 0;
-    target.vx = 0;
-    target.vy = 0;
-
-    shooter.x = BATTLEFIELD_WIDTH * 0.52;
-    shooter.y = BATTLEFIELD_HEIGHT * 0.55;
-    target.x = shooter.x + (tick % 2 === 0 ? epsilon : -epsilon);
-    target.y = shooter.y - verticalOffset;
-
     battle.update(dt, idleKeys);
-
-    const after = battle.getState();
-    const afterShooter = after.units.find((unit) => unit.id === shooterId);
-    if (!afterShooter) {
+    const s = battle.getState();
+    const liveShooter = s.units.find((unit) => unit.id === shooter.id);
+    const liveTarget = s.units.find((unit) => unit.id === target.id);
+    if (!liveShooter || !liveTarget) {
       break;
     }
-    facingHistory.push(afterShooter.facing);
-
-    const fired = afterShooter.weaponFireTimers.some((timer) => timer > 0);
+    blockedReason = liveShooter.aiDebugFireBlockReason;
+    const projectile = s.projectiles.find((entry) => {
+      if (entry.sourceId !== liveShooter.id) {
+        return false;
+      }
+      if (firstShotSourceWeaponAttachmentId === null) {
+        return true;
+      }
+      return entry.sourceWeaponAttachmentId === firstShotSourceWeaponAttachmentId;
+    }) ?? null;
+    if (projectile && !fired) {
+      fired = true;
+      firstShotSourceWeaponAttachmentId = projectile.sourceWeaponAttachmentId ?? null;
+      const projectileAngle = Math.atan2(projectile.vy, projectile.vx);
+      const expectedAngle = Math.atan2(ty - projectile.y, tx - projectile.x);
+      aimErrorDeg = angleDeltaDeg(projectileAngle, expectedAngle);
+      const expectedIntendedAngle = Math.atan2(projectile.intendedTargetY - projectile.y, projectile.intendedTargetX - projectile.x);
+      aimErrorToIntendedDeg = angleDeltaDeg(projectileAngle, expectedIntendedAngle);
+      planVsActualDeg = angleDeltaDeg(projectileAngle, liveShooter.aiDebugLastAngleRad);
+      leadTimeS = liveShooter.aiDebugLeadTimeS;
+    }
+    if (projectile) {
+      const distance = Math.hypot(projectile.x - liveTarget.x, projectile.y - liveTarget.y);
+      if (distance < minDistanceToTarget) {
+        minDistanceToTarget = distance;
+      }
+      if (distance <= liveTarget.radius + Math.max(1.5, projectile.r)) {
+        hit = true;
+      }
+    }
     if (fired) {
-      const aimSign = Math.cos(afterShooter.aiDebugLastAngleRad) > 0 ? 1 : -1;
-      shotSigns.push(aimSign);
-    } else if (afterShooter.aiDebugFireBlockReason === "angle-locked" || afterShooter.aiDebugFireBlockReason === "no-ready-weapon") {
-      blockedNoPlanTicks += 1;
+      postShotTicks += 1;
+      const targetAfter = s.units.find((unit) => unit.id === target.id);
+      if (targetAfter) {
+        const afterDamage = captureDamageSignature(targetAfter);
+        if (hasDamageDelta(beforeDamage, afterDamage)) {
+          hit = true;
+        }
+      }
+      const shotStillActive = s.projectiles.some((entry) => {
+        if (entry.sourceId !== liveShooter.id) {
+          return false;
+        }
+        if (firstShotSourceWeaponAttachmentId === null) {
+          return true;
+        }
+        return entry.sourceWeaponAttachmentId === firstShotSourceWeaponAttachmentId;
+      });
+      if (!shotStillActive || postShotTicks >= MAX_TICKS_POST_SHOT) {
+        break;
+      }
+    } else if (tick >= MAX_TICKS_PRE_SHOT - 1) {
+      break;
     }
   }
-
-  let facingFlips = 0;
-  for (let i = 1; i < facingHistory.length; i += 1) {
-    if (facingHistory[i] !== facingHistory[i - 1]) {
-      facingFlips += 1;
-    }
+  if (!Number.isFinite(minDistanceToTarget)) {
+    minDistanceToTarget = Number.POSITIVE_INFINITY;
   }
-  let shotSideFlips = 0;
-  for (let i = 1; i < shotSigns.length; i += 1) {
-    if (shotSigns[i] !== shotSigns[i - 1]) {
-      shotSideFlips += 1;
-    }
-  }
-
   return {
-    label,
-    totalShots: shotSigns.length,
-    facingFlips,
-    shotSideFlips,
-    sampleShotDirections: shotSigns.slice(0, 18).map((v) => (v > 0 ? "R" : "L")).join(""),
-    blockedNoPlanTicks,
+    deg,
+    fired,
+    hit,
+    aimErrorDeg,
+    aimErrorToIntendedDeg,
+    minDistanceToTarget,
+    blockedReason,
+    planVsActualDeg,
+    leadTimeS,
   };
 }
 
+type SweepResult = {
+  label: string;
+  results: CaseResult[];
+  totalTrials: number;
+  totalHits: number;
+};
+
+function runSweep(
+  templates: ReadonlyArray<UnitTemplate>,
+  partCatalog: ReadonlyArray<PartDefinition>,
+  label: string,
+  options: {
+    resetAimCorrectionEachTick: boolean;
+    enemyController: BattleAiController;
+  },
+): SweepResult {
+  const results: CaseResult[] = [];
+  let totalTrials = 0;
+  let totalHits = 0;
+  for (let deg = 0; deg < 360; deg += 1) {
+    for (let shot = 0; shot < SHOTS_PER_DEGREE; shot += 1) {
+      const caseResult = runSingleDegreeCase(templates, partCatalog, deg, options);
+      results.push(caseResult);
+      totalTrials += 1;
+      if (caseResult.hit) {
+        totalHits += 1;
+      }
+    }
+  }
+  return { label, results, totalTrials, totalHits };
+}
+
+function printSweepSummary(sweep: SweepResult): boolean {
+  const { label, results, totalTrials, totalHits } = sweep;
+  const firedCases = results.filter((result) => result.fired);
+  const notFiredCases = results.filter((result) => !result.fired);
+  const missedAimCases = firedCases.filter((result) => result.aimErrorDeg > AIM_PASS_THRESHOLD_DEG);
+  const missedPlanCases = firedCases.filter((result) => result.planVsActualDeg > PLAN_PASS_THRESHOLD_DEG);
+  const hitCases = results.filter((result) => result.hit);
+  const maxAimError = firedCases.reduce((best, result) => Math.max(best, result.aimErrorDeg), 0);
+  const maxAimErrorToIntended = firedCases.reduce((best, result) => Math.max(best, result.aimErrorToIntendedDeg), 0);
+  const avgAimError = firedCases.length > 0
+    ? firedCases.reduce((sum, result) => sum + result.aimErrorDeg, 0) / firedCases.length
+    : Number.NaN;
+  const avgAimErrorToIntended = firedCases.length > 0
+    ? firedCases.reduce((sum, result) => sum + result.aimErrorToIntendedDeg, 0) / firedCases.length
+    : Number.NaN;
+  const focus30 = results.find((result) => result.deg === 330) ?? null; // ~30deg up-right
+
+  console.log(`[headless-ai-sprinkler-repro:${label}]`);
+  console.log(`cases=${results.length} fired=${firedCases.length} hits=${hitCases.length} notFired=${notFiredCases.length}`);
+  console.log(`trueHitProbability=${(totalHits / Math.max(1, totalTrials)).toFixed(6)} (${totalHits}/${totalTrials})`);
+  console.log(`aimErrorDeg avg=${Number.isFinite(avgAimError) ? avgAimError.toFixed(3) : "n/a"} max=${maxAimError.toFixed(3)} threshold=${AIM_PASS_THRESHOLD_DEG}`);
+  if (focus30) {
+    console.log(
+        `focus(~30deg up-right): fired=${focus30.fired} hitLike=${focus30.hit} `
+        + `aimErrorDeg=${Number.isFinite(focus30.aimErrorDeg) ? focus30.aimErrorDeg.toFixed(3) : "n/a"} `
+        + `aimErrorToIntendedDeg=${Number.isFinite(focus30.aimErrorToIntendedDeg) ? focus30.aimErrorToIntendedDeg.toFixed(3) : "n/a"} `
+        + `minDist=${Number.isFinite(focus30.minDistanceToTarget) ? focus30.minDistanceToTarget.toFixed(2) : "inf"} `
+        + `block=${focus30.blockedReason ?? "none"}`,
+      );
+  }
+  if (notFiredCases.length > 0) {
+    const sample = notFiredCases.slice(0, 18).map((result) => `${result.deg}(${result.blockedReason ?? "none"})`).join(", ");
+    console.log(`notFiredSample: ${sample}`);
+  }
+  if (missedAimCases.length > 0) {
+    const sample = missedAimCases
+      .slice(0, 24)
+      .map((result) => `${result.deg}:${result.aimErrorDeg.toFixed(2)}`)
+      .join(", ");
+    console.log(`missedAimSample: ${sample}`);
+  }
+  const missHitCases = results.filter((result) => !result.hit);
+  if (missHitCases.length > 0) {
+    const sample = missHitCases
+      .slice(0, 24)
+      .map((result) => `${result.deg}(lead=${result.leadTimeS.toFixed(3)})`)
+      .join(", ");
+    console.log(`missHitSample: ${sample}`);
+  }
+  if (missedPlanCases.length > 0) {
+    const sample = missedPlanCases
+      .slice(0, 24)
+      .map((result) => `${result.deg}:${result.planVsActualDeg.toFixed(4)}`)
+      .join(", ");
+    console.log(`missedPlanSample: ${sample}`);
+  }
+  const strictPass = notFiredCases.length === 0 && totalHits === totalTrials;
+  console.log(
+    `aimErrorToIntendedDeg avg=${Number.isFinite(avgAimErrorToIntended) ? avgAimErrorToIntended.toFixed(3) : "n/a"} `
+    + `max=${maxAimErrorToIntended.toFixed(3)} (diagnostic only)`,
+  );
+  const avgPlanVsActual = firedCases.length > 0
+    ? firedCases.reduce((sum, result) => sum + result.planVsActualDeg, 0) / firedCases.length
+    : Number.NaN;
+  const maxPlanVsActual = firedCases.reduce((best, result) => Math.max(best, result.planVsActualDeg), 0);
+  console.log(
+    `planVsActualDeg avg=${Number.isFinite(avgPlanVsActual) ? avgPlanVsActual.toFixed(3) : "n/a"} `
+    + `max=${maxPlanVsActual.toFixed(3)}`,
+  );
+  console.log(`strictPass=${strictPass ? "yes" : "no"}`);
+  return strictPass;
+}
+
 function main(): void {
-  const epsilon = 170;
-  const verticalOffset = 60;
-  const baseline = runScenario("baseline", undefined, epsilon, verticalOffset);
-  const patched = runScenario("patched(dead-zone=180px)", makePatchedController(180), epsilon, verticalOffset);
-  console.log("[headless-ai-sprinkler-repro]");
-  console.log(`baseline shots=${baseline.totalShots} facingFlips=${baseline.facingFlips} shotSideFlips=${baseline.shotSideFlips} blocked=${baseline.blockedNoPlanTicks} sample=${baseline.sampleShotDirections}`);
-  console.log(`patched  shots=${patched.totalShots} facingFlips=${patched.facingFlips} shotSideFlips=${patched.shotSideFlips} blocked=${patched.blockedNoPlanTicks} sample=${patched.sampleShotDirections}`);
+  const partCatalog = loadRuntimeMergedParts();
+  const templates = loadRuntimeMergedTemplates(partCatalog);
+  const restoreWeaponPatch = patchRapidGunRuntime(partCatalog);
+  try {
+    const baseline = runSweep(templates, partCatalog, "baseline", {
+      resetAimCorrectionEachTick: false,
+      enemyController: createBaselineCompositeAiController(),
+    });
+    const baselinePass = printSweepSummary(baseline);
+    process.exit(baselinePass ? 0 : 1);
+  } finally {
+    restoreWeaponPatch();
+  }
 }
 
 main();

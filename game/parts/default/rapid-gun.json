@@ -1,0 +1,55 @@
+{
+  "id": 20,
+  "name": "rapid gun",
+  "layer": "functional",
+  "baseComponent": "rapidGun",
+  "directional": true,
+  "direction": "right",
+  "anchor": {
+    "x": 0,
+    "y": 0
+  },
+  "boxes": [
+    {
+      "x": 0,
+      "y": 0,
+      "occupiesStructureSpace": false,
+      "occupiesFunctionalSpace": true,
+      "needsStructureBehind": true,
+      "isAttachPoint": false,
+      "isAnchorPoint": true,
+      "isShootingPoint": true,
+      "takesDamage": true,
+      "takesFunctionalDamage": true
+    }
+  ],
+  "placement": {
+    "requireStructureOffsets": [],
+    "requireStructureBelowAnchor": false,
+    "requireStructureOnFunctionalOccupiedBoxes": true,
+    "requireStructureOnStructureOccupiedBoxes": true,
+    "requireEmptyStructureOffsets": [],
+    "requireEmptyFunctionalOffsets": []
+  },
+  "stats": {
+    "recoil": 10,
+    "range": 500,
+    "shootAngleDeg": 360,
+    "projectileSpeed": 500
+  },
+  "properties": {
+    "category": "weapon",
+    "subcategory": "rapid-fire",
+    "isEngine": false,
+    "isWeapon": true,
+    "isLoader": false,
+    "isArmor": false,
+    "weaponType": "rapid-fire",
+    "hasCoreTuning": false
+  },
+  "tags": [
+    "default",
+    "weapon",
+    "rapid-fire"
+  ]
+}

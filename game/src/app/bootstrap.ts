@@ -28,7 +28,6 @@ import {
   fetchUserTemplatesFromStore,
   mergeTemplates,
   saveDefaultTemplateToStore,
-  saveUserTemplateToStore,
   validateTemplateDetailed,
 } from "./template-store.ts";
 import {
@@ -561,6 +560,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
   let editorTemplateDialogSelectedId: number | null = null;
   let partDesignerDialogOpen = false;
   let partDesignerSelectedId: number | null = null;
+  let partDesignerOpenedPartId: number | null = null;
   let partDesignerOpenFilter: PartOpenFilter = "all";
   let partDesignerTool: PartDesignerTool = "select";
   const STRUCTURE_LAYER_BASE_OPTION = "__structure_layer__";
@@ -2267,7 +2267,6 @@ export function bootstrap(options: BootstrapOptions = {}): void {
 
   const makeUniqueTemplateId = (): number => {
     const used = new Set<number>(templates.map((template) => template.id));
-    used.delete(editorDraft.id);
     let next = 1;
     while (used.has(next)) {
       next += 1;
@@ -2277,7 +2276,6 @@ export function bootstrap(options: BootstrapOptions = {}): void {
 
   const makeUniquePartId = (): number => {
     const used = new Set<number>(parts.map((part) => part.id));
-    used.delete(partDesignerDraft.id);
     let next = 1;
     while (used.has(next)) {
       next += 1;
@@ -4450,7 +4448,6 @@ export function bootstrap(options: BootstrapOptions = {}): void {
           <button id="btnClearGrid">Clear Grid</button>
         </div>
         <div class="row">
-          <button id="btnSaveDraft">Save to User Space</button>
           <button id="btnSaveDraftDefault">Save</button>
         </div>
       `;
@@ -5533,7 +5530,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       ensureEditorSelectionForLayer();
       renderPanels();
     });
-    const saveEditorDraft = async (target: "user" | "default"): Promise<void> => {
+    const saveEditorDraft = async (): Promise<void> => {
       const snapshot = cloneTemplate(editorDraft);
       const normalizedName = snapshot.name.trim().toLowerCase();
       const openedNameNormalized = editorOpenedTemplateName.trim().toLowerCase();
@@ -5544,19 +5541,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       if (isRenameOfOpenedTemplate) {
         snapshot.id = makeUniqueTemplateId();
       }
-      if (target === "user") {
-        if (normalizedName.length > 0) {
-          const defaultTemplates = await fetchDefaultTemplatesFromStore(parts);
-          const hasNameConflict = defaultTemplates.some((template) => template.name.trim().toLowerCase() === normalizedName);
-          if (hasNameConflict) {
-            const message = `Cannot save to user space: template name "${snapshot.name}" is reserved by a default template`;
-            addLog(message, "bad");
-            window.alert(message);
-            return;
-          }
-        }
-      }
-      if (target === "default" && normalizedName.length > 0) {
+      if (normalizedName.length > 0) {
         const userTemplates = await fetchUserTemplatesFromStore(parts);
         const sameNameUserTemplates = userTemplates.filter((template) => template.name.trim().toLowerCase() === normalizedName);
         for (const userTemplate of sameNameUserTemplates) {
@@ -5579,11 +5564,9 @@ export function bootstrap(options: BootstrapOptions = {}): void {
           addLog(`Warning: ${issue}`, "warn");
         }
       }
-      const saved = target === "default"
-        ? await saveDefaultTemplateToStore(snapshot)
-        : await saveUserTemplateToStore(snapshot);
+      const saved = await saveDefaultTemplateToStore(snapshot);
       if (!saved) {
-        addLog(`Failed to save ${target} object`, "bad");
+        addLog("Failed to save default object", "bad");
         return;
       }
       if (oldTemplateIdToDelete !== null) {
@@ -5598,15 +5581,12 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       editorOpenedTemplateName = snapshot.name;
       editorTemplateDialogSelectedId = snapshot.id;
       await refreshTemplatesFromStore();
-      addLog(`Saved ${target} object: ${snapshot.name}`, "good");
+      addLog(`Saved default object: ${snapshot.name}`, "good");
       renderPanels();
     };
 
-    getOptionalElement<HTMLButtonElement>("#btnSaveDraft")?.addEventListener("click", async () => {
-      await saveEditorDraft("user");
-    });
     getOptionalElement<HTMLButtonElement>("#btnSaveDraftDefault")?.addEventListener("click", async () => {
-      await saveEditorDraft("default");
+      await saveEditorDraft();
     });
 
     getOptionalElement<HTMLInputElement>("#editorPlaceByCenter")?.addEventListener("change", (event) => {
@@ -5648,6 +5628,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
           recenterEditorViewForScreen("partEditor");
         }
         partDesignerSelectedId = partId;
+        partDesignerOpenedPartId = source.id;
         partDesignerDialogOpen = false;
         loadPartIntoDesignerSlots(source);
         renderPanels();
@@ -5668,6 +5649,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         recenterEditorViewForScreen("partEditor");
         const copy = makeCopyPart(source);
         partDesignerSelectedId = copy.id;
+        partDesignerOpenedPartId = null;
         partDesignerDialogOpen = false;
         loadPartIntoDesignerSlots(copy);
         addLog(`Created part copy: ${copy.name}`, "good");
@@ -5709,6 +5691,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
               recenterEditorViewForScreen("partEditor");
             }
             partDesignerSelectedId = fallback.id;
+            partDesignerOpenedPartId = fallback.id;
             loadPartIntoDesignerSlots(fallback);
           }
         } else if (partDesignerSelectedId === partId) {
@@ -6162,6 +6145,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       partDesignerCategoryEdited = false;
       partDesignerSubcategoryEdited = false;
       partDesignerSelectedId = partDesignerDraft.id;
+      partDesignerOpenedPartId = null;
       partDesignerTool = "select";
       partDesignerDialogOpen = false;
       recenterEditorViewForScreen("partEditor");
@@ -6183,6 +6167,15 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     const savePartDraft = async (): Promise<void> => {
       recalcPartDraftFromSlots();
       const snapshot = clonePartDefinition(partDesignerDraft);
+      const isUnsavedDraft = partDesignerOpenedPartId === null;
+      const collidesWithExistingPart = parts.some((part) => part.id === snapshot.id);
+      if (isUnsavedDraft && collidesWithExistingPart) {
+        const oldId = snapshot.id;
+        snapshot.id = makeUniquePartId();
+        partDesignerDraft.id = snapshot.id;
+        partDesignerSelectedId = snapshot.id;
+        addLog(`Adjusted copied/new draft id to avoid overwrite: ${oldId} -> ${snapshot.id}`, "warn");
+      }
       const validation = validatePartDefinitionDetailed(snapshot);
       for (const issue of validation.errors) {
         addLog(`Part Error: ${issue}`, "bad");
@@ -6198,6 +6191,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       await refreshPartsFromStore();
       await refreshTemplatesFromStore();
       partDesignerSelectedId = snapshot.id;
+      partDesignerOpenedPartId = snapshot.id;
       const reloaded = parts.find((part) => part.id === snapshot.id) ?? snapshot;
       loadPartIntoDesignerSlots(reloaded);
       addLog(`Saved part: ${snapshot.name}`, "good");
@@ -6234,6 +6228,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     const selected = parts.find((part) => part.id === partDesignerSelectedId);
     if (selected) {
       partDesignerSelectedId = selected.id;
+      partDesignerOpenedPartId = selected.id;
       loadPartIntoDesignerSlots(selected);
     }
     renderPanels();
@@ -6486,6 +6481,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     const selected = parts.find((part) => part.id === partDesignerSelectedId);
     if (selected) {
       partDesignerSelectedId = selected.id;
+      partDesignerOpenedPartId = selected.id;
       loadPartIntoDesignerSlots(selected);
     }
     renderPanels();
@@ -6733,6 +6729,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
 
   loadTemplateIntoEditorSlots(editorDraft);
   partDesignerSelectedId = partDesignerDraft.id;
+  partDesignerOpenedPartId = null;
   loadPartIntoDesignerSlots(partDesignerDraft);
   ensureEditorSelectionForLayer();
   setScreen("base");
@@ -6744,6 +6741,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       const selectedPart = parts.find((part) => part.id === partDesignerSelectedId);
       if (selectedPart) {
         partDesignerSelectedId = selectedPart.id;
+        partDesignerOpenedPartId = selectedPart.id;
         loadPartIntoDesignerSlots(selectedPart);
       }
       await refreshTemplatesFromStore();

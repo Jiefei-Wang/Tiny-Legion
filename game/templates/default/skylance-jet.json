@@ -2,7 +2,6 @@
   "id": 3,
   "name": "Skylance Jet",
   "type": "air",
-  "gasCost": 42,
   "structure": [
     {
       "partId": 11,
@@ -44,7 +43,7 @@
     },
     {
       "component": "rapidGun",
-      "partId": 19,
+      "partId": 20,
       "cell": 2,
       "x": 1,
       "y": 0,
