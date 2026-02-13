@@ -261,8 +261,9 @@ Template/editor architecture notes:
 - Loader injection remains configurable in parse options; current dev/headless normalization persists the injected-loader result to template JSON.
 - Editor save does not block on warnings/errors; categories are surfaced in UI/logs for developer feedback.
 - Battle deploy/spawn paths validate templates and block creation when `errors` are present.
-- Template editor includes optional template-level gas override input; empty value keeps gas derived from part totals.
+- Template editor displays computed template gas (sum of part gas values); template-level gas override input is removed.
 - Editor `Open` workflow supports direct editing of existing templates and one-click copy creation (`-copy` suffix).
+- Template `Open` list is grouped by template type (`ground` then `air`) and sorted by computed gas cost ascending within each group, with gas shown per row.
 - Template IDs are internal positive integers and auto-generated for new/copy templates; ID editing is removed from UI.
 
 ---
@@ -423,8 +424,8 @@ Editor UX implementation details:
 - Template editor functional palette uses part catalog entries (not only hardcoded component IDs).
 - Template editor functional palette applies template-type compatibility filtering: `air`-tagged parts are hidden on ground templates, `ground`-tagged parts are hidden on air templates, and untagged parts remain shared.
 - Template editor structure palette is part-catalog driven and keyed by structure `part.id` (no material-bucket dedupe).
-- Template structure schema uses `partId` per cell (not `material`), and template gas cost is computed from structure-part + functional-part gas values by default, with optional per-template explicit gas override.
-- Template persistence only writes `gasCost` when an explicit override is set; normalized computed gas remains runtime-derived so later part edits still auto-refresh total gas.
+- Template structure schema uses `partId` per cell (not `material`), and template gas cost is always computed from structure-part + functional-part gas values.
+- Template persistence omits template gas fields; normalized runtime gas remains derived from part totals so part edits auto-refresh template gas.
 - Template parsing is strict for structure cells: invalid or missing structure `partId` fails parsing (no legacy `material` fallback path).
 - Part Designer supports optional `stats.gasCost` override per part; deleting the field reverts to default gas calculation from base component/material defaults.
 - Part Designer supports a unique per-part firepoint marker (`Fire point`) on box flags (max one per part); runtime uses it as muzzle spawn origin and AI receives that resolved world coordinate via battle AI input.

@@ -435,7 +435,6 @@ export function cloneTemplate(template: UnitTemplate): UnitTemplate {
     name: template.name,
     type: template.type,
     gasCost: template.gasCost,
-    gasCostOverride: template.gasCostOverride,
     structure: template.structure.map((cell) => ({ partId: cell.partId, x: cell.x, y: cell.y })),
     attachments: template.attachments.map((attachment) => ({
       component: attachment.component,
@@ -575,18 +574,11 @@ export function parseTemplate(input: unknown, options: ParseTemplateOptions = {}
   const injectLoaders = options.injectLoaders ?? true;
   const sanitizePlacement = options.sanitizePlacement ?? true;
 
-  const explicitGasCostOverride = typeof data.gasCostOverride === "number" && Number.isFinite(data.gasCostOverride)
-    ? Math.max(0, Math.floor(data.gasCostOverride))
-    : undefined;
-  const legacyGasCost = typeof data.gasCost === "number" && Number.isFinite(data.gasCost)
-    ? Math.max(0, Math.floor(data.gasCost))
-    : undefined;
   const template: UnitTemplate = {
     id: data.id,
     name: data.name.trim(),
     type: data.type,
     gasCost: 0,
-    gasCostOverride: undefined,
     structure,
     attachments,
     display,
@@ -599,11 +591,7 @@ export function parseTemplate(input: unknown, options: ParseTemplateOptions = {}
   const loaderNormalized = injectLoaders
     ? { ...placementNormalized, attachments: ensureLoaderCoverage(placementNormalized, partCatalog) }
     : placementNormalized;
-  const computedGasCost = computeTemplateGasCost(loaderNormalized, partCatalog);
-  const resolvedGasOverride = explicitGasCostOverride ??
-    (legacyGasCost !== undefined && legacyGasCost !== computedGasCost ? legacyGasCost : undefined);
-  loaderNormalized.gasCostOverride = resolvedGasOverride;
-  loaderNormalized.gasCost = resolvedGasOverride ?? computedGasCost;
+  loaderNormalized.gasCost = computeTemplateGasCost(loaderNormalized, partCatalog);
   return loaderNormalized;
 }
 

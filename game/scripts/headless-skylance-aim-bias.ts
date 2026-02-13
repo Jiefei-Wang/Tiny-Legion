@@ -43,6 +43,25 @@ function loadRuntimeMergedParts(): PartDefinition[] {
   return mergePartCatalogs(defaults, users);
 }
 
+function serializeTemplateForFile(template: UnitTemplate): Record<string, unknown> {
+  return {
+    id: template.id,
+    name: template.name,
+    type: template.type,
+    structure: template.structure.map((cell) => ({ partId: cell.partId, x: cell.x, y: cell.y })),
+    attachments: template.attachments.map((attachment) => ({
+      component: attachment.component,
+      partId: attachment.partId,
+      cell: attachment.cell,
+      x: attachment.x,
+      y: attachment.y,
+      rotateQuarter: attachment.rotateQuarter,
+      rotate90: attachment.rotate90,
+    })),
+    display: template.display?.map((item) => ({ kind: item.kind, cell: item.cell, x: item.x, y: item.y })) ?? [],
+  };
+}
+
 function readTemplateDir(dirPath: string, partCatalog: ReadonlyArray<PartDefinition>): UnitTemplate[] {
   if (!existsSync(dirPath)) {
     return [];
@@ -58,7 +77,7 @@ function readTemplateDir(dirPath: string, partCatalog: ReadonlyArray<PartDefinit
       if (!normalized) {
         continue;
       }
-      const normalizedRaw = `${JSON.stringify(normalized, null, 2)}\n`;
+      const normalizedRaw = `${JSON.stringify(serializeTemplateForFile(normalized), null, 2)}\n`;
       if (raw !== normalizedRaw) {
         writeFileSync(filePath, normalizedRaw, "utf8");
       }

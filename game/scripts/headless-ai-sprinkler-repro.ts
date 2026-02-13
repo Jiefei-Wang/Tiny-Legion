@@ -20,7 +20,7 @@ const REPRO_CANVAS_HEIGHT = 8000;
 const SWEEP_RADIUS = 2400;
 const MAX_TICKS_PRE_SHOT = 240;
 const MAX_TICKS_POST_SHOT = 1800;
-const SHOTS_PER_DEGREE = 1;
+const SHOTS_PER_DEGREE = 1000;
 const AIM_PASS_THRESHOLD_DEG = 0.75;
 const PLAN_PASS_THRESHOLD_DEG = 0.0001;
 
@@ -87,6 +87,25 @@ function loadRuntimeMergedParts(): PartDefinition[] {
   return mergePartCatalogs(defaults, users);
 }
 
+function serializeTemplateForFile(template: UnitTemplate): Record<string, unknown> {
+  return {
+    id: template.id,
+    name: template.name,
+    type: template.type,
+    structure: template.structure.map((cell) => ({ partId: cell.partId, x: cell.x, y: cell.y })),
+    attachments: template.attachments.map((attachment) => ({
+      component: attachment.component,
+      partId: attachment.partId,
+      cell: attachment.cell,
+      x: attachment.x,
+      y: attachment.y,
+      rotateQuarter: attachment.rotateQuarter,
+      rotate90: attachment.rotate90,
+    })),
+    display: template.display?.map((item) => ({ kind: item.kind, cell: item.cell, x: item.x, y: item.y })) ?? [],
+  };
+}
+
 function readTemplateDir(dirPath: string, partCatalog: ReadonlyArray<PartDefinition>): UnitTemplate[] {
   if (!existsSync(dirPath)) {
     return [];
@@ -102,7 +121,7 @@ function readTemplateDir(dirPath: string, partCatalog: ReadonlyArray<PartDefinit
       if (!normalized) {
         continue;
       }
-      const normalizedRaw = `${JSON.stringify(normalized, null, 2)}\n`;
+      const normalizedRaw = `${JSON.stringify(serializeTemplateForFile(normalized), null, 2)}\n`;
       if (raw !== normalizedRaw) {
         writeFileSync(filePath, normalizedRaw, "utf8");
       }
@@ -483,6 +502,18 @@ function printSweepSummary(sweep: SweepResult): boolean {
     console.log(`missedPlanSample: ${sample}`);
   }
   const strictPass = notFiredCases.length === 0 && totalHits === totalTrials;
+  const perDegree = Array.from({ length: 360 }, (_, deg) => {
+    const degreeCases = results.filter((result) => result.deg === deg);
+    const trials = degreeCases.length;
+    const hits = degreeCases.filter((result) => result.hit).length;
+    const misses = trials - hits;
+    const missRate = misses / Math.max(1, trials);
+    return { deg, trials, hits, misses, missRate };
+  });
+  console.log("perDegreeMissRate:");
+  for (const row of perDegree) {
+    console.log(`${row.deg}: missRate=${row.missRate.toFixed(6)} misses=${row.misses}/${row.trials}`);
+  }
   console.log(
     `aimErrorToIntendedDeg avg=${Number.isFinite(avgAimErrorToIntended) ? avgAimErrorToIntended.toFixed(3) : "n/a"} `
     + `max=${maxAimErrorToIntended.toFixed(3)} (diagnostic only)`,

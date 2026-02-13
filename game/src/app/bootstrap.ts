@@ -3138,7 +3138,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
 
   const recomputeEditorDraftGasCost = (): number => {
     const computed = computeTemplateGasCost(editorDraft, parts);
-    editorDraft.gasCost = typeof editorDraft.gasCostOverride === "number" ? editorDraft.gasCostOverride : computed;
+    editorDraft.gasCost = computed;
     return computed;
   };
 
@@ -4377,16 +4377,21 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     ensureEditorSelectionForLayer();
     if (isTemplateEditorScreen()) {
       const computedTemplateGas = computeTemplateGasCost(editorDraft, parts);
-      const effectiveTemplateGas = typeof editorDraft.gasCostOverride === "number" ? editorDraft.gasCostOverride : computedTemplateGas;
-      editorDraft.gasCost = effectiveTemplateGas;
+      editorDraft.gasCost = computedTemplateGas;
       if (editorTemplateDialogSelectedId === null || !templates.some((template) => template.id === editorTemplateDialogSelectedId)) {
         editorTemplateDialogSelectedId = templates[0]?.id ?? null;
       }
-      const templateOpenRows = templates
-        .map((template) => {
+      const makeTemplateRows = (type: UnitTemplate["type"]): string => templates
+        .filter((template) => template.type === type)
+        .map((template) => ({
+          template,
+          gasCost: computeTemplateGasCost(template, parts),
+        }))
+        .sort((a, b) => (a.gasCost - b.gasCost) || a.template.name.localeCompare(b.template.name))
+        .map(({ template, gasCost }) => {
           const selectedClass = template.id === editorTemplateDialogSelectedId ? "active" : "";
           return `<div class="row" style="gap:8px; flex-wrap:nowrap; align-items:center;">
-            <button data-editor-open-select="${template.id}" class="${selectedClass}" style="flex:1; text-align:left;">${template.name} (${template.type})</button>
+            <button data-editor-open-select="${template.id}" class="${selectedClass}" style="flex:1; text-align:left;">${template.name} (${gasCost} gas)</button>
             <div style="display:flex; gap:6px; margin-left:auto;">
               <button data-editor-open-copy="${template.id}">Copy</button>
               <button data-editor-open-delete="${template.id}">Delete</button>
@@ -4394,6 +4399,14 @@ export function bootstrap(options: BootstrapOptions = {}): void {
           </div>`;
         })
         .join("");
+      const groundTemplateRows = makeTemplateRows("ground");
+      const airTemplateRows = makeTemplateRows("air");
+      const templateOpenRows = `
+        <div><strong>Ground</strong></div>
+        ${groundTemplateRows || `<div class="small">No ground template available.</div>`}
+        <div style="margin-top:8px;"><strong>Air</strong></div>
+        ${airTemplateRows || `<div class="small">No air template available.</div>`}
+      `;
       editorPanel.innerHTML = `
         <h3>Template Editor</h3>
         <div class="small">Choose a layer, pick a part card on the right panel, then click the ${editorGridCols}x${editorGridRows} grid on canvas. Right-drag to move view and wheel to zoom. Origin is (0,0), negative coordinates supported.</div>
@@ -4423,11 +4436,8 @@ export function bootstrap(options: BootstrapOptions = {}): void {
               <option value="air" ${editorDraft.type === "air" ? "selected" : ""}>Air</option>
             </select>
           </label>
-          <label class="small">Gas Override
-            <input id="editorGasOverride" type="number" min="0" step="1" value="${editorDraft.gasCostOverride ?? ""}" placeholder="${computedTemplateGas}" />
-          </label>
         </div>
-        <div class="small">Gas cost = ${effectiveTemplateGas} (${typeof editorDraft.gasCostOverride === "number" ? "template override" : "sum of part gas values"}).</div>
+        <div class="small">Gas cost = ${computedTemplateGas} (sum of part gas values).</div>
         <div class="row">
           <label class="small"><input id="editorDeleteMode" type="checkbox" ${editorDeleteMode ? "checked" : ""} /> Delete mode</label>
           <label class="small"><input id="editorPlaceByCenter" type="checkbox" ${editorPlaceByCenter ? "checked" : ""} /> Center place on click</label>
@@ -4736,12 +4746,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       for (const cell of template.structure) {
         cell.partId = upgradedPartId;
       }
-      if (typeof template.gasCostOverride === "number") {
-        template.gasCostOverride += material === "combined" ? 8 : 4;
-        template.gasCost = template.gasCostOverride;
-      } else {
-        template.gasCost = computeTemplateGasCost(template, parts);
-      }
+      template.gasCost = computeTemplateGasCost(template, parts);
     }
   };
 
@@ -4866,12 +4871,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       const weapon = tankTemplate?.attachments.find((attachment) => attachment.component === "heavyCannon");
       if (weapon && tankTemplate) {
         weapon.component = "explosiveShell";
-        if (typeof tankTemplate.gasCostOverride === "number") {
-          tankTemplate.gasCostOverride += 9;
-          tankTemplate.gasCost = tankTemplate.gasCostOverride;
-        } else {
-          tankTemplate.gasCost = computeTemplateGasCost(tankTemplate, parts);
-        }
+        tankTemplate.gasCost = computeTemplateGasCost(tankTemplate, parts);
       }
       addLog("Unlocked explosive cannon option", "good");
       renderPanels();
@@ -5486,18 +5486,6 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       recomputeEditorDraftGasCost();
       updateSelectedInfo();
     });
-    getOptionalElement<HTMLInputElement>("#editorGasOverride")?.addEventListener("input", (event) => {
-      const raw = (event.currentTarget as HTMLInputElement).value.trim();
-      if (raw.length <= 0) {
-        editorDraft.gasCostOverride = undefined;
-      } else {
-        const parsed = Number(raw);
-        editorDraft.gasCostOverride = Number.isFinite(parsed) ? Math.max(0, Math.floor(parsed)) : undefined;
-      }
-      recomputeEditorDraftGasCost();
-      updateSelectedInfo();
-    });
-
     getOptionalElement<HTMLButtonElement>("#btnClearGrid")?.addEventListener("click", () => {
       editorStructureSlots = new Array<number | null>(EDITOR_GRID_MAX_SIZE).fill(null);
       editorFunctionalSlots = new Array<EditorFunctionalSlot>(EDITOR_GRID_MAX_SIZE).fill(null);
@@ -5513,7 +5501,6 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         name: newName,
         type: "ground",
         gasCost: 0,
-        gasCostOverride: undefined,
         structure: [],
         attachments: [],
         display: [],

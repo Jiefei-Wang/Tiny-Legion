@@ -216,7 +216,6 @@ export interface UnitTemplate {
   name: string;
   type: UnitType;
   gasCost: number;
-  gasCostOverride?: number;
   structure: StructureCellTemplate[];
   attachments: AttachmentTemplate[];
   display?: DisplayAttachmentTemplate[];

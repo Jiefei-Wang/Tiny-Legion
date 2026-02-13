@@ -106,12 +106,11 @@ Current implementation includes dedicated in-app editor tabs where the player ca
 - Editor view defaults to centered origin (`0,0`) on first load and recenters only when loading a different template/part.
 - Battle rendering and hitboxes now honor stored structure/display/functional coordinates instead of compacting to a fixed index grid.
 - Template gas cost defaults to the sum of part gas values (structure material parts + functional parts).
-- Templates can still override gas cost explicitly; when override is absent, gas auto-recomputes from current part composition.
-- Template save payloads persist `gasCost` only when an explicit template gas override is set; computed gas is runtime-derived and not treated as an override.
 - Part Designer includes editable part gas override (`stats.gasCost`); clearing the value resets to default computed gas for that part family.
 - Save templates from editor with a single `Save` action (default storage) and deploy them in battle.
 - Saving to default storage (`Save`) removes any user-storage templates with the same template name (case-insensitive), then writes the default template.
-- Template Editor exposes optional gas override input; leaving it empty keeps gas auto-computed from part gas totals.
+- Template Editor shows computed template gas info (sum of part gas values); template-level gas override input is removed.
+- Template Editor `Open` window is stratified by unit category (`Ground` then `Air`), each category sorted by total gas ascending, and each row shows template gas.
 - Save is allowed even with validation issues.
 - Validation is split into `Error` and `Warning` categories:
   - `Error`: severe issues (for example missing control module, air unit cannot hold altitude).
