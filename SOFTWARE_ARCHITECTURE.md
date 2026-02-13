@@ -234,9 +234,11 @@ Map node metadata supports test-only battle tuning via optional fields on `MapNo
 - `testBaseHpOverride` sets both player/enemy battle base HP and max HP for long-running test battles.
 - The `Test Arena` tab uses these overrides while skipping campaign rewards/ownership changes.
 - Test Arena UI controls for enemy count / battlefield size / zoom apply on input commit (`Enter` or blur) without extra apply buttons.
-- Test Arena enemy-spawn selection uses a checkbox dropdown allowlist; selected template IDs are applied to `BattleSession` enemy auto-spawn candidate filtering (manual spawn uses its own direct template selector).
-- Test Arena Unit tab includes an auto-spawn mirror toggle that spawns the same auto-selected template on the player side whenever the enemy auto-spawner creates a unit.
+- Test Arena enemy/player spawn selection uses separate template multi-select dropdowns (one per side).
+- Test Arena Unit tab includes two auto-spawn toggles (`enemy side`, `player side`, both default ON), side count inputs, and side template dropdowns; runtime keeps alive units per side at/above configured targets by auto-spawning the selected side template when enabled.
+- Test Arena start path clears default starter units so no extra non-auto units remain.
 - Test Arena Unit tab includes a `Clear all units` action that removes all currently active units from the running Test Arena session.
+- Battle Ops panel includes spawn-side toggles (`Player Spawn` / `Enemy Spawn`, default player); enemy-side deploy via Battle Ops is restricted to active Test Arena sessions.
 - Test Arena AI control supports side-level composed-model selection (full `{ target, movement, shoot }` bundle) plus a `2 x 3` component grid fallback for custom per-module composition.
 - Dropdown inventory is populated from:
   - built-in module presets,

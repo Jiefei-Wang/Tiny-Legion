@@ -45,7 +45,11 @@ Lose condition chain:
   - Contested
 - Includes a dedicated `Test Arena` top-level tab (parallel to `Battle`) for debug scenarios.
 - Test Arena overrides both battle bases to extremely high HP so base destruction does not end the test run.
-- Test Arena controls allow setting enemy count, battlefield simulation size (`W`/`H`), ground-zone height, display zoom percentage, selecting enemy auto-spawn templates from a checkbox dropdown, optionally mirroring those automatic spawns to the player side using the same template, manually spawning an enemy template, clearing all currently active arena units, and toggling controlled-unit invincibility (no HP loss, still collides and can be hit).
+- Test Arena controls allow setting enemy count, player count, battlefield simulation size (`W`/`H`), ground-zone height, display zoom percentage, selecting enemy and player auto-spawn templates from separate multi-select dropdowns, toggling `auto spawn on enemy side` and `auto spawn on player side` (both default ON), clearing all currently active arena units, and toggling controlled-unit invincibility (no HP loss, still collides and can be hit).
+- Test Arena Unit controls are arranged as a `Player`/`Enemy` two-column grid with three rows: count, spawn template, auto-spawn toggle.
+- Test Arena auto-spawn behavior: when enabled per side, the game auto-spawns the selected side template whenever alive units drop below the configured count target.
+- Test Arena starts with no extra starter units; units only appear through enabled auto-spawn behavior (or explicit deploy actions).
+- Battle Ops pane includes a spawn-side switch (`Player Spawn` / `Enemy Spawn`, default `Player Spawn`); enemy-side deploy from this pane is allowed only during active Test Arena.
 - Test Arena options panel is organized as collapsible tabs to save space: battle start/stop actions are always in the first row, `Unit` is expanded by default, `AI Selection` is collapsed by default, and `UI Configuration` is grouped in its own tab.
 - Test Arena AI presets are local JS/TS-only and run without external Python bridge/service dependencies.
 - Test Arena parameter inputs apply on `Enter` or input blur (no separate apply button).

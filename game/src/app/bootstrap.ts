@@ -310,13 +310,17 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     testBaseHpOverride: 1000000000,
   };
   let testArenaEnemyCount = 2;
+  let testArenaPlayerCount = 2;
   let testArenaBattlefieldWidth = BATTLEFIELD_WIDTH;
   let testArenaBattlefieldHeight = BATTLEFIELD_HEIGHT;
   let testArenaGroundHeight = Math.floor(BATTLEFIELD_HEIGHT * DEFAULT_GROUND_HEIGHT_RATIO);
-  let testArenaSpawnTemplateIds: string[] = templates.map((template) => template.id);
-  let testArenaManualSpawnTemplateId: string | null = templates[0]?.id ?? null;
-  let testArenaSpawnTemplateDropdownOpen = false;
-  let testArenaAutoSpawnBothSides = false;
+  let testArenaEnemySpawnTemplateIds: string[] = templates.map((template) => template.id);
+  let testArenaPlayerSpawnTemplateIds: string[] = templates.map((template) => template.id);
+  let testArenaEnemySpawnTemplateDropdownOpen = false;
+  let testArenaPlayerSpawnTemplateDropdownOpen = false;
+  let testArenaAutoSpawnOnEnemySide = true;
+  let testArenaAutoSpawnOnPlayerSide = true;
+  let battleDeploySide: "player" | "enemy" = "player";
   let testArenaInvinciblePlayer = false;
   type TestArenaAiPreset =
     | "baseline"
@@ -785,27 +789,21 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     }
     return normalized;
   };
-  const setTestArenaSpawnTemplateIds = (candidateIds: ReadonlyArray<string>): string[] => {
-    testArenaSpawnTemplateIds = normalizeTestArenaSpawnTemplateIds(candidateIds);
-    return testArenaSpawnTemplateIds;
+  const setTestArenaEnemySpawnTemplateIds = (candidateIds: ReadonlyArray<string>): string[] => {
+    testArenaEnemySpawnTemplateIds = normalizeTestArenaSpawnTemplateIds(candidateIds);
+    return testArenaEnemySpawnTemplateIds;
   };
-  const getTestArenaSpawnTemplateIds = (): string[] => {
-    testArenaSpawnTemplateIds = normalizeTestArenaSpawnTemplateIds(testArenaSpawnTemplateIds);
-    return testArenaSpawnTemplateIds;
+  const getTestArenaEnemySpawnTemplateIds = (): string[] => {
+    testArenaEnemySpawnTemplateIds = normalizeTestArenaSpawnTemplateIds(testArenaEnemySpawnTemplateIds);
+    return testArenaEnemySpawnTemplateIds;
   };
-  const normalizeTestArenaManualSpawnTemplateId = (candidateId: string | null): string | null => {
-    if (typeof candidateId === "string" && templates.some((template) => template.id === candidateId)) {
-      return candidateId;
-    }
-    return templates[0]?.id ?? null;
+  const setTestArenaPlayerSpawnTemplateIds = (candidateIds: ReadonlyArray<string>): string[] => {
+    testArenaPlayerSpawnTemplateIds = normalizeTestArenaSpawnTemplateIds(candidateIds);
+    return testArenaPlayerSpawnTemplateIds;
   };
-  const setTestArenaManualSpawnTemplateId = (candidateId: string | null): string | null => {
-    testArenaManualSpawnTemplateId = normalizeTestArenaManualSpawnTemplateId(candidateId);
-    return testArenaManualSpawnTemplateId;
-  };
-  const getTestArenaManualSpawnTemplateId = (): string | null => {
-    testArenaManualSpawnTemplateId = normalizeTestArenaManualSpawnTemplateId(testArenaManualSpawnTemplateId);
-    return testArenaManualSpawnTemplateId;
+  const getTestArenaPlayerSpawnTemplateIds = (): string[] => {
+    testArenaPlayerSpawnTemplateIds = normalizeTestArenaSpawnTemplateIds(testArenaPlayerSpawnTemplateIds);
+    return testArenaPlayerSpawnTemplateIds;
   };
   const syncTestArenaZoomInput = (): void => {
     const zoomInput = getOptionalElement<HTMLInputElement>("#testArenaZoomPercent");
@@ -1775,6 +1773,8 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       ...(typeof spec.baseHp === "number" && Number.isFinite(spec.baseHp) && spec.baseHp > 0 ? { testBaseHpOverride: spec.baseHp } : {}),
     };
     applyBattlefieldDefaults();
+    battle.setPlayerAutoSpawnEnabled(false);
+    battle.setPlayerAutoSpawnTargetCount(0);
     battle.setEnemySpawnTemplateFilter(null);
     battle.start(node);
     battle.clearControlSelection();
@@ -4146,28 +4146,39 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       <div class="small">Call reinforcements using global gas. Active cap from commander skill.</div>
       <div class="small">Turn-based: battle ends at end of round (press Next Round to resolve).</div>
       <div class="row">${templates.map((template) => `<button data-deploy="${template.id}">${template.name} (${template.gasCost} gas)</button>`).join("")}</div>
+      <div class="row">
+        <span class="small">Spawn side:</span>
+        <button id="btnDeploySidePlayer" ${battleDeploySide === "player" ? "class=\"active\"" : ""}>Player Spawn</button>
+        <button id="btnDeploySideEnemy" ${battleDeploySide === "enemy" ? "class=\"active\"" : ""}>Enemy Spawn</button>
+      </div>
       <div id="friendlyActive" class="small"></div>
       ${battle.getState().outcome ? `<div class="row"><button id="btnBackToMap">Return to Map</button></div>` : ""}
     `;
 
-    const selectedSpawnTemplateIds = getTestArenaSpawnTemplateIds();
-    const selectedSpawnTemplateIdSet = new Set<string>(selectedSpawnTemplateIds);
-    const spawnTemplateCheckboxRows = templates
+    const enemySpawnTemplateIds = getTestArenaEnemySpawnTemplateIds();
+    const enemySpawnTemplateIdSet = new Set<string>(enemySpawnTemplateIds);
+    const enemySpawnTemplateOptions = templates
       .map((template) => `
         <label class="small test-arena-spawn-option">
-          <input class="testArenaSpawnTemplateToggle" type="checkbox" data-template-id="${escapeHtml(template.id)}" ${selectedSpawnTemplateIdSet.has(template.id) ? "checked" : ""} />
+          <input class="testArenaEnemySpawnTemplateToggle" type="checkbox" data-template-id="${escapeHtml(template.id)}" ${enemySpawnTemplateIdSet.has(template.id) ? "checked" : ""} />
           <span>${escapeHtml(template.name)}</span>
         </label>
       `)
       .join("");
-    const spawnTemplateSummary = selectedSpawnTemplateIds.length <= 0
-      ? "Enemy (none selected)"
-      : `Enemy (${selectedSpawnTemplateIds.length} selected)`;
-    const spawnTemplateDropdownOpenAttr = testArenaSpawnTemplateDropdownOpen ? "open" : "";
-    const manualSpawnTemplateId = getTestArenaManualSpawnTemplateId();
-    const manualSpawnTemplateOptions = templates
-      .map((template) => `<option value="${template.id}" ${template.id === manualSpawnTemplateId ? "selected" : ""}>${escapeHtml(template.name)}</option>`)
+    const playerSpawnTemplateIds = getTestArenaPlayerSpawnTemplateIds();
+    const playerSpawnTemplateIdSet = new Set<string>(playerSpawnTemplateIds);
+    const playerSpawnTemplateOptions = templates
+      .map((template) => `
+        <label class="small test-arena-spawn-option">
+          <input class="testArenaPlayerSpawnTemplateToggle" type="checkbox" data-template-id="${escapeHtml(template.id)}" ${playerSpawnTemplateIdSet.has(template.id) ? "checked" : ""} />
+          <span>${escapeHtml(template.name)}</span>
+        </label>
+      `)
       .join("");
+    const enemySpawnSummary = enemySpawnTemplateIds.length <= 0 ? "None" : `${enemySpawnTemplateIds.length} selected`;
+    const playerSpawnSummary = playerSpawnTemplateIds.length <= 0 ? "None" : `${playerSpawnTemplateIds.length} selected`;
+    const enemySpawnDropdownOpenAttr = testArenaEnemySpawnTemplateDropdownOpen ? "open" : "";
+    const playerSpawnDropdownOpenAttr = testArenaPlayerSpawnTemplateDropdownOpen ? "open" : "";
     const renderCompositeModelOptions = (side: TestArenaSide): string => {
       const selectedId = testArenaCompositeModelSelections[side];
       return testArenaCompositeModelOptions
@@ -4190,9 +4201,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       `;
     };
     const enemyCountLabel = Math.max(0, Math.floor(testArenaEnemyCount));
-    const enemyCountActive = isTestArenaActive
-      ? battle.getAliveEnemyCount()
-      : enemyCountLabel;
+    const playerCountLabel = Math.max(0, Math.floor(testArenaPlayerCount));
     const zoomPercentLabel = Math.round(battleViewScale * 100);
     const unitSectionOpenAttr = testArenaPanelSections.unit ? "open" : "";
     const aiSectionOpenAttr = testArenaPanelSections.ai ? "open" : "";
@@ -4208,31 +4217,29 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       <details id="testArenaSectionUnit" class="test-arena-section" ${unitSectionOpenAttr}>
         <summary><strong>Unit</strong></summary>
         <div class="test-arena-section-body">
-          <div class="test-arena-inline-grid">
-            <label class="small">Enemy count
-              <input id="testArenaEnemyCount" type="number" min="0" max="40" step="1" value="${enemyCountLabel}" />
-            </label>
-            <span class="small">Active: ${enemyCountActive}</span>
-          </div>
-          <div class="test-arena-spawn-row">
-            <details id="testArenaSpawnTemplateDropdown" class="test-arena-spawn-dropdown" ${spawnTemplateDropdownOpenAttr}>
-              <summary class="small">${spawnTemplateSummary}</summary>
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; align-items:center;">
+            <div class="small"><strong>Player</strong></div>
+            <div class="small"><strong>Enemy</strong></div>
+            <input id="testArenaPlayerCount" type="number" min="0" max="40" step="1" value="${playerCountLabel}" />
+            <input id="testArenaEnemyCount" type="number" min="0" max="40" step="1" value="${enemyCountLabel}" />
+            <details id="testArenaPlayerSpawnTemplateDropdown" class="test-arena-spawn-dropdown" ${playerSpawnDropdownOpenAttr}>
+              <summary class="small">${playerSpawnSummary}</summary>
               <div class="test-arena-spawn-options">
-                ${spawnTemplateCheckboxRows}
+                ${playerSpawnTemplateOptions}
               </div>
             </details>
+            <details id="testArenaEnemySpawnTemplateDropdown" class="test-arena-spawn-dropdown" ${enemySpawnDropdownOpenAttr}>
+              <summary class="small">${enemySpawnSummary}</summary>
+              <div class="test-arena-spawn-options">
+                ${enemySpawnTemplateOptions}
+              </div>
+            </details>
+            <label class="small"><input id="testArenaAutoSpawnOnPlayerSide" type="checkbox" ${testArenaAutoSpawnOnPlayerSide ? "checked" : ""} /> Auto spawn</label>
+            <label class="small"><input id="testArenaAutoSpawnOnEnemySide" type="checkbox" ${testArenaAutoSpawnOnEnemySide ? "checked" : ""} /> Auto spawn</label>
           </div>
-          <label class="small"><input id="testArenaAutoSpawnBothSides" type="checkbox" ${testArenaAutoSpawnBothSides ? "checked" : ""} /> Auto spawn same template on player side</label>
           <div class="test-arena-spawn-row">
-            <label class="small">Manual spawn enemy
-              <select id="testArenaManualSpawnTemplate">
-                ${manualSpawnTemplateOptions}
-              </select>
-            </label>
-            <button id="btnSpawnTestEnemy">Spawn</button>
             <button id="btnClearTestArenaUnits" class="warn">Clear all units</button>
           </div>
-          <div class="small">Checkbox dropdown controls automatic enemy spawn templates. Mirror toggle also auto spawns selected templates on player side.</div>
           <label class="small"><input id="testArenaInvinciblePlayer" type="checkbox" ${testArenaInvinciblePlayer ? "checked" : ""} /> Player controlled invincible</label>
           <div class="small">Invincible player still collides and can be targeted, but takes no damage.</div>
         </div>
@@ -4793,11 +4800,17 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     await refreshTestArenaAiOptions();
     await refreshTestArenaComponentGrid();
     applyTestArenaAiControllers();
-    battle.setEnemySpawnTemplateFilter(getTestArenaSpawnTemplateIds());
-    battle.setAutoSpawnEnemyTemplateOnPlayerSide(testArenaAutoSpawnBothSides);
+    const enemyTemplateIds = getTestArenaEnemySpawnTemplateIds();
+    const playerTemplateIds = getTestArenaPlayerSpawnTemplateIds();
+    battle.setEnemySpawnTemplateFilter(enemyTemplateIds.length > 0 ? enemyTemplateIds : null);
+    battle.setPlayerAutoSpawnEnabled(testArenaAutoSpawnOnPlayerSide);
+    battle.setPlayerAutoSpawnTargetCount(testArenaPlayerCount);
+    battle.setPlayerSpawnTemplateFilter(playerTemplateIds.length > 0 ? playerTemplateIds : null);
     battle.start(testArenaNode);
+    battle.clearAllUnits();
     battle.setControlledUnitInvincible(testArenaInvinciblePlayer);
-    battle.setEnemyActiveCount(testArenaEnemyCount);
+    battle.setEnemyActiveCount(testArenaAutoSpawnOnEnemySide ? testArenaEnemyCount : 0);
+    battle.syncAutoSpawnTargets();
     const playerModel = findCompositeModelOptionById(testArenaCompositeModelSelections.player)?.label ?? testArenaCompositeModelSelections.player;
     const enemyModel = findCompositeModelOptionById(testArenaCompositeModelSelections.enemy)?.label ?? testArenaCompositeModelSelections.enemy;
     addLog(`Test Arena started. P model=${playerModel} | E model=${enemyModel}.`);
@@ -4890,6 +4903,8 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         applyBattlefieldDefaults();
         battle.setAiControllers({});
         battle.setExternalAiSides({ player: false, enemy: false });
+        battle.setPlayerAutoSpawnEnabled(false);
+        battle.setPlayerAutoSpawnTargetCount(0);
         battle.setEnemySpawnTemplateFilter(null);
         battle.start(node);
         addLog(`Battle started at ${node.name}`);
@@ -4919,9 +4934,31 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         if (!templateId) {
           return;
         }
-        battle.deployUnit(templateId);
+        if (battleDeploySide === "enemy") {
+          if (!(battle.getState().active && battle.getState().nodeId === testArenaNode.id)) {
+            addLog("Enemy spawn from Battle Ops is only available in Test Arena.", "warn");
+            renderPanels();
+            return;
+          }
+          const spawned = battle.arenaDeploy("enemy", templateId, { chargeGas: false, deploymentGasCost: 0, ignoreCap: true, ignoreLowGasThreshold: true });
+          addLog(
+            spawned ? `Spawned enemy unit: ${templateId}.` : `Failed to spawn enemy unit: ${templateId}.`,
+            spawned ? "good" : "bad",
+          );
+        } else {
+          battle.deployUnit(templateId);
+        }
         renderPanels();
       });
+    });
+
+    getOptionalElement<HTMLButtonElement>("#btnDeploySidePlayer")?.addEventListener("click", () => {
+      battleDeploySide = "player";
+      renderPanels();
+    });
+    getOptionalElement<HTMLButtonElement>("#btnDeploySideEnemy")?.addEventListener("click", () => {
+      battleDeploySide = "enemy";
+      renderPanels();
     });
 
     getOptionalElement<HTMLButtonElement>("#btnBackToMap")?.addEventListener("click", () => {
@@ -5011,6 +5048,8 @@ export function bootstrap(options: BootstrapOptions = {}): void {
 
     getOptionalElement<HTMLButtonElement>("#btnEndTestArena")?.addEventListener("click", () => {
       battle.setExternalAiSides({ player: false, enemy: false });
+      battle.setPlayerAutoSpawnEnabled(false);
+      battle.setPlayerAutoSpawnTargetCount(0);
       battle.resetToMapMode();
       setScreen("testArena");
       renderPanels();
@@ -5029,14 +5068,20 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     bindTestArenaSectionToggle("#testArenaSectionUnit", "unit");
     bindTestArenaSectionToggle("#testArenaSectionAi", "ai");
     bindTestArenaSectionToggle("#testArenaSectionUi", "ui");
-    const spawnTemplateDropdown = getOptionalElement<HTMLDetailsElement>("#testArenaSpawnTemplateDropdown");
-    if (spawnTemplateDropdown) {
-      testArenaSpawnTemplateDropdownOpen = spawnTemplateDropdown.open;
-      spawnTemplateDropdown.addEventListener("toggle", () => {
-        testArenaSpawnTemplateDropdownOpen = spawnTemplateDropdown.open;
+    const enemySpawnTemplateDropdown = getOptionalElement<HTMLDetailsElement>("#testArenaEnemySpawnTemplateDropdown");
+    if (enemySpawnTemplateDropdown) {
+      testArenaEnemySpawnTemplateDropdownOpen = enemySpawnTemplateDropdown.open;
+      enemySpawnTemplateDropdown.addEventListener("toggle", () => {
+        testArenaEnemySpawnTemplateDropdownOpen = enemySpawnTemplateDropdown.open;
       });
     }
-
+    const playerSpawnTemplateDropdown = getOptionalElement<HTMLDetailsElement>("#testArenaPlayerSpawnTemplateDropdown");
+    if (playerSpawnTemplateDropdown) {
+      testArenaPlayerSpawnTemplateDropdownOpen = playerSpawnTemplateDropdown.open;
+      playerSpawnTemplateDropdown.addEventListener("toggle", () => {
+        testArenaPlayerSpawnTemplateDropdownOpen = playerSpawnTemplateDropdown.open;
+      });
+    }
     const bindCommitOnEnterOrBlur = (input: HTMLInputElement | null, onCommit: () => void): void => {
       if (!input) {
         return;
@@ -5063,14 +5108,33 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       }
       testArenaEnemyCount = Math.max(0, Math.min(40, value));
       if (battle.getState().active && battle.getState().nodeId === testArenaNode.id) {
-        const updated = battle.setEnemyActiveCount(testArenaEnemyCount);
-        addLog(`Test Arena enemy count set to ${updated}.`, "good");
+        const updated = battle.setEnemyActiveCount(testArenaAutoSpawnOnEnemySide ? testArenaEnemyCount : 0);
+        addLog(`Test Arena enemy count set to ${testArenaAutoSpawnOnEnemySide ? updated : 0}.`, "good");
       } else {
         addLog(`Test Arena enemy count queued: ${testArenaEnemyCount}.`, "warn");
       }
       renderPanels();
     };
     bindCommitOnEnterOrBlur(getOptionalElement<HTMLInputElement>("#testArenaEnemyCount"), commitTestArenaEnemyCount);
+
+    const commitTestArenaPlayerCount = (): void => {
+      const raw = getOptionalElement<HTMLInputElement>("#testArenaPlayerCount")?.value ?? "";
+      const value = Number.parseInt(raw, 10);
+      if (!Number.isFinite(value)) {
+        addLog("Player count must be a number.", "warn");
+        renderPanels();
+        return;
+      }
+      testArenaPlayerCount = Math.max(0, Math.min(40, value));
+      const applied = battle.setPlayerAutoSpawnTargetCount(testArenaPlayerCount);
+      if (battle.getState().active && battle.getState().nodeId === testArenaNode.id) {
+        addLog(`Test Arena player count set to ${applied}.`, "good");
+      } else {
+        addLog(`Test Arena player count queued: ${applied}.`, "warn");
+      }
+      renderPanels();
+    };
+    bindCommitOnEnterOrBlur(getOptionalElement<HTMLInputElement>("#testArenaPlayerCount"), commitTestArenaPlayerCount);
 
     const commitTestArenaBattlefieldWidth = (): void => {
       const raw = getOptionalElement<HTMLInputElement>("#testArenaBattlefieldWidth")?.value ?? "";
@@ -5143,72 +5207,76 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     };
     bindCommitOnEnterOrBlur(getOptionalElement<HTMLInputElement>("#testArenaGroundHeight"), commitTestArenaGroundHeight);
 
-    document.querySelectorAll<HTMLInputElement>("input.testArenaSpawnTemplateToggle").forEach((input) => {
+    document.querySelectorAll<HTMLInputElement>("input.testArenaEnemySpawnTemplateToggle").forEach((input) => {
       input.addEventListener("change", (event) => {
         const checkbox = event.currentTarget as HTMLInputElement;
         const templateId = checkbox.getAttribute("data-template-id") ?? "";
         if (!templateId) {
           return;
         }
-        const nextSelection = new Set<string>(getTestArenaSpawnTemplateIds());
+        const nextSelection = new Set<string>(getTestArenaEnemySpawnTemplateIds());
         if (checkbox.checked) {
           nextSelection.add(templateId);
         } else {
           nextSelection.delete(templateId);
         }
-        const appliedSelection = setTestArenaSpawnTemplateIds(Array.from(nextSelection));
-        battle.setEnemySpawnTemplateFilter(appliedSelection);
-        if (battle.getState().active && battle.getState().nodeId === testArenaNode.id) {
-          const updated = battle.setEnemyActiveCount(testArenaEnemyCount);
-          addLog(
-            appliedSelection.length > 0
-              ? `Enemy spawn templates updated (${appliedSelection.length} selected). Active: ${updated}.`
-              : `Enemy spawn templates cleared. Active: ${updated}.`,
-            appliedSelection.length > 0 ? "good" : "warn",
-          );
-        } else {
-          addLog(
-            appliedSelection.length > 0
-              ? `Enemy spawn templates queued (${appliedSelection.length} selected).`
-              : "Enemy spawn templates queued: none selected.",
-            "warn",
-          );
-        }
+        const selected = setTestArenaEnemySpawnTemplateIds(Array.from(nextSelection));
+        battle.setEnemySpawnTemplateFilter(selected.length > 0 ? selected : null);
+        addLog(`Enemy auto-spawn templates: ${selected.length} selected.`, selected.length > 0 ? "good" : "warn");
         renderPanels();
       });
     });
 
-    getOptionalElement<HTMLSelectElement>("#testArenaManualSpawnTemplate")?.addEventListener("change", (event) => {
-      const nextValue = (event.currentTarget as HTMLSelectElement).value;
-      setTestArenaManualSpawnTemplateId(nextValue);
+    document.querySelectorAll<HTMLInputElement>("input.testArenaPlayerSpawnTemplateToggle").forEach((input) => {
+      input.addEventListener("change", (event) => {
+        const checkbox = event.currentTarget as HTMLInputElement;
+        const templateId = checkbox.getAttribute("data-template-id") ?? "";
+        if (!templateId) {
+          return;
+        }
+        const nextSelection = new Set<string>(getTestArenaPlayerSpawnTemplateIds());
+        if (checkbox.checked) {
+          nextSelection.add(templateId);
+        } else {
+          nextSelection.delete(templateId);
+        }
+        const selected = setTestArenaPlayerSpawnTemplateIds(Array.from(nextSelection));
+        battle.setPlayerSpawnTemplateFilter(selected.length > 0 ? selected : null);
+        addLog(`Player auto-spawn templates: ${selected.length} selected.`, selected.length > 0 ? "good" : "warn");
+        renderPanels();
+      });
     });
 
-    getOptionalElement<HTMLInputElement>("#testArenaAutoSpawnBothSides")?.addEventListener("change", (event) => {
-      testArenaAutoSpawnBothSides = (event.currentTarget as HTMLInputElement).checked;
-      battle.setAutoSpawnEnemyTemplateOnPlayerSide(testArenaAutoSpawnBothSides);
+    getOptionalElement<HTMLInputElement>("#testArenaAutoSpawnOnPlayerSide")?.addEventListener("change", (event) => {
+      testArenaAutoSpawnOnPlayerSide = (event.currentTarget as HTMLInputElement).checked;
+      battle.setPlayerAutoSpawnEnabled(testArenaAutoSpawnOnPlayerSide);
       addLog(
-        testArenaAutoSpawnBothSides
-          ? "Auto spawn mirror enabled: selected enemy templates will also spawn on player side."
-          : "Auto spawn mirror disabled: automatic spawn will only create enemy units.",
+        testArenaAutoSpawnOnPlayerSide
+          ? "Auto spawn on player side enabled."
+          : "Auto spawn on player side disabled.",
         "warn",
       );
       renderPanels();
     });
 
-    getOptionalElement<HTMLButtonElement>("#btnSpawnTestEnemy")?.addEventListener("click", async () => {
-      const selection = getOptionalElement<HTMLSelectElement>("#testArenaManualSpawnTemplate")?.value
-        ?? getTestArenaManualSpawnTemplateId()
-        ?? "";
-      if (!selection) {
-        addLog("Select a manual enemy template to spawn.", "warn");
-        return;
+    getOptionalElement<HTMLInputElement>("#testArenaAutoSpawnOnEnemySide")?.addEventListener("change", (event) => {
+      testArenaAutoSpawnOnEnemySide = (event.currentTarget as HTMLInputElement).checked;
+      if (battle.getState().active && battle.getState().nodeId === testArenaNode.id) {
+        const updated = battle.setEnemyActiveCount(testArenaAutoSpawnOnEnemySide ? testArenaEnemyCount : 0);
+        addLog(
+          testArenaAutoSpawnOnEnemySide
+            ? `Auto spawn on enemy side enabled (active target ${updated}).`
+            : "Auto spawn on enemy side disabled.",
+          "warn",
+        );
+      } else {
+        addLog(
+          testArenaAutoSpawnOnEnemySide
+            ? "Auto spawn on enemy side enabled."
+            : "Auto spawn on enemy side disabled.",
+          "warn",
+        );
       }
-      setTestArenaManualSpawnTemplateId(selection);
-      if (!battle.getState().active || battle.getState().nodeId !== testArenaNode.id) {
-        await startTestArena();
-      }
-      const spawned = battle.spawnEnemyTemplate(selection);
-      addLog(spawned ? `Spawned enemy: ${selection}.` : `Failed to spawn enemy: ${selection}.`, spawned ? "good" : "bad");
       renderPanels();
     });
 

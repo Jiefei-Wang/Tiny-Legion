@@ -82,6 +82,9 @@ export class BattleSession {
   private controlledUnitInvincible: boolean;
   private enemySpawnTemplateAllowList: Set<string> | null;
   private autoSpawnEnemyTemplateOnPlayerSide: boolean;
+  private autoSpawnPlayerSideEnabled: boolean;
+  private autoSpawnPlayerTargetCount: number;
+  private playerSpawnTemplateAllowList: Set<string> | null;
   private groundHeightPx: number;
   private readonly baselineController: BattleAiController;
 
@@ -120,6 +123,9 @@ export class BattleSession {
     this.controlledUnitInvincible = false;
     this.enemySpawnTemplateAllowList = null;
     this.autoSpawnEnemyTemplateOnPlayerSide = false;
+    this.autoSpawnPlayerSideEnabled = false;
+    this.autoSpawnPlayerTargetCount = 0;
+    this.playerSpawnTemplateAllowList = null;
     this.groundHeightPx = Math.max(80, canvas.height * DEFAULT_GROUND_HEIGHT_RATIO);
     this.baselineController = createBaselineCompositeAiController();
   }
@@ -248,6 +254,10 @@ export class BattleSession {
     return this.state.units.filter((unit) => unit.side === "enemy" && unit.alive).length;
   }
 
+  public getAlivePlayerCount(): number {
+    return this.state.units.filter((unit) => unit.side === "player" && unit.alive).length;
+  }
+
   public setEnemyActiveCount(targetCount: number): number {
     const normalizedTarget = clamp(Math.floor(targetCount), 0, 40);
     this.state.enemyMinActive = normalizedTarget;
@@ -319,6 +329,40 @@ export class BattleSession {
 
   public setAutoSpawnEnemyTemplateOnPlayerSide(enabled: boolean): void {
     this.autoSpawnEnemyTemplateOnPlayerSide = enabled === true;
+  }
+
+  public setPlayerAutoSpawnEnabled(enabled: boolean): void {
+    this.autoSpawnPlayerSideEnabled = enabled === true;
+  }
+
+  public setPlayerAutoSpawnTargetCount(targetCount: number): number {
+    this.autoSpawnPlayerTargetCount = clamp(Math.floor(targetCount), 0, 40);
+    return this.autoSpawnPlayerTargetCount;
+  }
+
+  public setPlayerSpawnTemplateFilter(templateIds: ReadonlyArray<string> | null): string[] {
+    if (templateIds === null) {
+      this.playerSpawnTemplateAllowList = null;
+      return [];
+    }
+    const validIds = new Set<string>(this.templates.map((template) => template.id));
+    const normalized: string[] = [];
+    for (const id of templateIds) {
+      if (!validIds.has(id)) {
+        continue;
+      }
+      if (normalized.includes(id)) {
+        continue;
+      }
+      normalized.push(id);
+    }
+    this.playerSpawnTemplateAllowList = new Set<string>(normalized);
+    return normalized;
+  }
+
+  public syncAutoSpawnTargets(): void {
+    this.ensureEnemyMinimumPresence();
+    this.ensurePlayerMinimumPresence();
   }
 
   public setBattlefieldSize(width: number, height: number): { width: number; height: number } {
@@ -595,6 +639,7 @@ export class BattleSession {
     if (!this.disableEnemyMinimumPresence) {
       this.ensureEnemyMinimumPresence();
     }
+    this.ensurePlayerMinimumPresence();
 
     const laneBounds = this.getLaneBounds();
     for (const unit of this.state.units) {
@@ -1151,6 +1196,41 @@ export class BattleSession {
       return;
     }
     this.state.units.push(player);
+  }
+
+  private ensurePlayerMinimumPresence(): void {
+    if (!this.autoSpawnPlayerSideEnabled || this.autoSpawnPlayerTargetCount <= 0) {
+      return;
+    }
+    const candidates = this.templates.filter((template) => {
+      if (this.playerSpawnTemplateAllowList && !this.playerSpawnTemplateAllowList.has(template.id)) {
+        return false;
+      }
+      const validation = validateTemplateDetailed(template, { partCatalog: this.partCatalog });
+      return validation.errors.length <= 0;
+    });
+    if (candidates.length <= 0) {
+      return;
+    }
+    let alivePlayer = this.getAlivePlayerCount();
+    let attempts = 0;
+    const maxAttempts = Math.max(2, this.autoSpawnPlayerTargetCount * 3);
+    while (alivePlayer < this.autoSpawnPlayerTargetCount && attempts < maxAttempts) {
+      const template = candidates[Math.floor(Math.random() * candidates.length)] ?? null;
+      if (!template) {
+        break;
+      }
+      const spawned = this.arenaDeploy("player", template.id, {
+        chargeGas: false,
+        deploymentGasCost: 0,
+        ignoreCap: true,
+      });
+      if (!spawned) {
+        break;
+      }
+      alivePlayer += 1;
+      attempts += 1;
+    }
   }
 
   public arenaDeploy(
