@@ -290,6 +290,7 @@ export interface UnitInstance {
   deploymentGasCost: number;
   returnedToBase: boolean;
   aiTimer: number;
+  aiAimCorrectionX: number;
   aiAimCorrectionY: number;
   aiState: "engage" | "evade";
   aiStateTimer: number;
@@ -334,6 +335,9 @@ export interface Projectile {
   intendedTargetId: string | null;
   intendedTargetX: number;
   intendedTargetY: number;
+  closestTargetDx: number;
+  closestTargetDy: number;
+  closestTargetDistance: number;
   hitIntendedTarget: boolean;
   axisY: number;
   allowAirPierce: boolean;

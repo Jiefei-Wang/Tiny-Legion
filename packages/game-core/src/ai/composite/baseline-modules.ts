@@ -109,7 +109,9 @@ export function createBaselineShootAi(): ShootAiModule {
           debugTag: "shoot.axis-blocked",
         };
       }
-      const distanceToTarget = Math.hypot(target.attackPoint.x - unit.x, target.attackPoint.y - unit.y);
+      const correctedTargetX = target.attackPoint.x + unit.aiAimCorrectionX;
+      const correctedTargetY = target.attackPoint.y + unit.aiAimCorrectionY;
+      const distanceToTarget = Math.hypot(correctedTargetX - unit.x, correctedTargetY - unit.y);
       let best: FirePlan | null = null;
       let bestScore = Number.NEGATIVE_INFINITY;
       let blockedReason: string | null = "no-ready-weapon";
@@ -139,20 +141,20 @@ export function createBaselineShootAi(): ShootAiModule {
         const solved = solveBallisticAim(
           unit.x,
           unit.y,
-          target.attackPoint.x,
-          target.attackPoint.y,
+          correctedTargetX,
+          correctedTargetY,
           leadVx,
           leadVy,
           effectiveRange,
         );
         const leadTimeS = solved?.leadTimeS ?? 0;
-        const angleRad = solved?.firingAngleRad ?? Math.atan2(target.attackPoint.y - unit.y, target.attackPoint.x - unit.x);
+        const angleRad = solved?.firingAngleRad ?? Math.atan2(correctedTargetY - unit.y, correctedTargetX - unit.x);
         const aimDistance = solved
           ? Math.max(90, Math.min(effectiveRange, PROJECTILE_SPEED * solved.leadTimeS))
           : Math.min(effectiveRange, Math.max(90, distanceToTarget));
         const baseAim = {
           x: unit.x + Math.cos(angleRad) * aimDistance,
-          y: unit.y + Math.sin(angleRad) * aimDistance + unit.aiAimCorrectionY,
+          y: unit.y + Math.sin(angleRad) * aimDistance,
         };
         const aim = adjustAimForWeaponPolicy(attachment.component, baseAim);
         const angleAllowed = input.canShootAtAngle(attachment.component, aim.x - unit.x, aim.y - unit.y, attachment.stats?.shootAngleDeg);

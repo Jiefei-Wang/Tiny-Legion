@@ -2,6 +2,7 @@
   "id": 5,
   "name": "Skylance",
   "type": "air",
+  "gasCost": 44,
   "structure": [
     {
       "partId": 11,

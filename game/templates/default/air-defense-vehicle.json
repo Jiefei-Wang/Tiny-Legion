@@ -2,6 +2,7 @@
   "id": 6,
   "name": "air defense vehicle",
   "type": "ground",
+  "gasCost": 27,
   "structure": [
     {
       "partId": 11,

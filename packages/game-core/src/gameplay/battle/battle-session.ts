@@ -17,7 +17,6 @@ import { COMPONENTS } from "../../config/balance/weapons.ts";
 import {
   AI_GRAVITY_CORRECTION_CLAMP,
   AI_GRAVITY_CORRECTION_STEP,
-  AI_MISS_VERTICAL_TOLERANCE,
   GLOBAL_WEAPON_RANGE_MULTIPLIER,
   GROUND_FIRE_Y_TOLERANCE,
   PROJECTILE_SPEED,
@@ -821,6 +820,7 @@ export class BattleSession {
       const stepY = projectile.vy * dt;
       projectile.x += stepX;
       projectile.y += stepY;
+      this.updateProjectileClosestTargetError(projectile);
       projectile.traveledDistance += Math.hypot(stepX, stepY);
       if (projectile.traveledDistance >= projectile.maxDistance) {
         projectile.ttl = -1;
@@ -1524,6 +1524,9 @@ export class BattleSession {
       intendedTargetId,
       intendedTargetX: finalIntendedTargetX,
       intendedTargetY: finalIntendedTargetY,
+      closestTargetDx: 0,
+      closestTargetDy: 0,
+      closestTargetDistance: Number.POSITIVE_INFINITY,
       hitIntendedTarget: false,
       axisY: finalIntendedTargetY,
       allowAirPierce: unit.type === "ground",
@@ -1561,6 +1564,24 @@ export class BattleSession {
       this.hooks.addLog(`${unit.name} fired weapon #${slot + 1}`, "warn");
     }
     return true;
+  }
+
+  private updateProjectileClosestTargetError(projectile: BattleState["projectiles"][number]): void {
+    if (!projectile.shooterWasAI || projectile.intendedTargetId === null || projectile.hitIntendedTarget) {
+      return;
+    }
+    const target = this.state.units.find((unit) => unit.id === projectile.intendedTargetId && unit.alive && unit.side !== projectile.side);
+    if (!target) {
+      return;
+    }
+    const dx = projectile.x - target.x;
+    const dy = projectile.y - target.y;
+    const distance = Math.hypot(dx, dy);
+    if (distance < projectile.closestTargetDistance) {
+      projectile.closestTargetDistance = distance;
+      projectile.closestTargetDx = dx;
+      projectile.closestTargetDy = dy;
+    }
   }
 
   private clampAndAdjustAngle(
@@ -2125,9 +2146,11 @@ export class BattleSession {
       if (dxToTarget < bestRange && canHitByAxis) {
         const targetVx = target?.vx ?? 0;
         const targetVy = target?.vy ?? 0;
-        const solved = solveBallisticAim(unit.x, unit.y, attackTarget.x, attackTarget.y, targetVx, targetVy, bestRange);
+        const correctedTargetX = attackTarget.x + unit.aiAimCorrectionX;
+        const correctedTargetY = attackTarget.y + unit.aiAimCorrectionY;
+        const solved = solveBallisticAim(unit.x, unit.y, correctedTargetX, correctedTargetY, targetVx, targetVy, bestRange);
 
-        let aim = { x: attackTarget.x, y: attackTarget.y + unit.aiAimCorrectionY };
+        let aim = { x: correctedTargetX, y: correctedTargetY };
         let intendedY: number | null = target ? attackTarget.y : null;
         if (solved) {
           unit.aiDebugLastAngleRad = solved.firingAngleRad;
@@ -2515,17 +2538,19 @@ export class BattleSession {
     if (!shooter) {
       return;
     }
-    const verticalMiss = projectile.y - projectile.intendedTargetY;
-    if (Math.abs(verticalMiss) <= AI_MISS_VERTICAL_TOLERANCE) {
+    if (!Number.isFinite(projectile.closestTargetDistance)) {
       return;
     }
-
-    if (verticalMiss > 0) {
-      shooter.aiAimCorrectionY -= AI_GRAVITY_CORRECTION_STEP;
-    } else {
-      shooter.aiAimCorrectionY += AI_GRAVITY_CORRECTION_STEP;
+    const distance = projectile.closestTargetDistance;
+    if (distance <= 0.01) {
+      return;
     }
-    shooter.aiAimCorrectionY = clamp(shooter.aiAimCorrectionY, -AI_GRAVITY_CORRECTION_CLAMP, AI_GRAVITY_CORRECTION_CLAMP);
+    const maxStep = AI_GRAVITY_CORRECTION_STEP * 3;
+    const gain = 0.2;
+    const adjustX = clamp(-projectile.closestTargetDx * gain, -maxStep, maxStep);
+    const adjustY = clamp(-projectile.closestTargetDy * gain, -maxStep, maxStep);
+    shooter.aiAimCorrectionX = clamp(shooter.aiAimCorrectionX + adjustX, -AI_GRAVITY_CORRECTION_CLAMP, AI_GRAVITY_CORRECTION_CLAMP);
+    shooter.aiAimCorrectionY = clamp(shooter.aiAimCorrectionY + adjustY, -AI_GRAVITY_CORRECTION_CLAMP, AI_GRAVITY_CORRECTION_CLAMP);
   }
 
   private shouldIgnoreDamageForUnit(unit: UnitInstance): boolean {

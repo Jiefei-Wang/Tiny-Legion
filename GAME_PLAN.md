@@ -634,6 +634,7 @@ The current playable implementation already includes:
 - AI split into targeting, movement, and shooting modules with a shared composite interface in `packages/game-core/src/ai/composite/`.
 - Baseline combat AI now runs through `createCompositeAiController(...)` (target -> movement -> shoot), and the legacy decision-tree entrypoint is kept as a compatibility wrapper.
 - Target module returns ranked targets (sorted by importance); movement consumes ranked targets + battlefield state; shooting consumes ranked targets + movement intent + weapon readiness.
+- AI shot-feedback correction now tracks each AI projectile's closest real-time miss vector (`dx`,`dy`) against its intended target id during flight and applies bounded vector correction on despawn.
 - Arena supports composite module wiring (`target/movement/shoot`) so each module can be replaced and compared independently.
 - Arena headless match specs are composite-only (`familyId: "composite"`); baseline behavior is represented as a baseline composite bundle rather than a standalone AI family.
 - `dt-shoot` now exposes additional trainable angle-feature parameters: `weaponSpeed` (for standardized relative distance), plus weighted terms over `stdX`, `stdY`, `stdY/stdX`, and `stdY/(stdX^2)` to bias final firing angle.
