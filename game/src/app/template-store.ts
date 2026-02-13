@@ -84,7 +84,7 @@ export async function saveDefaultTemplateToStore(template: UnitTemplate): Promis
   }
 }
 
-export async function deleteUserTemplateFromStore(templateId: string): Promise<boolean> {
+export async function deleteUserTemplateFromStore(templateId: number): Promise<boolean> {
   try {
     const response = await fetch(`/__templates/user/${encodeURIComponent(templateId)}`, {
       method: "DELETE",
@@ -95,7 +95,7 @@ export async function deleteUserTemplateFromStore(templateId: string): Promise<b
   }
 }
 
-export async function deleteDefaultTemplateFromStore(templateId: string): Promise<boolean> {
+export async function deleteDefaultTemplateFromStore(templateId: number): Promise<boolean> {
   try {
     const response = await fetch(`/__templates/default/${encodeURIComponent(templateId)}`, {
       method: "DELETE",

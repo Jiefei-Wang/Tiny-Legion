@@ -85,7 +85,7 @@ export async function runMatch(spec: MatchSpec): Promise<MatchResult> {
   if (templates.length <= 0) {
     throw new Error(`runMatch: no templates matched pattern(s): ${templatePatterns.join(", ")}`);
   }
-  const templateById = new Map<string, any>(templates.map((t: any) => [String(t.id), t] as const));
+  const templateById = new Map<number, any>(templates.map((t: any) => [Number(t.id), t] as const));
   const refundFactor = BATTLE_SALVAGE_REFUND_FACTOR;
 
   let playerGas = spec.playerGas;
@@ -154,12 +154,12 @@ export async function runMatch(spec: MatchSpec): Promise<MatchResult> {
   }
   battle.clearControlSelection();
 
-  const rosterPreference = ["scout-ground", "tank-ground", "air-jet", "air-propeller", "air-light"];
-  const availableTemplateIds = new Set<string>(templates.map((t: any) => String(t.id)));
+  const rosterPreference = [1, 2, 3, 4, 5];
+  const availableTemplateIds = new Set<number>(templates.map((t: any) => Number(t.id)));
   const roster = rosterPreference.filter((id) => availableTemplateIds.has(id));
   if (roster.length === 0) {
     for (const t of templates.slice(0, 6)) {
-      roster.push(String(t.id));
+      roster.push(Number(t.id));
     }
   }
 
@@ -215,7 +215,7 @@ export async function runMatch(spec: MatchSpec): Promise<MatchResult> {
   const spawnFamilyPlayer = spawnMode === "ai" && spec.spawnPlayer ? getSpawnFamily(spec.spawnPlayer.familyId) : null;
   const spawnFamilyEnemy = spawnMode === "ai" && spec.spawnEnemy ? getSpawnFamily(spec.spawnEnemy.familyId) : null;
 
-  const pickMirrored = (): { templateId: string | null; y: number } => {
+  const pickMirrored = (): { templateId: number | null; y: number } => {
     if (roster.length === 0) {
       return { templateId: null, y: 0 };
     }
@@ -263,22 +263,30 @@ export async function runMatch(spec: MatchSpec): Promise<MatchResult> {
     let minInterval = spawnIntervalS;
     for (let i = 0; i < spawnBurst; i += 1) {
       const playerDecision = spawnFamilyPlayer
-        ? spawnFamilyPlayer.pick(spec.spawnPlayer?.params ?? {}, roster, spawnRng, { gas: playerGas, capRemaining: playerCapRemaining })
+        ? spawnFamilyPlayer.pick(spec.spawnPlayer?.params ?? {}, roster.map((id) => String(id)), spawnRng, { gas: playerGas, capRemaining: playerCapRemaining })
         : { templateId: null, intervalS: spawnIntervalS };
       const enemyDecision = spawnFamilyEnemy
-        ? spawnFamilyEnemy.pick(spec.spawnEnemy?.params ?? {}, roster, spawnRng, { gas: s.enemyGas, capRemaining: enemyCapRemaining })
+        ? spawnFamilyEnemy.pick(spec.spawnEnemy?.params ?? {}, roster.map((id) => String(id)), spawnRng, { gas: s.enemyGas, capRemaining: enemyCapRemaining })
         : { templateId: null, intervalS: spawnIntervalS };
 
       minInterval = Math.min(minInterval, playerDecision.intervalS, enemyDecision.intervalS);
 
       if (playerDecision.templateId && playerCapRemaining > 0) {
-        const ok = battle.arenaDeploy("player", playerDecision.templateId, { chargeGas: true, ignoreCap: true });
+        const playerTemplateId = Number.parseInt(playerDecision.templateId, 10);
+        if (!Number.isInteger(playerTemplateId) || playerTemplateId < 1) {
+          continue;
+        }
+        const ok = battle.arenaDeploy("player", playerTemplateId, { chargeGas: true, ignoreCap: true });
         if (ok) {
           playerCapRemaining -= 1;
         }
       }
       if (enemyDecision.templateId && enemyCapRemaining > 0) {
-        const ok = battle.arenaDeploy("enemy", enemyDecision.templateId, { chargeGas: true, ignoreCap: true, ignoreLowGasThreshold: true });
+        const enemyTemplateId = Number.parseInt(enemyDecision.templateId, 10);
+        if (!Number.isInteger(enemyTemplateId) || enemyTemplateId < 1) {
+          continue;
+        }
+        const ok = battle.arenaDeploy("enemy", enemyTemplateId, { chargeGas: true, ignoreCap: true, ignoreLowGasThreshold: true });
         if (ok) {
           enemyCapRemaining -= 1;
         }

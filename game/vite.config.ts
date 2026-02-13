@@ -256,9 +256,67 @@ function templateStorePlugin() {
     }
   };
 
-  const safeId = (raw: string): string | null => {
-    const id = raw.trim();
-    return /^[a-z0-9-]+$/.test(id) ? id : null;
+  const safeId = (raw: string): number | null => {
+    const id = Number.parseInt(raw.trim(), 10);
+    return Number.isInteger(id) && id >= 1 ? id : null;
+  };
+
+  const toSafeTemplateFileStem = (rawName: string): string => {
+    const stem = rawName
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .replace(/-+/g, "-");
+    return stem.length > 0 ? stem : "template";
+  };
+
+  const findTemplateFileById = (dirPath: string, id: number): string | null => {
+    ensureDir(dirPath);
+    const files = readdirSync(dirPath).filter((name) => name.endsWith(".json"));
+    for (const fileName of files) {
+      const filePath = resolve(dirPath, fileName);
+      try {
+        const raw = readFileSync(filePath, "utf8");
+        const parsed = JSON.parse(raw);
+        const normalized = parseTemplate(parsed, {
+          injectLoaders: true,
+          sanitizePlacement: true,
+          partCatalog: loadPartCatalog(),
+        });
+        if (normalized?.id === id) {
+          return filePath;
+        }
+      } catch {
+        continue;
+      }
+    }
+    return null;
+  };
+
+  const resolveTargetTemplateFilePath = (
+    dirPath: string,
+    template: NonNullable<ReturnType<typeof parseTemplate>>,
+  ): string => {
+    const safeStem = toSafeTemplateFileStem(template.name);
+    const preferredPath = resolve(dirPath, `${safeStem}.json`);
+    if (!existsSync(preferredPath)) {
+      return preferredPath;
+    }
+    try {
+      const existingRaw = readFileSync(preferredPath, "utf8");
+      const existingParsed = JSON.parse(existingRaw);
+      const existingNormalized = parseTemplate(existingParsed, {
+        injectLoaders: true,
+        sanitizePlacement: true,
+        partCatalog: loadPartCatalog(),
+      });
+      if (existingNormalized?.id === template.id) {
+        return preferredPath;
+      }
+    } catch {
+      // If existing file cannot be parsed, avoid overwriting it.
+    }
+    return resolve(dirPath, `${safeStem}-${template.id}.json`);
   };
 
   const readPartsInDir = (dirPath: string): Array<NonNullable<ReturnType<typeof parsePartDefinition>>> => {
@@ -331,8 +389,13 @@ function templateStorePlugin() {
           continue;
         }
         const normalizedRaw = `${JSON.stringify(serializeTemplateForStore(normalized), null, 2)}\n`;
-        if (raw !== normalizedRaw) {
-          writeFileSync(filePath, normalizedRaw, "utf8");
+        const targetPath = resolveTargetTemplateFilePath(dirPath, normalized);
+        const shouldRewrite = raw !== normalizedRaw || filePath !== targetPath;
+        if (shouldRewrite) {
+          writeFileSync(targetPath, normalizedRaw, "utf8");
+          if (filePath !== targetPath && existsSync(filePath)) {
+            unlinkSync(filePath);
+          }
         }
         results.push(normalized);
       } catch {
@@ -368,8 +431,8 @@ function templateStorePlugin() {
         ensureDir(defaultDir);
 
         if (req.method === "DELETE") {
-          const filePath = resolve(defaultDir, `${id}.json`);
-          if (existsSync(filePath)) {
+          const filePath = findTemplateFileById(defaultDir, id);
+          if (filePath && existsSync(filePath)) {
             unlinkSync(filePath);
           }
           res.setHeader("content-type", "application/json");
@@ -394,8 +457,17 @@ function templateStorePlugin() {
               res.end("invalid template payload");
               return;
             }
-            const filePath = resolve(defaultDir, `${id}.json`);
+            if (normalized.id !== id) {
+              res.statusCode = 400;
+              res.end("template id mismatch");
+              return;
+            }
+            const existingPath = findTemplateFileById(defaultDir, id);
+            const filePath = resolveTargetTemplateFilePath(defaultDir, normalized);
             writeFileSync(filePath, `${JSON.stringify(serializeTemplateForStore(normalized), null, 2)}\n`, "utf8");
+            if (existingPath && existingPath !== filePath && existsSync(existingPath)) {
+              unlinkSync(existingPath);
+            }
             res.setHeader("content-type", "application/json");
             res.end(JSON.stringify({ ok: true }));
           } catch {
@@ -428,8 +500,8 @@ function templateStorePlugin() {
         ensureDir(userDir);
 
         if (req.method === "DELETE") {
-          const filePath = resolve(userDir, `${id}.json`);
-          if (existsSync(filePath)) {
+          const filePath = findTemplateFileById(userDir, id);
+          if (filePath && existsSync(filePath)) {
             unlinkSync(filePath);
           }
           res.setHeader("content-type", "application/json");
@@ -454,8 +526,17 @@ function templateStorePlugin() {
               res.end("invalid template payload");
               return;
             }
-            const filePath = resolve(userDir, `${id}.json`);
+            if (normalized.id !== id) {
+              res.statusCode = 400;
+              res.end("template id mismatch");
+              return;
+            }
+            const existingPath = findTemplateFileById(userDir, id);
+            const filePath = resolveTargetTemplateFilePath(userDir, normalized);
             writeFileSync(filePath, `${JSON.stringify(serializeTemplateForStore(normalized), null, 2)}\n`, "utf8");
+            if (existingPath && existingPath !== filePath && existsSync(existingPath)) {
+              unlinkSync(existingPath);
+            }
             res.setHeader("content-type", "application/json");
             res.end(JSON.stringify({ ok: true }));
           } catch {

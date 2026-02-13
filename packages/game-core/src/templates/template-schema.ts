@@ -471,7 +471,7 @@ export function parseTemplate(input: unknown, options: ParseTemplateOptions = {}
     return null;
   }
   const data = input as Record<string, unknown>;
-  if (!isUnitType(data.type) || typeof data.id !== "string" || typeof data.name !== "string") {
+  if (!isUnitType(data.type) || typeof data.id !== "number" || !Number.isInteger(data.id) || data.id < 1 || typeof data.name !== "string") {
     return null;
   }
   if (!Array.isArray(data.structure) || !Array.isArray(data.attachments)) {
@@ -582,7 +582,7 @@ export function parseTemplate(input: unknown, options: ParseTemplateOptions = {}
     ? Math.max(0, Math.floor(data.gasCost))
     : undefined;
   const template: UnitTemplate = {
-    id: data.id.trim(),
+    id: data.id,
     name: data.name.trim(),
     type: data.type,
     gasCost: 0,
@@ -608,7 +608,7 @@ export function parseTemplate(input: unknown, options: ParseTemplateOptions = {}
 }
 
 export function mergeTemplates(baseTemplates: UnitTemplate[], incomingTemplates: UnitTemplate[]): UnitTemplate[] {
-  const map = new Map<string, UnitTemplate>();
+  const map = new Map<number, UnitTemplate>();
   for (const template of baseTemplates) {
     map.set(template.id, cloneTemplate(template));
   }

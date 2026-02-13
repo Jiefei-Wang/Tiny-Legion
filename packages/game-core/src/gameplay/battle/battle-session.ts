@@ -81,11 +81,11 @@ export class BattleSession {
   private debugTargetLineEnabled: boolean;
   private debugPartHpEnabled: boolean;
   private controlledUnitInvincible: boolean;
-  private enemySpawnTemplateAllowList: Set<string> | null;
+  private enemySpawnTemplateAllowList: Set<number> | null;
   private autoSpawnEnemyTemplateOnPlayerSide: boolean;
   private autoSpawnPlayerSideEnabled: boolean;
   private autoSpawnPlayerTargetCount: number;
-  private playerSpawnTemplateAllowList: Set<string> | null;
+  private playerSpawnTemplateAllowList: Set<number> | null;
   private groundHeightPx: number;
   private readonly baselineController: BattleAiController;
 
@@ -304,17 +304,17 @@ export class BattleSession {
     return removed;
   }
 
-  public spawnEnemyTemplate(templateId: string): boolean {
+  public spawnEnemyTemplate(templateId: number): boolean {
     return this.arenaDeploy("enemy", templateId, { chargeGas: false, ignoreCap: true, ignoreLowGasThreshold: true });
   }
 
-  public setEnemySpawnTemplateFilter(templateIds: ReadonlyArray<string> | null): string[] {
+  public setEnemySpawnTemplateFilter(templateIds: ReadonlyArray<number> | null): number[] {
     if (templateIds === null) {
       this.enemySpawnTemplateAllowList = null;
       return [];
     }
-    const validIds = new Set<string>(this.templates.map((template) => template.id));
-    const normalized: string[] = [];
+    const validIds = new Set<number>(this.templates.map((template) => template.id));
+    const normalized: number[] = [];
     for (const id of templateIds) {
       if (!validIds.has(id)) {
         continue;
@@ -324,7 +324,7 @@ export class BattleSession {
       }
       normalized.push(id);
     }
-    this.enemySpawnTemplateAllowList = new Set<string>(normalized);
+    this.enemySpawnTemplateAllowList = new Set<number>(normalized);
     return normalized;
   }
 
@@ -341,13 +341,13 @@ export class BattleSession {
     return this.autoSpawnPlayerTargetCount;
   }
 
-  public setPlayerSpawnTemplateFilter(templateIds: ReadonlyArray<string> | null): string[] {
+  public setPlayerSpawnTemplateFilter(templateIds: ReadonlyArray<number> | null): number[] {
     if (templateIds === null) {
       this.playerSpawnTemplateAllowList = null;
       return [];
     }
-    const validIds = new Set<string>(this.templates.map((template) => template.id));
-    const normalized: string[] = [];
+    const validIds = new Set<number>(this.templates.map((template) => template.id));
+    const normalized: number[] = [];
     for (const id of templateIds) {
       if (!validIds.has(id)) {
         continue;
@@ -357,7 +357,7 @@ export class BattleSession {
       }
       normalized.push(id);
     }
-    this.playerSpawnTemplateAllowList = new Set<string>(normalized);
+    this.playerSpawnTemplateAllowList = new Set<number>(normalized);
     return normalized;
   }
 
@@ -551,11 +551,11 @@ export class BattleSession {
     }
 
     if (!this.disableDefaultStarters) {
-      const starterA = instantiateUnit(this.templates, "scout-ground", "player", 140, 300, {
+      const starterA = instantiateUnit(this.templates, 1, "player", 140, 300, {
         deploymentGasCost: 0,
         partCatalog: this.partCatalog,
       });
-      const starterB = instantiateUnit(this.templates, "tank-ground", "player", 150, 430, {
+      const starterB = instantiateUnit(this.templates, 2, "player", 150, 430, {
         deploymentGasCost: 0,
         partCatalog: this.partCatalog,
       });
@@ -586,7 +586,7 @@ export class BattleSession {
     this.aimY = this.canvas.height * 0.5;
   }
 
-  public deployUnit(templateId: string): void {
+  public deployUnit(templateId: number): void {
     if (!this.state.active || this.state.outcome) {
       return;
     }
@@ -1259,7 +1259,7 @@ export class BattleSession {
 
   public arenaDeploy(
     side: Side,
-    templateId: string,
+    templateId: number,
     opts: { chargeGas?: boolean; y?: number; deploymentGasCost?: number; ignoreCap?: boolean; ignoreLowGasThreshold?: boolean } = {},
   ): boolean {
     if (!this.state.active || this.state.outcome) {

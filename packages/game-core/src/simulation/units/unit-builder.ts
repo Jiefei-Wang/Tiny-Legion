@@ -22,7 +22,7 @@ function resolveCatalog(partCatalog?: ReadonlyArray<PartDefinition>): PartDefini
 export function createInitialTemplates(): UnitTemplate[] {
   return [
     {
-      id: "scout-ground",
+      id: 1,
       name: "Scout Buggy",
       type: "ground",
       gasCost: 22,
@@ -35,7 +35,7 @@ export function createInitialTemplates(): UnitTemplate[] {
       ],
     },
     {
-      id: "tank-ground",
+      id: 2,
       name: "Line Tank",
       type: "ground",
       gasCost: 38,
@@ -56,7 +56,7 @@ export function createInitialTemplates(): UnitTemplate[] {
       ],
     },
     {
-      id: "air-jet",
+      id: 3,
       name: "Skylance Jet",
       type: "air",
       gasCost: 48,
@@ -75,7 +75,7 @@ export function createInitialTemplates(): UnitTemplate[] {
       ],
     },
     {
-      id: "air-propeller",
+      id: 4,
       name: "Rotor Pike",
       type: "air",
       gasCost: 54,
@@ -100,7 +100,7 @@ export function createInitialTemplates(): UnitTemplate[] {
 
 export function instantiateUnit(
   templates: UnitTemplate[],
-  templateId: string,
+  templateId: number,
   side: Side,
   x: number,
   y: number,

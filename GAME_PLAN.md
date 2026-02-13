@@ -83,7 +83,8 @@ Current implementation includes dedicated in-app editor tabs where the player ca
 - Template Editor functional palette now applies unit-type compatibility filtering: parts tagged `air` only show for air templates, parts tagged `ground` only show for ground templates, and untagged parts remain available to both.
 - Toggle delete mode to remove items on the active layer.
 - Open any existing template from an `Open` window, create a template copy using one-click `Copy` (`-copy` postfix), or `Delete` file-backed entries from the same list.
-- Template IDs are auto-generated and hidden from editor UI (not user-editable).
+- Template IDs are internal positive integers, auto-generated, and hidden from editor UI (not user-editable).
+- Saving a renamed opened template creates a new template identity and deletes the previously opened template entry.
 - Stored template parts include coordinate metadata (`x`,`y`) with origin `(0,0)` and negative coordinates supported.
 - Functional template entries now persist both `component` and `partId` so user templates can reference developer-authored parts.
 - Weapon functional parts store additive orientation (`rotateQuarter`, 0..3 in 90-degree steps).
@@ -266,6 +267,7 @@ Display layer provides optional visual mesh/sprite styling and silhouette polish
 - Default object designs are file-based under `game/templates/default/`.
 - Player-created object designs are stored separately under `game/templates/user/`.
 - On startup, game loads templates from both folders (user templates override same-id defaults).
+- Template filenames are derived from sanitized `template.name` (invalid filename characters removed); runtime identity remains integer `id`.
 - Template parse/validation/merge rules are shared in `packages/game-core/src/templates/template-schema.ts` so game UI and arena tooling use identical template behavior.
 - File-backed template load normalizes placement and loader coverage, and normalized JSON is written back to disk so editor, headless checks, and battle runtime read the same corrected shape.
 - Loader auto-injection is part of persisted template normalization; injected loaders are placed on available structure cells to avoid overlapping existing functional footprints and existing attachment anchor cells when possible.

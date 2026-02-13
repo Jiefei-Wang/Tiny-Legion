@@ -137,8 +137,8 @@ export function validateTemplateDetailed(
   const errors: string[] = [];
   const warnings: string[] = [];
 
-  if (!template.id || !/^[a-z0-9-]+$/.test(template.id)) {
-    errors.push("template id must match [a-z0-9-]+");
+  if (!Number.isInteger(template.id) || template.id < 1) {
+    errors.push("template id must be a positive integer");
   }
   if (!template.name || template.name.trim().length < 2) {
     errors.push("template name is too short");

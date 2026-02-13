@@ -89,10 +89,10 @@ export type ArenaReplayDeciderCtx = {
   side: "player" | "enemy";
   gas: number;
   capRemaining: number;
-  roster: string[];
+  roster: number[];
 };
 
-export type ArenaReplayDecider = (ctx: ArenaReplayDeciderCtx) => { templateId: string | null; intervalS: number };
+export type ArenaReplayDecider = (ctx: ArenaReplayDeciderCtx) => { templateId: number | null; intervalS: number };
 
 export type BootstrapOptions = {
   arenaReplay?: { spec: ArenaReplaySpec; deciders?: { player?: ArenaReplayDecider; enemy?: ArenaReplayDecider }; expected?: unknown };
@@ -314,8 +314,8 @@ export function bootstrap(options: BootstrapOptions = {}): void {
   let testArenaBattlefieldWidth = BATTLEFIELD_WIDTH;
   let testArenaBattlefieldHeight = BATTLEFIELD_HEIGHT;
   let testArenaGroundHeight = Math.floor(BATTLEFIELD_HEIGHT * DEFAULT_GROUND_HEIGHT_RATIO);
-  let testArenaEnemySpawnTemplateIds: string[] = templates.map((template) => template.id);
-  let testArenaPlayerSpawnTemplateIds: string[] = templates.map((template) => template.id);
+  let testArenaEnemySpawnTemplateIds: number[] = templates.map((template) => template.id);
+  let testArenaPlayerSpawnTemplateIds: number[] = templates.map((template) => template.id);
   let testArenaEnemySpawnTemplateDropdownOpen = false;
   let testArenaPlayerSpawnTemplateDropdownOpen = false;
   let testArenaAutoSpawnOnEnemySide = true;
@@ -558,7 +558,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
   let editorFunctionalSlots: EditorFunctionalSlot[] = new Array<EditorFunctionalSlot>(EDITOR_GRID_MAX_SIZE).fill(null);
   let editorDisplaySlots: Array<DisplayAttachmentTemplate["kind"] | null> = new Array<DisplayAttachmentTemplate["kind"] | null>(EDITOR_GRID_MAX_SIZE).fill(null);
   let editorTemplateDialogOpen = false;
-  let editorTemplateDialogSelectedId: string | null = null;
+  let editorTemplateDialogSelectedId: number | null = null;
   let partDesignerDialogOpen = false;
   let partDesignerSelectedId: number | null = null;
   let partDesignerOpenFilter: PartOpenFilter = "all";
@@ -596,7 +596,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     combined: { ...MATERIALS.combined },
   };
   let editorDraft: UnitTemplate = {
-    id: "custom-1",
+    id: 1000,
     name: "Custom Unit",
     type: "ground",
     gasCost: 0,
@@ -775,9 +775,9 @@ export function bootstrap(options: BootstrapOptions = {}): void {
   const normalizeTestArenaBattlefieldHeight = (value: number): number => Math.max(360, Math.min(2160, Math.floor(value)));
   const normalizeTestArenaZoomPercent = (value: number): number => Math.max(45, Math.min(240, Math.round(value)));
   const normalizeTestArenaGroundHeight = (value: number): number => Math.max(80, Math.min(Math.max(120, testArenaBattlefieldHeight - 40), Math.floor(value)));
-  const normalizeTestArenaSpawnTemplateIds = (candidateIds: ReadonlyArray<string>): string[] => {
-    const validIds = new Set<string>(templates.map((template) => template.id));
-    const normalized: string[] = [];
+  const normalizeTestArenaSpawnTemplateIds = (candidateIds: ReadonlyArray<number>): number[] => {
+    const validIds = new Set<number>(templates.map((template) => template.id));
+    const normalized: number[] = [];
     for (const id of candidateIds) {
       if (!validIds.has(id)) {
         continue;
@@ -789,19 +789,21 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     }
     return normalized;
   };
-  const setTestArenaEnemySpawnTemplateIds = (candidateIds: ReadonlyArray<string>): string[] => {
+  let editorOpenedTemplateId: number | null = null;
+  let editorOpenedTemplateName = editorDraft.name;
+  const setTestArenaEnemySpawnTemplateIds = (candidateIds: ReadonlyArray<number>): number[] => {
     testArenaEnemySpawnTemplateIds = normalizeTestArenaSpawnTemplateIds(candidateIds);
     return testArenaEnemySpawnTemplateIds;
   };
-  const getTestArenaEnemySpawnTemplateIds = (): string[] => {
+  const getTestArenaEnemySpawnTemplateIds = (): number[] => {
     testArenaEnemySpawnTemplateIds = normalizeTestArenaSpawnTemplateIds(testArenaEnemySpawnTemplateIds);
     return testArenaEnemySpawnTemplateIds;
   };
-  const setTestArenaPlayerSpawnTemplateIds = (candidateIds: ReadonlyArray<string>): string[] => {
+  const setTestArenaPlayerSpawnTemplateIds = (candidateIds: ReadonlyArray<number>): number[] => {
     testArenaPlayerSpawnTemplateIds = normalizeTestArenaSpawnTemplateIds(candidateIds);
     return testArenaPlayerSpawnTemplateIds;
   };
-  const getTestArenaPlayerSpawnTemplateIds = (): string[] => {
+  const getTestArenaPlayerSpawnTemplateIds = (): number[] => {
     testArenaPlayerSpawnTemplateIds = normalizeTestArenaSpawnTemplateIds(testArenaPlayerSpawnTemplateIds);
     return testArenaPlayerSpawnTemplateIds;
   };
@@ -1781,7 +1783,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     battle.getState().enemyGas = spec.enemyGas;
 
     // Symmetric starters.
-    const starters = ["scout-ground", "tank-ground"].filter((id) => templates.some((t) => t.id === id));
+    const starters = [1, 2].filter((id) => templates.some((t) => t.id === id));
     for (const id of starters) {
       battle.arenaDeploy("player", id, { chargeGas: false, deploymentGasCost: 0, y: 300 });
       battle.arenaDeploy("enemy", id, { chargeGas: false, deploymentGasCost: 0, y: 300 });
@@ -1793,8 +1795,8 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     addLog(`Arena replay started (seed=${spec.seed})`, "good");
 
     // Replay macro loop state.
-    const rosterPreference = ["scout-ground", "tank-ground", "air-jet", "air-propeller", "air-light"];
-    const availableTemplateIds = new Set<string>(templates.map((t) => t.id));
+    const rosterPreference = [1, 2, 3, 4, 5];
+    const availableTemplateIds = new Set<number>(templates.map((t) => t.id));
     let roster = rosterPreference.filter((id) => availableTemplateIds.has(id));
     if (roster.length === 0) {
       roster = templates.slice(0, 6).map((t) => t.id);
@@ -1813,7 +1815,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     onFieldStartPlayer = computeOnFieldGasValue("player");
     onFieldStartEnemy = computeOnFieldGasValue("enemy");
 
-    const pickMirrored = (): { templateId: string | null; y: number } => {
+    const pickMirrored = (): { templateId: number | null; y: number } => {
       if (roster.length === 0) {
         return { templateId: null, y: 0 };
       }
@@ -1823,7 +1825,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       return { templateId, y };
     };
 
-    const decide = (side: "player" | "enemy"): { templateId: string | null; intervalS: number; y?: number } => {
+    const decide = (side: "player" | "enemy"): { templateId: number | null; intervalS: number; y?: number } => {
       const s = battle.getState();
       const alive = s.units.filter((u) => u.alive && u.side === side).length;
       const capRemaining = side === "enemy"
@@ -2263,23 +2265,12 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     applyBattleViewTransform();
   };
 
-  const slugifyTemplateId = (rawName: string): string => {
-    const base = rawName
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, "-")
-      .replace(/^-+|-+$/g, "")
-      .replace(/-+/g, "-");
-    return base || "custom-unit";
-  };
-
-  const makeUniqueTemplateId = (baseId: string): string => {
-    const used = new Set<string>(templates.map((template) => template.id));
+  const makeUniqueTemplateId = (): number => {
+    const used = new Set<number>(templates.map((template) => template.id));
     used.delete(editorDraft.id);
-    let next = baseId;
-    let index = 2;
+    let next = 1;
     while (used.has(next)) {
-      next = `${baseId}-${index}`;
-      index += 1;
+      next += 1;
     }
     return next;
   };
@@ -2297,7 +2288,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
   const makeCopyTemplate = (source: UnitTemplate): UnitTemplate => {
     const copy = cloneTemplate(source);
     copy.name = `${source.name}-copy`;
-    copy.id = makeUniqueTemplateId(slugifyTemplateId(copy.name));
+    copy.id = makeUniqueTemplateId();
     return copy;
   };
 
@@ -4156,21 +4147,21 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     `;
 
     const enemySpawnTemplateIds = getTestArenaEnemySpawnTemplateIds();
-    const enemySpawnTemplateIdSet = new Set<string>(enemySpawnTemplateIds);
+    const enemySpawnTemplateIdSet = new Set<number>(enemySpawnTemplateIds);
     const enemySpawnTemplateOptions = templates
       .map((template) => `
         <label class="small test-arena-spawn-option">
-          <input class="testArenaEnemySpawnTemplateToggle" type="checkbox" data-template-id="${escapeHtml(template.id)}" ${enemySpawnTemplateIdSet.has(template.id) ? "checked" : ""} />
+          <input class="testArenaEnemySpawnTemplateToggle" type="checkbox" data-template-id="${template.id}" ${enemySpawnTemplateIdSet.has(template.id) ? "checked" : ""} />
           <span>${escapeHtml(template.name)}</span>
         </label>
       `)
       .join("");
     const playerSpawnTemplateIds = getTestArenaPlayerSpawnTemplateIds();
-    const playerSpawnTemplateIdSet = new Set<string>(playerSpawnTemplateIds);
+    const playerSpawnTemplateIdSet = new Set<number>(playerSpawnTemplateIds);
     const playerSpawnTemplateOptions = templates
       .map((template) => `
         <label class="small test-arena-spawn-option">
-          <input class="testArenaPlayerSpawnTemplateToggle" type="checkbox" data-template-id="${escapeHtml(template.id)}" ${playerSpawnTemplateIdSet.has(template.id) ? "checked" : ""} />
+          <input class="testArenaPlayerSpawnTemplateToggle" type="checkbox" data-template-id="${template.id}" ${playerSpawnTemplateIdSet.has(template.id) ? "checked" : ""} />
           <span>${escapeHtml(template.name)}</span>
         </label>
       `)
@@ -4874,7 +4865,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         return;
       }
       tech.mediumWeapons = true;
-      const tankTemplate = templates.find((template) => template.id === "tank-ground");
+      const tankTemplate = templates.find((template) => template.id === 2);
       const weapon = tankTemplate?.attachments.find((attachment) => attachment.component === "heavyCannon");
       if (weapon && tankTemplate) {
         weapon.component = "explosiveShell";
@@ -4932,8 +4923,9 @@ export function bootstrap(options: BootstrapOptions = {}): void {
 
     document.querySelectorAll<HTMLButtonElement>("button[data-deploy]").forEach((button) => {
       button.addEventListener("click", () => {
-        const templateId = button.getAttribute("data-deploy");
-        if (!templateId) {
+        const rawTemplateId = button.getAttribute("data-deploy");
+        const templateId = rawTemplateId ? Number.parseInt(rawTemplateId, 10) : Number.NaN;
+        if (!Number.isInteger(templateId) || templateId < 1) {
           return;
         }
         if (battleDeploySide === "enemy") {
@@ -5212,11 +5204,12 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     document.querySelectorAll<HTMLInputElement>("input.testArenaEnemySpawnTemplateToggle").forEach((input) => {
       input.addEventListener("change", (event) => {
         const checkbox = event.currentTarget as HTMLInputElement;
-        const templateId = checkbox.getAttribute("data-template-id") ?? "";
-        if (!templateId) {
+        const rawTemplateId = checkbox.getAttribute("data-template-id") ?? "";
+        const templateId = Number.parseInt(rawTemplateId, 10);
+        if (!Number.isInteger(templateId) || templateId < 1) {
           return;
         }
-        const nextSelection = new Set<string>(getTestArenaEnemySpawnTemplateIds());
+        const nextSelection = new Set<number>(getTestArenaEnemySpawnTemplateIds());
         if (checkbox.checked) {
           nextSelection.add(templateId);
         } else {
@@ -5232,11 +5225,12 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     document.querySelectorAll<HTMLInputElement>("input.testArenaPlayerSpawnTemplateToggle").forEach((input) => {
       input.addEventListener("change", (event) => {
         const checkbox = event.currentTarget as HTMLInputElement;
-        const templateId = checkbox.getAttribute("data-template-id") ?? "";
-        if (!templateId) {
+        const rawTemplateId = checkbox.getAttribute("data-template-id") ?? "";
+        const templateId = Number.parseInt(rawTemplateId, 10);
+        if (!Number.isInteger(templateId) || templateId < 1) {
           return;
         }
-        const nextSelection = new Set<string>(getTestArenaPlayerSpawnTemplateIds());
+        const nextSelection = new Set<number>(getTestArenaPlayerSpawnTemplateIds());
         if (checkbox.checked) {
           nextSelection.add(templateId);
         } else {
@@ -5370,8 +5364,9 @@ export function bootstrap(options: BootstrapOptions = {}): void {
 
     document.querySelectorAll<HTMLButtonElement>("button[data-editor-open-select]").forEach((button) => {
       button.addEventListener("click", () => {
-        const templateId = button.getAttribute("data-editor-open-select");
-        if (!templateId) {
+        const rawTemplateId = button.getAttribute("data-editor-open-select");
+        const templateId = rawTemplateId ? Number.parseInt(rawTemplateId, 10) : Number.NaN;
+        if (!Number.isInteger(templateId) || templateId < 1) {
           return;
         }
         const source = templates.find((template) => template.id === templateId);
@@ -5382,6 +5377,8 @@ export function bootstrap(options: BootstrapOptions = {}): void {
           recenterEditorViewForScreen("templateEditor");
         }
         editorDraft = cloneTemplate(source);
+        editorOpenedTemplateId = source.id;
+        editorOpenedTemplateName = source.name;
         loadTemplateIntoEditorSlots(editorDraft);
         editorDeleteMode = false;
         editorWeaponRotateQuarter = 0;
@@ -5394,8 +5391,9 @@ export function bootstrap(options: BootstrapOptions = {}): void {
 
     document.querySelectorAll<HTMLButtonElement>("button[data-editor-open-copy]").forEach((button) => {
       button.addEventListener("click", () => {
-        const templateId = button.getAttribute("data-editor-open-copy");
-        if (!templateId) {
+        const rawTemplateId = button.getAttribute("data-editor-open-copy");
+        const templateId = rawTemplateId ? Number.parseInt(rawTemplateId, 10) : Number.NaN;
+        if (!Number.isInteger(templateId) || templateId < 1) {
           return;
         }
         const source = templates.find((template) => template.id === templateId);
@@ -5404,6 +5402,8 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         }
         recenterEditorViewForScreen("templateEditor");
         editorDraft = makeCopyTemplate(source);
+        editorOpenedTemplateId = null;
+        editorOpenedTemplateName = editorDraft.name;
         loadTemplateIntoEditorSlots(editorDraft);
         editorDeleteMode = false;
         editorWeaponRotateQuarter = 0;
@@ -5416,8 +5416,9 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     });
     document.querySelectorAll<HTMLButtonElement>("button[data-editor-open-delete]").forEach((button) => {
       button.addEventListener("click", async () => {
-        const templateId = button.getAttribute("data-editor-open-delete");
-        if (!templateId) {
+        const rawTemplateId = button.getAttribute("data-editor-open-delete");
+        const templateId = rawTemplateId ? Number.parseInt(rawTemplateId, 10) : Number.NaN;
+        if (!Number.isInteger(templateId) || templateId < 1) {
           return;
         }
         const source = templates.find((template) => template.id === templateId);
@@ -5447,6 +5448,8 @@ export function bootstrap(options: BootstrapOptions = {}): void {
               recenterEditorViewForScreen("templateEditor");
             }
             editorDraft = cloneTemplate(fallback);
+            editorOpenedTemplateId = fallback.id;
+            editorOpenedTemplateName = fallback.name;
             loadTemplateIntoEditorSlots(editorDraft);
             editorTemplateDialogSelectedId = fallback.id;
             editorDeleteMode = false;
@@ -5509,7 +5512,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     getOptionalElement<HTMLButtonElement>("#btnNewDraft")?.addEventListener("click", () => {
       const newName = "Custom Unit";
       editorDraft = {
-        id: makeUniqueTemplateId(slugifyTemplateId(newName)),
+        id: makeUniqueTemplateId(),
         name: newName,
         type: "ground",
         gasCost: 0,
@@ -5523,6 +5526,8 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       editorWeaponRotateQuarter = 0;
       editorTemplateDialogOpen = false;
       editorTemplateDialogSelectedId = editorDraft.id;
+      editorOpenedTemplateId = null;
+      editorOpenedTemplateName = editorDraft.name;
       recenterEditorViewForScreen("templateEditor");
       loadTemplateIntoEditorSlots(editorDraft);
       ensureEditorSelectionForLayer();
@@ -5531,6 +5536,14 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     const saveEditorDraft = async (target: "user" | "default"): Promise<void> => {
       const snapshot = cloneTemplate(editorDraft);
       const normalizedName = snapshot.name.trim().toLowerCase();
+      const openedNameNormalized = editorOpenedTemplateName.trim().toLowerCase();
+      const isRenameOfOpenedTemplate = editorOpenedTemplateId !== null
+        && normalizedName.length > 0
+        && normalizedName !== openedNameNormalized;
+      const oldTemplateIdToDelete = isRenameOfOpenedTemplate ? editorOpenedTemplateId : null;
+      if (isRenameOfOpenedTemplate) {
+        snapshot.id = makeUniqueTemplateId();
+      }
       if (target === "user") {
         if (normalizedName.length > 0) {
           const defaultTemplates = await fetchDefaultTemplatesFromStore(parts);
@@ -5573,6 +5586,17 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         addLog(`Failed to save ${target} object`, "bad");
         return;
       }
+      if (oldTemplateIdToDelete !== null) {
+        const deletedUserOld = await deleteUserTemplateFromStore(oldTemplateIdToDelete);
+        const deletedDefaultOld = await deleteDefaultTemplateFromStore(oldTemplateIdToDelete);
+        if (!deletedUserOld && !deletedDefaultOld) {
+          addLog(`Failed to delete renamed old template id=${oldTemplateIdToDelete}`, "warn");
+        }
+      }
+      editorDraft = cloneTemplate(snapshot);
+      editorOpenedTemplateId = snapshot.id;
+      editorOpenedTemplateName = snapshot.name;
+      editorTemplateDialogSelectedId = snapshot.id;
       await refreshTemplatesFromStore();
       addLog(`Saved ${target} object: ${snapshot.name}`, "good");
       renderPanels();

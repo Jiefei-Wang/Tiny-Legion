@@ -212,7 +212,7 @@ export interface DisplayAttachmentTemplate {
 }
 
 export interface UnitTemplate {
-  id: string;
+  id: number;
   name: string;
   type: UnitType;
   gasCost: number;
@@ -263,7 +263,7 @@ export interface Attachment {
 
 export interface UnitInstance {
   id: string;
-  templateId: string;
+  templateId: number;
   side: Side;
   type: UnitType;
   name: string;

@@ -1,9 +1,15 @@
 {
-  "id": "scout-ground",
-  "name": "Scout Buggy",
+  "id": 2,
+  "name": "Line Tank",
   "type": "ground",
-  "gasCost": 22,
+  "gasCost": 38,
   "structure": [
+    {
+      "partId": 11
+    },
+    {
+      "partId": 11
+    },
     {
       "partId": 11
     },
@@ -18,19 +24,25 @@
     {
       "component": "control",
       "partId": 3,
+      "cell": 2,
+      "rotateQuarter": 0
+    },
+    {
+      "component": "engineM",
+      "partId": 5,
       "cell": 1,
       "rotateQuarter": 0
     },
     {
-      "component": "engineS",
-      "partId": 6,
-      "cell": 0,
+      "component": "heavyCannon",
+      "partId": 8,
+      "cell": 3,
       "rotateQuarter": 0
     },
     {
-      "component": "rapidGun",
-      "partId": 19,
-      "cell": 2,
+      "component": "cannonLoader",
+      "partId": 2,
+      "cell": 0,
       "rotateQuarter": 0
     }
   ],
@@ -44,8 +56,16 @@
       "cell": 1
     },
     {
-      "kind": "stripe",
+      "kind": "glass",
       "cell": 2
+    },
+    {
+      "kind": "panel",
+      "cell": 3
+    },
+    {
+      "kind": "stripe",
+      "cell": 4
     }
   ]
 }

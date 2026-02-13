@@ -11,7 +11,7 @@ import type { KeyState, MapNode, PartDefinition, UnitInstance, UnitTemplate } fr
 declare const process: { exit: (code?: number) => void; cwd: () => string };
 
 type Failure = {
-  templateId: string;
+  templateId: number;
   templateName: string;
   check: "validation" | "movement" | "firing";
   detail: string;
@@ -54,7 +54,7 @@ function makeHooks(logs: string[]): BattleHooks {
   };
 }
 
-function findNewUnit(beforeIds: Set<string>, units: UnitInstance[], templateId: string): UnitInstance | null {
+function findNewUnit(beforeIds: Set<string>, units: UnitInstance[], templateId: number): UnitInstance | null {
   for (const unit of units) {
     if (unit.side === "player" && unit.templateId === templateId && !beforeIds.has(unit.id)) {
       return unit;
@@ -156,7 +156,7 @@ function getMissingLoaderClasses(template: UnitTemplate): string[] {
 
 function runSmoke(): Failure[] {
   const failures: Failure[] = [];
-  const requiredTemplateIds = ["scout-ground", "tank-ground", "air-light", "air-jet", "air-propeller"];
+  const requiredTemplateIds = [1, 2, 5, 3, 4];
   const partCatalog = loadRuntimeMergedParts();
   const templates = loadRuntimeMergedTemplates(partCatalog);
   const defaultTemplateIds = new Set(readTemplateDir(`${process.cwd().replace(/\\/g, "/")}/templates/default`, partCatalog).map((template) => template.id));
@@ -185,7 +185,7 @@ function runSmoke(): Failure[] {
     if (!matched) {
       failures.push({
         templateId: requiredTemplateId,
-        templateName: requiredTemplateId,
+        templateName: String(requiredTemplateId),
         check: "movement",
         detail: "required template missing from runtime merged templates",
       });

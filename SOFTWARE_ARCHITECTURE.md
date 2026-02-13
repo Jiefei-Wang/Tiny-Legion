@@ -263,7 +263,7 @@ Template/editor architecture notes:
 - Battle deploy/spawn paths validate templates and block creation when `errors` are present.
 - Template editor includes optional template-level gas override input; empty value keeps gas derived from part totals.
 - Editor `Open` workflow supports direct editing of existing templates and one-click copy creation (`-copy` suffix).
-- Template IDs are internal and auto-generated for new/copy templates; ID editing is removed from UI.
+- Template IDs are internal positive integers and auto-generated for new/copy templates; ID editing is removed from UI.
 
 ---
 
@@ -402,6 +402,7 @@ Template persistence middleware (dev server via `vite.config.ts`):
 - `GET /__templates/user` -> read user object templates from `game/templates/user`
 - `PUT /__templates/user/:id` -> save/overwrite one user object template JSON
 - `DELETE /__templates/user/:id` -> remove one user object template JSON
+- Template save filenames are canonicalized from `template.name` (illegal filename symbols removed); delete/update resolves by internal integer `template.id`, not by filename.
 
 Part persistence middleware (dev server via `vite.config.ts`):
 
@@ -428,7 +429,8 @@ Editor UX implementation details:
 - Part Designer supports optional `stats.gasCost` override per part; deleting the field reverts to default gas calculation from base component/material defaults.
 - Editor `Open` window lists all templates; clicking a template row opens it directly, and right-aligned `Copy` / `Delete` actions clone (`-copy` suffix) or remove file-backed entries.
 - Editor has `Save` (persist to user templates) and `Save to Default` (persist to default templates); both paths run the same template normalization before writing JSON.
-- Template ID is internal/auto-managed for new and copied templates (no manual ID field in editor UI).
+- Template ID is internal integer/auto-managed for new and copied templates (no manual ID field in editor UI).
+- When an opened template is renamed and saved, editor save flow assigns a new template ID and removes the previously opened template entry.
 - Editor templates persist coordinates per placed part (`x`,`y`, origin `(0,0)`; negatives allowed).
 - Template Editor and Part Editor maintain separate grid pan/view state, so tab switching restores each editor's last viewport.
 - Editor grid viewport defaults to screen-centered origin and only recenters when loading a different template/part.
