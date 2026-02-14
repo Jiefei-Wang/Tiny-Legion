@@ -28,13 +28,10 @@ export function solveBallisticAim(
   if (MAX_T <= MIN_T) {
     return null;
   }
-  // Temporarily disable target-motion leading to isolate spread-like misses.
-  const leadTargetVx = targetVx * 0;
-  const leadTargetVy = targetVy * 0;
 
   const speedErrorAtTime = (t: number): number => {
-    const px = targetX + leadTargetVx * t;
-    const py = targetY + leadTargetVy * t;
+    const px = targetX + targetVx * t;
+    const py = targetY + targetVy * t;
     const dx = px - shooterX;
     const dy = py - shooterY;
     const vx = dx / t;
@@ -85,8 +82,8 @@ export function solveBallisticAim(
   }
   const t = (a + b) * 0.5;
 
-  const aimX = targetX + leadTargetVx * t;
-  const aimY = targetY + leadTargetVy * t;
+  const aimX = targetX + targetVx * t;
+  const aimY = targetY + targetVy * t;
 
   // Coarse range gating: if even the straight-line distance is beyond range, we can't hit.
   const directDistance = Math.hypot(aimX - shooterX, aimY - shooterY);

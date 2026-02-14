@@ -15,6 +15,28 @@ import {
   type TargetAiModule,
 } from "./composite-ai.ts";
 
+const LEAD_VELOCITY_FILTER_RATE_PER_S = 6.0;
+const LEAD_GAIN_NEAR = 0.32;
+const LEAD_GAIN_FAR = 0.82;
+const LEAD_ACCEL_SOFT_CAP = 180;
+const LEAD_ACCEL_HARD_CAP = 520;
+const LEAD_ACCEL_MIN_GAIN = 0.35;
+const AIM_SLEW_DEG_PER_S = 92;
+const AIM_DEADBAND_DEG = 0.5;
+const AIM_SLEW_RAD_PER_S = (AIM_SLEW_DEG_PER_S * Math.PI) / 180;
+const AIM_DEADBAND_RAD = (AIM_DEADBAND_DEG * Math.PI) / 180;
+
+type TargetMotionState = {
+  rawVx: number;
+  rawVy: number;
+  filteredVx: number;
+  filteredVy: number;
+};
+
+function wrapAngleDelta(next: number, prev: number): number {
+  return Math.atan2(Math.sin(next - prev), Math.cos(next - prev));
+}
+
 function canHitByAxis(unit: BattleAiInput["unit"], target: { y: number; type: BattleAiInput["unit"]["type"] } | null): boolean {
   if (!target) {
     return true;
@@ -98,6 +120,9 @@ export function createBaselineMovementAi(): MovementAiModule {
 }
 
 export function createBaselineShootAi(): ShootAiModule {
+  const targetMotionById = new Map<string, TargetMotionState>();
+  const lastAngleByWeaponKey = new Map<string, number>();
+
   return {
     decideShoot: (input, target) => {
       const unit = input.unit;
@@ -113,8 +138,37 @@ export function createBaselineShootAi(): ShootAiModule {
       let best: FirePlan | null = null;
       let bestScore = Number.NEGATIVE_INFINITY;
       let blockedReason: string | null = "no-ready-weapon";
-      const leadVx = target.rankedTargets[0]?.vx ?? 0;
-      const leadVy = target.rankedTargets[0]?.vy ?? 0;
+      const primaryTarget = target.rankedTargets[0] ?? null;
+      let filteredLeadVx = 0;
+      let filteredLeadVy = 0;
+      let targetAccel = 0;
+      if (primaryTarget) {
+        const prior = targetMotionById.get(primaryTarget.targetId);
+        if (!prior) {
+          targetMotionById.set(primaryTarget.targetId, {
+            rawVx: primaryTarget.vx,
+            rawVy: primaryTarget.vy,
+            filteredVx: primaryTarget.vx,
+            filteredVy: primaryTarget.vy,
+          });
+          filteredLeadVx = primaryTarget.vx;
+          filteredLeadVy = primaryTarget.vy;
+        } else {
+          const alpha = clamp(input.dt * LEAD_VELOCITY_FILTER_RATE_PER_S, 0, 1);
+          const nextFilteredVx = prior.filteredVx + (primaryTarget.vx - prior.filteredVx) * alpha;
+          const nextFilteredVy = prior.filteredVy + (primaryTarget.vy - prior.filteredVy) * alpha;
+          const dtSafe = Math.max(1e-3, input.dt);
+          const dvx = primaryTarget.vx - prior.rawVx;
+          const dvy = primaryTarget.vy - prior.rawVy;
+          targetAccel = Math.hypot(dvx, dvy) / dtSafe;
+          prior.rawVx = primaryTarget.vx;
+          prior.rawVy = primaryTarget.vy;
+          prior.filteredVx = nextFilteredVx;
+          prior.filteredVy = nextFilteredVy;
+          filteredLeadVx = nextFilteredVx;
+          filteredLeadVy = nextFilteredVy;
+        }
+      }
       for (let slot = 0; slot < unit.weaponAttachmentIds.length; slot += 1) {
         if (!unit.weaponAutoFire[slot]) {
           continue;
@@ -135,19 +189,39 @@ export function createBaselineShootAi(): ShootAiModule {
           blockedReason = "out-of-range";
           continue;
         }
+        const rangeNorm = clamp(distanceToTarget / Math.max(1, effectiveRange), 0, 1);
+        const baseLeadGain = LEAD_GAIN_NEAR + (LEAD_GAIN_FAR - LEAD_GAIN_NEAR) * rangeNorm;
+        const accelGain = targetAccel <= LEAD_ACCEL_SOFT_CAP
+          ? 1
+          : targetAccel >= LEAD_ACCEL_HARD_CAP
+          ? LEAD_ACCEL_MIN_GAIN
+          : 1 - ((targetAccel - LEAD_ACCEL_SOFT_CAP) / Math.max(1, LEAD_ACCEL_HARD_CAP - LEAD_ACCEL_SOFT_CAP)) * (1 - LEAD_ACCEL_MIN_GAIN);
+        const leadGain = baseLeadGain * accelGain;
         const solved = solveBallisticAim(
           weaponInput.firepointX,
           weaponInput.firepointY,
           correctedTargetX,
           correctedTargetY,
-          leadVx,
-          leadVy,
+          filteredLeadVx * leadGain,
+          filteredLeadVy * leadGain,
           effectiveRange,
           weaponInput.projectileSpeed,
           weaponInput.projectileGravity,
         );
         const leadTimeS = solved?.leadTimeS ?? 0;
-        const angleRad = solved?.firingAngleRad ?? Math.atan2(correctedTargetY - weaponInput.firepointY, correctedTargetX - weaponInput.firepointX);
+        let angleRad = solved?.firingAngleRad ?? Math.atan2(correctedTargetY - weaponInput.firepointY, correctedTargetX - weaponInput.firepointX);
+        const angleKey = `${unit.id}:${slot}`;
+        const prevAngle = lastAngleByWeaponKey.get(angleKey);
+        if (prevAngle !== undefined) {
+          const delta = wrapAngleDelta(angleRad, prevAngle);
+          if (Math.abs(delta) <= AIM_DEADBAND_RAD) {
+            angleRad = prevAngle;
+          } else {
+            const maxDelta = AIM_SLEW_RAD_PER_S * Math.max(1e-3, input.dt);
+            angleRad = prevAngle + clamp(delta, -maxDelta, maxDelta);
+          }
+        }
+        lastAngleByWeaponKey.set(angleKey, angleRad);
         const aimDistance = solved
           ? Math.max(90, Math.min(effectiveRange, weaponInput.projectileSpeed * solved.leadTimeS))
           : Math.min(effectiveRange, Math.max(90, distanceToTarget));

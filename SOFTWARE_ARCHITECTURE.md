@@ -460,6 +460,7 @@ Editor UX implementation details:
 - Projectile runtime state now carries firing origin metadata (`sourceUnitType`, `fireOriginY`, `initialVy`) so ground-vehicle non-tracking shots fired above horizontal can be terminated when they fall too far below the firing origin, while downward-fired shots remain unaffected.
 - Projectile runtime state also carries penetration state (`remainingPenetration`) plus per-part hit keys so one projectile can pass through multiple parts while never damaging the same part twice.
 - AI shot-feedback correction has been removed from runtime projectile state and despawn handling; projectile aim now remains purely command/solver-driven for deterministic behavior.
+- Baseline shoot module now applies anti-jitter lead smoothing (filtered target velocity, partial lead gain with acceleration guard, and per-weapon aim slew/deadband) before issuing fire angles.
 - Air units compute lift from air propulsion thrust (`jetEngine` omni, `propeller` directional cone) and compare against gravity hold.
 - Air movement reserves thrust for vertical hold first, then spends remaining thrust for horizontal/intentional altitude movement.
 - If lift becomes critically low, units transition into an air-drop crash path, pushing horizontally toward base; propeller aircraft can use remaining lift to slow descent during the crash, otherwise they fall at full crash gravity.

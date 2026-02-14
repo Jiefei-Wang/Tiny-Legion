@@ -634,7 +634,7 @@ The current playable implementation already includes:
 - Baseline shoot AI now receives per-slot runtime fire inputs from battle runtime (`effectiveRange`, resolved projectile speed/gravity, and world-space firepoint), and no longer assumes a global projectile model.
 - Baseline shoot AI range gating is evaluated from each weapon firepoint (not unit center), and ballistic solve now compensates for runtime semi-implicit projectile integration to reduce long-range edge-angle misses under gravity.
 - Player-side auto-fire now uses the same composite fire-decision pipeline as AI-controlled units (manual-controlled slots still suppress auto fire).
-- Ballistic solver target-motion leading is currently disabled for diagnostics (target velocity is ignored in solve), so firing aims at target current position under gravity only.
+- Baseline shoot prediction keeps movement lead enabled but now applies anti-jitter damping: filtered target velocity (EMA), partial lead-gain scaling (distance + acceleration guard), plus per-weapon angle deadband and slew-rate limiting.
 - Target module returns ranked targets (sorted by importance); movement consumes ranked targets + battlefield state; shooting consumes ranked targets + movement intent + weapon readiness.
 - AI shot-feedback correction has been removed; baseline/composite firing now uses direct ballistic solve + runtime angle constraints without per-shot adaptive aim-offset accumulation.
 - Arena supports composite module wiring (`target/movement/shoot`) so each module can be replaced and compared independently.
