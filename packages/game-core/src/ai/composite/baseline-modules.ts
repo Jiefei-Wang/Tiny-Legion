@@ -104,33 +104,31 @@ function estimateWeightedVelocityFromHistory(
   return { vx: covTX / varT, vy: covTY / varT };
 }
 
-function normalizeNonNegativeWeights(raw: ReadonlyArray<number>, fallback: ReadonlyArray<number>): number[] {
+function sanitizeNonNegativeWeights(raw: ReadonlyArray<number>, fallback: ReadonlyArray<number>): number[] {
   const clamped = raw.map((value) => (Number.isFinite(value) ? Math.max(0, value) : 0));
-  const sum = clamped.reduce((acc, value) => acc + value, 0);
-  if (sum > 1e-9) {
-    return clamped.map((value) => value / sum);
+  const hasPositive = clamped.some((value) => value > 1e-9);
+  if (hasPositive) {
+    return clamped;
   }
   const fallbackClamped = fallback.map((value) => (Number.isFinite(value) ? Math.max(0, value) : 0));
-  const fallbackSum = fallbackClamped.reduce((acc, value) => acc + value, 0);
-  if (fallbackSum <= 1e-9) {
-    return new Array(Math.max(1, raw.length)).fill(1 / Math.max(1, raw.length));
+  const fallbackHasPositive = fallbackClamped.some((value) => value > 1e-9);
+  if (fallbackHasPositive) {
+    return fallbackClamped;
   }
-  return fallbackClamped.map((value) => value / fallbackSum);
+  return new Array(Math.max(1, raw.length)).fill(0);
 }
 
 function estimateLagVelocitiesFromHistory(
-  currentVx: number,
-  currentVy: number,
   history: ReadonlyArray<{ x: number; y: number }> | null | undefined,
   sampleIntervalS: number,
   count: number,
 ): Array<{ vx: number; vy: number }> {
   const desired = Math.max(1, Math.floor(count));
   const dt = Math.max(1e-3, sampleIntervalS);
-  const out: Array<{ vx: number; vy: number }> = [{ vx: currentVx, vy: currentVy }];
   if (!history || history.length < 2) {
+    const out: Array<{ vx: number; vy: number }> = [];
     while (out.length < desired) {
-      out.push({ vx: currentVx, vy: currentVy });
+      out.push({ vx: 0, vy: 0 });
     }
     return out;
   }
@@ -143,9 +141,11 @@ function estimateLagVelocitiesFromHistory(
       vy: (next.y - prev.y) / dt,
     });
   }
+  const newest = segmentVelocities[segmentVelocities.length - 1] ?? { vx: 0, vy: 0 };
+  const out: Array<{ vx: number; vy: number }> = [{ vx: newest.vx, vy: newest.vy }];
   for (let lagIndex = 1; lagIndex < desired; lagIndex += 1) {
-    const segIdxFromEnd = Math.max(0, Math.min(segmentVelocities.length - 1, segmentVelocities.length - lagIndex));
-    const seg = segmentVelocities[segIdxFromEnd] ?? segmentVelocities[0] ?? { vx: currentVx, vy: currentVy };
+    const segIdxFromEnd = Math.max(0, Math.min(segmentVelocities.length - 1, segmentVelocities.length - 1 - lagIndex));
+    const seg = segmentVelocities[segIdxFromEnd] ?? newest;
     out.push({ vx: seg.vx, vy: seg.vy });
   }
   return out;
@@ -627,7 +627,7 @@ export function createAutoregShootAi(alphaRaw: number): ShootAiModule {
 
 export function createWeightedLagShootAi(alphaRaw: ReadonlyArray<number>): ShootAiModule {
   const fallbackWeights = new Array(11).fill(0).map((_, index) => 11 - index);
-  const baseWeights = normalizeNonNegativeWeights(alphaRaw, fallbackWeights);
+  const baseWeights = sanitizeNonNegativeWeights(alphaRaw, fallbackWeights);
   const lastAngleByWeaponKey = new Map<string, number>();
   return {
     decideShoot: (input, target) => {
@@ -651,14 +651,12 @@ export function createWeightedLagShootAi(alphaRaw: ReadonlyArray<number>): Shoot
       if (primary) {
         const targetUnit = input.state.units.find((entry) => entry.id === primary.targetId) ?? null;
         const lagVelocities = estimateLagVelocitiesFromHistory(
-          primary.vx,
-          primary.vy,
           targetUnit?.targetHistory,
           AI_TARGET_HISTORY_SAMPLE_INTERVAL_S,
           baseWeights.length,
         );
         for (let i = 0; i < baseWeights.length; i += 1) {
-          const lag = lagVelocities[i] ?? lagVelocities[lagVelocities.length - 1] ?? { vx: primary.vx, vy: primary.vy };
+          const lag = lagVelocities[i] ?? lagVelocities[lagVelocities.length - 1] ?? { vx: 0, vy: 0 };
           const w = baseWeights[i] ?? 0;
           leadVx += lag.vx * w;
           leadVy += lag.vy * w;

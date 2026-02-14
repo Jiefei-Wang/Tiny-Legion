@@ -37,6 +37,7 @@
     "range": 500,
     "shootAngleDeg": 360,
     "projectileSpeed": 300,
+    "projectileGravity": 50,
     "spreadDeg": 0
   },
   "properties": {
