@@ -6,7 +6,8 @@
       "initialUnitsPerSide": 1,
       "seeds": 16,
       "templateNames": ["*"],
-      "battlefield": { "width": 1000, "height": 900, "groundHeight": 620 }
+      "battlefield": { "width": 1000, "height": 900, "groundHeight": 400 },
+      "maxSimSeconds": 60
     },
     {
       "id": "p2-no-base-nvn",
@@ -14,7 +15,8 @@
       "initialUnitsPerSide": 4,
       "seeds": 16,
       "templateNames": ["*"],
-      "battlefield": { "width": 1000, "height": 1000, "groundHeight": 680 }
+      "battlefield": { "width": 1000, "height": 1000, "groundHeight": 400 },
+      "maxSimSeconds": 60
     },
     {
       "id": "p3-battlefield-base",
@@ -22,7 +24,8 @@
       "initialUnitsPerSide": 4,
       "seeds": 16,
       "templateNames": ["*"],
-      "battlefield": { "width": 1000, "height": 1000, "groundHeight": 680 }
+      "battlefield": { "width": 1000, "height": 1000, "groundHeight": 400 },
+      "maxSimSeconds": 60
     },
     {
       "id": "p4-leaderboard",
@@ -30,9 +33,10 @@
       "initialUnitsPerSide": 4,
       "seeds": 16,
       "templateNames": ["*"],
-      "battlefield": { "width": 1000, "height": 1000, "groundHeight": 680 },
+      "battlefield": { "width": 1000, "height": 1000, "groundHeight": 400 },
       "opponentMode": "leaderboard-nearby",
-      "leaderboard": { "opponentCount": 6 }
+      "leaderboard": { "opponentCount": 6 },
+      "maxSimSeconds": 60
     }
   ]
 }

@@ -33,9 +33,10 @@
   },
   "stats": {
     "recoil": 10,
+    "damage": 15,
     "range": 500,
     "shootAngleDeg": 360,
-    "projectileSpeed": 500,
+    "projectileSpeed": 300,
     "spreadDeg": 0
   },
   "properties": {

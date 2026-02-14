@@ -33,6 +33,7 @@ type PhaseDef = {
     height: number;
     groundHeight?: number;
   };
+  maxSimSeconds: number;
   opponentMode?: "best" | "leaderboard-nearby";
   leaderboard?: {
     opponentCount: number;
@@ -49,6 +50,13 @@ type LeaderboardOpponent = {
   runId: string;
   score: number;
   modules: CompositeSnapshot;
+};
+
+type TrainingProgress = {
+  module: ModuleKind;
+  phase: string;
+  generation: number;
+  lastUpdatedAt: number;
 };
 
 function ensureDir(path: string): void {
@@ -91,6 +99,7 @@ function makePhase(
       height: config?.battlefield?.height ?? 1000,
       ...(typeof config?.battlefield?.groundHeight === "number" ? { groundHeight: config.battlefield.groundHeight } : {}),
     },
+    maxSimSeconds: config?.maxSimSeconds ?? 240,
     opponentMode: config?.opponentMode ?? "best",
     ...(config?.leaderboard ? { leaderboard: { opponentCount: Math.max(1, Math.floor(config.leaderboard.opponentCount)) } } : {}),
   };
@@ -373,7 +382,6 @@ export async function runCompositeTraining(opts: {
   generations: number;
   population: number;
   parallel: number;
-  maxSimSeconds: number;
   nodeDefense: number;
   baseHp: number | null;
   playerGas: number;
@@ -425,6 +433,7 @@ export async function runCompositeTraining(opts: {
   const phases = loadPhaseDefs(opts.nUnits, opts.phaseSeeds, opts.phaseConfigPath);
   const pool = new WorkerPool(WorkerPool.matchWorkerUrl(), opts.parallel);
   const leaderboardOpponents = loadLeaderboardOpponents(dataRoot);
+  let lastProgress: TrainingProgress | null = null;
   try {
     for (const moduleKind of order) {
       const schema = getModuleSchema(moduleKind, shootFamily);
@@ -437,7 +446,7 @@ export async function runCompositeTraining(opts: {
         ensureDir(phaseDir);
 
         const baseMatch: Omit<MatchSpec, "seed" | "aiPlayer" | "aiEnemy"> = {
-          maxSimSeconds: opts.maxSimSeconds,
+          maxSimSeconds: phase.maxSimSeconds,
           nodeDefense: opts.nodeDefense,
           ...(opts.baseHp ? { baseHp: opts.baseHp } : {}),
           playerGas: opts.playerGas,
@@ -519,6 +528,21 @@ export async function runCompositeTraining(opts: {
             if (better) {
               bestCandidate = candidate;
               currentBestParams = candidate.params;
+              lastProgress = {
+                module: moduleKind,
+                phase: phase.id,
+                generation: gen,
+                lastUpdatedAt: Date.now(),
+              };
+              const intermediateBest = withCandidate(best, moduleKind, currentBestParams, shootFamily);
+              writeFileSync(
+                resolve(runDir, "best-composite.json"),
+                JSON.stringify({
+                  ...aiSpecFromModules(intermediateBest),
+                  trainingProgress: lastProgress,
+                }, null, 2),
+                "utf8",
+              );
             }
           }
 
@@ -560,7 +584,14 @@ export async function runCompositeTraining(opts: {
       }
     }
 
-    writeFileSync(resolve(runDir, "best-composite.json"), JSON.stringify(aiSpecFromModules(best), null, 2), "utf8");
+    writeFileSync(
+      resolve(runDir, "best-composite.json"),
+      JSON.stringify({
+        ...aiSpecFromModules(best),
+        ...(lastProgress ? { trainingProgress: lastProgress } : {}),
+      }, null, 2),
+      "utf8",
+    );
   } finally {
     await pool.close();
   }

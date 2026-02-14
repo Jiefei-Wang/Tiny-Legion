@@ -98,7 +98,6 @@ async function main(): Promise<void> {
     const generations = asNumber(args.generations, defaults.generations ?? 20);
     const population = asNumber(args.population, defaults.population ?? 24);
     const parallel = asNumber(args.parallel, defaults.parallel ?? 8);
-    const maxSimSeconds = asNumber(args.maxSimSeconds, defaults.maxSimSeconds ?? 240);
     const nodeDefense = asNumber(args.nodeDefense, defaults.nodeDefense ?? 1);
     const playerGas = asNumber(args.playerGas, defaults.playerGas ?? 10000);
     const enemyGas = asNumber(args.enemyGas, defaults.enemyGas ?? 10000);
@@ -120,7 +119,6 @@ async function main(): Promise<void> {
       generations: Math.max(1, Math.floor(generations)),
       population: Math.max(4, Math.floor(population)),
       parallel: Math.max(1, Math.floor(parallel)),
-      maxSimSeconds,
       nodeDefense,
       baseHp: Number.isFinite(baseHp) && baseHp > 0 ? baseHp : null,
       playerGas,

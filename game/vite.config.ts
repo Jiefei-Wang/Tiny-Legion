@@ -794,6 +794,7 @@ function arenaModelPlugin() {
     runId: string;
     spec: MatchAiSpec;
     mtimeMs: number;
+    phaseGen?: string;
   };
   type RatingEntry = {
     score: number;
@@ -821,6 +822,7 @@ function arenaModelPlugin() {
     isUnranked: boolean;
     mtimeMs: number;
     spec: MatchAiSpec;
+    phaseGen?: string;
   };
   type LeaderboardPhaseScenario = {
     withBase: boolean;
@@ -927,21 +929,36 @@ function arenaModelPlugin() {
     }
     const runIds = readdirSync(runsDir);
     for (const runId of runIds) {
-      const filePath = resolve(runsDir, runId, "best-composite.json");
-      if (!existsSync(filePath)) {
+      const runDir = resolve(runsDir, runId);
+      const mainFilePath = resolve(runDir, "best-composite.json");
+      if (!existsSync(mainFilePath)) {
         continue;
       }
       try {
-        const raw = readFileSync(filePath, "utf8");
+        const raw = readFileSync(mainFilePath, "utf8");
         const parsed = JSON.parse(raw) as unknown;
         if (!isCompositeSpec(parsed)) {
           continue;
         }
-        const stat = statSync(filePath);
+        const obj = parsed as Record<string, unknown>;
+        const progressRaw = obj.trainingProgress;
+        let phaseGen: string | undefined;
+        if (progressRaw && typeof progressRaw === "object") {
+          const progress = progressRaw as Record<string, unknown>;
+          const phase = typeof progress.phase === "string" ? progress.phase.trim() : "";
+          const generation = typeof progress.generation === "number" && Number.isFinite(progress.generation)
+            ? Math.max(0, Math.floor(progress.generation))
+            : null;
+          if (phase && generation !== null) {
+            phaseGen = `${phase} gen ${generation}`;
+          }
+        }
+        const stat = statSync(mainFilePath);
         out.push({
           runId,
           spec: parsed,
           mtimeMs: stat.mtimeMs,
+          phaseGen,
         });
       } catch {
         continue;
@@ -1100,6 +1117,7 @@ function arenaModelPlugin() {
         isUnranked: rating.rounds <= 0,
         mtimeMs: run.mtimeMs,
         spec: run.spec,
+        phaseGen: run.phaseGen,
       };
     });
     entries.sort((a, b) => {
@@ -1220,7 +1238,9 @@ function arenaModelPlugin() {
         const entries = buildLeaderboardEntries().map((entry) => ({
           runId: entry.runId,
           label: `${entry.runId}${
-            entry.runId === BASELINE_MODEL_ID
+            entry.phaseGen
+              ? ` (${entry.phaseGen})`
+              : entry.runId === BASELINE_MODEL_ID
               ? " (default baseline AI)"
               : entry.runId === HISTORY_MODEL_ID
               ? " (default history-shoot AI)"
@@ -1465,7 +1485,13 @@ function arenaModelPlugin() {
         runs.sort((a, b) => b.mtimeMs - a.mtimeMs);
         const latest = runs[0];
         res.setHeader("content-type", "application/json");
-        res.end(JSON.stringify({ ok: true, found: true, runId: latest.runId, spec: latest.spec }));
+        res.end(JSON.stringify({
+          ok: true,
+          found: true,
+          runId: latest.runId,
+          phaseGen: latest.phaseGen,
+          spec: latest.spec,
+        }));
       });
 
       server.middlewares.use("/__arena/composite/leaderboard", (req, res) => {
@@ -1476,6 +1502,7 @@ function arenaModelPlugin() {
         }
         const entries = buildLeaderboardEntries().map((entry) => ({
           runId: entry.runId,
+          phaseGen: entry.phaseGen,
           score: entry.score,
           rounds: entry.rounds,
           games: entry.games,
