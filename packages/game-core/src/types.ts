@@ -288,6 +288,8 @@ export interface UnitInstance {
   loaderStates: LoaderState[];
   deploymentGasCost: number;
   returnedToBase: boolean;
+  targetHistory: Array<{ x: number; y: number }>;
+  targetHistorySampleTimerS: number;
   aiTimer: number;
   aiState: "engage" | "evade";
   aiStateTimer: number;

@@ -635,6 +635,12 @@ The current playable implementation already includes:
 - Baseline shoot AI range gating is evaluated from each weapon firepoint (not unit center), and ballistic solve now compensates for runtime semi-implicit projectile integration to reduce long-range edge-angle misses under gravity.
 - Player-side auto-fire now uses the same composite fire-decision pipeline as AI-controlled units (manual-controlled slots still suppress auto fire).
 - Baseline shoot prediction keeps movement lead enabled but now applies anti-jitter damping: filtered target velocity (EMA), partial lead-gain scaling (distance + acceleration guard), plus per-weapon angle deadband and slew-rate limiting.
+- Runtime now records per-unit target history samples (last 10 `(x,y)` positions across a 1-second window) using time-interval sampling (`sampleInterval = window / samples`) rather than frame-count assumptions.
+- Added a separate composite shoot module family `history-shoot` that estimates target movement from weighted history points (`(1..10)/sum(1..10)`, newest highest) and feeds that estimate into ballistic aim, so it can be compared directly against baseline in Test Arena/arena runs.
+- Added a separate composite shoot family `autoreg-shoot` with autoregressive velocity estimate `v_hat = (1 - alpha) * old_v_hat + alpha * current_v` (`alpha` from module params).
+- Added trainable composite shoot families `history-shoot`, `w11-shoot`, and `autoreg-shoot` for arena optimization (`history-shoot` trains `history.recencyPower`; `autoreg-shoot` trains `alpha`; `w11-shoot` trains `alpha1..alpha11` with runtime normalization to sum 1).
+- Angle deadband + slew-rate damping is applied only in `baseline-shoot` (`baseline-game-ai`); `history-shoot`, `autoreg-shoot`, and `w11-shoot` use direct per-tick ballistic aim angles without AI-side angle-change clamping.
+- Leaderboard model pool no longer auto-injects built-in autoreg alpha-sweep entries; autoreg leaderboard entries now come from saved trained runs.
 - Target module returns ranked targets (sorted by importance); movement consumes ranked targets + battlefield state; shooting consumes ranked targets + movement intent + weapon readiness.
 - AI shot-feedback correction has been removed; baseline/composite firing now uses direct ballistic solve + runtime angle constraints without per-shot adaptive aim-offset accumulation.
 - Arena supports composite module wiring (`target/movement/shoot`) so each module can be replaced and compared independently.
@@ -657,7 +663,7 @@ The current playable implementation already includes:
 - Leaderboard competition runtime uses `p4-leaderboard` scenario settings from `arena/composite-training.phases.json` (template filters + battlefield size/ground-height), so rank battles align with training phase-4 conditions.
 - Elo uses pairwise diminishing-K updates (same two models -> progressively smaller K), which naturally converges under repeated head-to-head loops without hard score caps.
 - Leaderboard panel includes quick competition controls: `random pair`, `unranked vs random`, and `manual pair` modes plus configurable run count.
-- Leaderboard model pool includes a built-in `baseline-game-ai` composed model (`baseline-target` + `baseline-movement` + `baseline-shoot`) so trained runs are ranked directly against current in-game baseline behavior.
+- Leaderboard model pool includes built-in composed models for `baseline-game-ai` (`baseline-target` + `baseline-movement` + `baseline-shoot`) and `baseline-history-shoot-ai` (`baseline-target` + `baseline-movement` + `history-shoot`) so both baseline shooters are ranked directly against trained runs.
 - Leaderboard `Run Competition` submits a batched request and executes rounds in parallel across CPU worker threads (all detected cores when worker runtime is available), then refreshes leaderboard/model lists after completion.
 - Test Arena module-selection contract is documented in `game/AI_COMPONENT_CONFIG.md`.
 - Training automation script `train_ai.sh` provides module-specific optimization (`shoot`/`movement`/`target`) and full compose optimization (`compose`) with per-module source selection (`baseline|new|trained:<path>`).

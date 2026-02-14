@@ -15,6 +15,8 @@ import {
 } from "../../config/balance/battlefield.ts";
 import { COMPONENTS } from "../../config/balance/weapons.ts";
 import {
+  AI_TARGET_HISTORY_SAMPLE_INTERVAL_S,
+  AI_TARGET_HISTORY_SAMPLES,
   GLOBAL_WEAPON_RANGE_MULTIPLIER,
   PROJECTILE_GRAVITY,
   PROJECTILE_SPEED,
@@ -637,6 +639,7 @@ export class BattleSession {
       this.ensureEnemyMinimumPresence();
     }
     this.ensurePlayerMinimumPresence();
+    this.updateTargetHistorySamples(dt);
 
     const laneBounds = this.getLaneBounds();
     for (const unit of this.state.units) {
@@ -2244,6 +2247,24 @@ export class BattleSession {
       x: base.x + base.w * 0.5,
       y: base.y + base.h * 0.5,
     };
+  }
+
+  private updateTargetHistorySamples(dt: number): void {
+    const sampleIntervalS = Math.max(1e-3, AI_TARGET_HISTORY_SAMPLE_INTERVAL_S);
+    const maxSamples = Math.max(2, Math.floor(AI_TARGET_HISTORY_SAMPLES));
+    for (const unit of this.state.units) {
+      if (!unit.targetHistory || unit.targetHistory.length <= 0) {
+        unit.targetHistory = [{ x: unit.x, y: unit.y }];
+      }
+      unit.targetHistorySampleTimerS += Math.max(0, dt);
+      while (unit.targetHistorySampleTimerS >= sampleIntervalS) {
+        unit.targetHistorySampleTimerS -= sampleIntervalS;
+        unit.targetHistory.push({ x: unit.x, y: unit.y });
+        while (unit.targetHistory.length > maxSamples) {
+          unit.targetHistory.shift();
+        }
+      }
+    }
   }
 
   private findClosestEnemyToPoint(side: UnitInstance["side"], x: number, y: number): UnitInstance | null {

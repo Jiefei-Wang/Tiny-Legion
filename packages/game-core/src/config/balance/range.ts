@@ -5,6 +5,9 @@ export const AIRCRAFT_RANGE_BONUS_MAX = 1.0;
 export const PROJECTILE_SPEED = 260;
 export const PROJECTILE_GRAVITY = 95;
 export const GROUND_FIRE_Y_TOLERANCE = 92;
+export const AI_TARGET_HISTORY_WINDOW_S = 1.0;
+export const AI_TARGET_HISTORY_SAMPLES = 10;
+export const AI_TARGET_HISTORY_SAMPLE_INTERVAL_S = AI_TARGET_HISTORY_WINDOW_S / AI_TARGET_HISTORY_SAMPLES;
 
 export function getAircraftAltitudeBonus(unit: UnitInstance, airMinZ: number, groundMinY: number): number {
   if (unit.type !== "air") {

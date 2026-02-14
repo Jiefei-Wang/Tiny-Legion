@@ -774,6 +774,7 @@ function arenaModelPlugin() {
   const leaderboardFile = resolve(leaderboardDir, "composite-elo.json");
   const phaseConfigFile = resolve(process.cwd(), "..", "arena", "composite-training.phases.json");
   const BASELINE_MODEL_ID = "baseline-game-ai";
+  const HISTORY_MODEL_ID = "baseline-history-shoot-ai";
   let leaderboardCompeteBusy = false;
   const leaderboardParallelWorkers = Math.max(
     1,
@@ -855,6 +856,15 @@ function arenaModelPlugin() {
       target: { familyId: "baseline-target", params: {} },
       movement: { familyId: "baseline-movement", params: {} },
       shoot: { familyId: "baseline-shoot", params: {} },
+    },
+  });
+  const historyCompositeSpec = (): MatchAiSpec => ({
+    familyId: "composite",
+    params: {},
+    composite: {
+      target: { familyId: "baseline-target", params: {} },
+      movement: { familyId: "baseline-movement", params: {} },
+      shoot: { familyId: "history-shoot", params: {} },
     },
   });
   const getWorkerPool = async (): Promise<{ run: (payload: unknown) => Promise<unknown>; close: () => Promise<void> } | null> => {
@@ -945,6 +955,11 @@ function arenaModelPlugin() {
     models.push({
       runId: BASELINE_MODEL_ID,
       spec: baselineCompositeSpec(),
+      mtimeMs: 0,
+    });
+    models.push({
+      runId: HISTORY_MODEL_ID,
+      spec: historyCompositeSpec(),
       mtimeMs: 0,
     });
     return models;
@@ -1204,7 +1219,13 @@ function arenaModelPlugin() {
         }
         const entries = buildLeaderboardEntries().map((entry) => ({
           runId: entry.runId,
-          label: `${entry.runId}${entry.runId === BASELINE_MODEL_ID ? " (default baseline AI)" : ""} (score ${entry.score.toFixed(2)}, rounds ${entry.rounds})`,
+          label: `${entry.runId}${
+            entry.runId === BASELINE_MODEL_ID
+              ? " (default baseline AI)"
+              : entry.runId === HISTORY_MODEL_ID
+              ? " (default history-shoot AI)"
+              : ""
+          } (score ${entry.score.toFixed(2)}, rounds ${entry.rounds})`,
           score: entry.score,
           rounds: entry.rounds,
           games: entry.games,
@@ -1246,7 +1267,7 @@ function arenaModelPlugin() {
             : payload.mode === "manual-pair"
               ? "manual-pair"
               : "random-pair";
-          const runsRequested = clampInt(payload.runs, 1, 200, 10);
+          const runsRequested = clampInt(payload.runs, 1, 1_000_000_000, 10);
           const runAId = typeof payload.runAId === "string" ? payload.runAId.trim() : "";
           const runBId = typeof payload.runBId === "string" ? payload.runBId.trim() : "";
 

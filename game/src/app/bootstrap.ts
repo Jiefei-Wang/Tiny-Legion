@@ -405,6 +405,19 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         },
       },
     },
+    {
+      id: "builtin-history-shoot-composite",
+      label: "builtin: baseline + history-shoot",
+      spec: {
+        familyId: "composite",
+        params: {},
+        composite: {
+          target: { familyId: "baseline-target", params: {} },
+          movement: { familyId: "baseline-movement", params: {} },
+          shoot: { familyId: "history-shoot", params: {} },
+        },
+      },
+    },
   ];
   let testArenaCompositeModelSelections: Record<TestArenaSide, string> = {
     player: "custom-components",
@@ -421,6 +434,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     ],
     shoot: [
       { id: "baseline-shoot", label: "builtin: baseline-shoot", spec: { familyId: "baseline-shoot", params: {} } },
+      { id: "history-shoot", label: "builtin: history-shoot", spec: { familyId: "history-shoot", params: {} } },
       { id: "dt-shoot-default", label: "builtin: dt-shoot (default)", spec: { familyId: "dt-shoot", params: {} } },
       { id: "dt-shoot-atan-default", label: "builtin: dt-shoot-atan (default)", spec: { familyId: "dt-shoot-atan", params: {} } },
     ],
@@ -1203,6 +1217,20 @@ export function bootstrap(options: BootstrapOptions = {}): void {
             },
           },
         },
+      testArenaCompositeModelOptions.find((entry) => entry.id === "builtin-history-shoot-composite")
+        ?? {
+          id: "builtin-history-shoot-composite",
+          label: "builtin: baseline + history-shoot",
+          spec: {
+            familyId: "composite",
+            params: {},
+            composite: {
+              target: { familyId: "baseline-target", params: {} },
+              movement: { familyId: "baseline-movement", params: {} },
+              shoot: { familyId: "history-shoot", params: {} },
+            },
+          },
+        },
     ];
     const merged: TestArenaCompositeModelOption[] = [...defaults];
     try {
@@ -1261,7 +1289,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       }
     }
     testArenaLeaderboardCompeteBusy = true;
-    const totalRuns = Math.max(1, Math.min(200, Math.floor(runs)));
+    const totalRuns = Math.max(1, Math.floor(runs));
     testArenaLeaderboardCompeteStatus = `Running leaderboard matches... 0/${totalRuns}`;
     renderPanels();
     try {
@@ -4285,7 +4313,6 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     `;
 
     const leaderboardRows = testArenaLeaderboardEntries
-      .slice(0, 24)
       .map((entry, index) => {
         const winRate = Number.isFinite(entry.winRate) ? `${(Number(entry.winRate) * 100).toFixed(1)}%` : "-";
         const score = Number.isFinite(entry.leaderboardScore) ? Number(entry.leaderboardScore).toFixed(2) : "-";
@@ -4310,7 +4337,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         </tr>`;
       })
       .join("");
-    const competeRunsValue = Math.max(1, Math.min(200, Math.floor(testArenaLeaderboardCompeteRuns)));
+    const competeRunsValue = Math.max(1, Math.floor(testArenaLeaderboardCompeteRuns));
     const competeModeOptions = `
       <option value="random-pair" ${testArenaLeaderboardCompeteMode === "random-pair" ? "selected" : ""}>Random pair</option>
       <option value="unranked-vs-random" ${testArenaLeaderboardCompeteMode === "unranked-vs-random" ? "selected" : ""}>Unranked vs random</option>
@@ -4332,7 +4359,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
           </select>
         </label>
         <label class="small">Runs
-          <input id="leaderboardCompeteRuns" type="number" min="1" max="200" step="1" value="${competeRunsValue}" />
+          <input id="leaderboardCompeteRuns" type="number" min="1" step="1" value="${competeRunsValue}" />
         </label>
         ${testArenaLeaderboardCompeteMode === "manual-pair" ? `
           <label class="small">Model A
@@ -4995,7 +5022,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       if (!Number.isFinite(parsed)) {
         testArenaLeaderboardCompeteRuns = 100;
       } else {
-        testArenaLeaderboardCompeteRuns = Math.max(1, Math.min(200, parsed));
+        testArenaLeaderboardCompeteRuns = Math.max(1, parsed);
       }
       renderPanels();
     };

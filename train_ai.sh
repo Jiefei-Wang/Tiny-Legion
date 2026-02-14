@@ -72,7 +72,7 @@ if [[ "$command" == "help" ]]; then
   echo "  --target-source <source>    baseline | new | trained:<path>"
   echo "  --movement-source <source>  baseline | new | trained:<path>"
   echo "  --shoot-source <source>     baseline | new | trained:<path>"
-  echo "  --shoot-family <id>         dt-shoot | dt-shoot-atan"
+  echo "  --shoot-family <id>         dt-shoot | dt-shoot-atan | w11-shoot | autoreg-shoot | history-shoot"
   echo "  --phase-seeds <n> --generations <n> --population <n> --parallel <n> --n-units <n>"
   exit 0
 fi

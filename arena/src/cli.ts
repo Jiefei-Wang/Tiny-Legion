@@ -52,8 +52,11 @@ function asModuleSource(value: unknown, fallback: "baseline" | "new" | `trained:
   return fallback;
 }
 
-function asShootFamily(value: unknown, fallback: "dt-shoot" | "dt-shoot-atan"): "dt-shoot" | "dt-shoot-atan" {
-  if (value === "dt-shoot" || value === "dt-shoot-atan") {
+function asShootFamily(
+  value: unknown,
+  fallback: "dt-shoot" | "dt-shoot-atan" | "w11-shoot" | "autoreg-shoot" | "history-shoot",
+): "dt-shoot" | "dt-shoot-atan" | "w11-shoot" | "autoreg-shoot" | "history-shoot" {
+  if (value === "dt-shoot" || value === "dt-shoot-atan" || value === "w11-shoot" || value === "autoreg-shoot" || value === "history-shoot") {
     return value;
   }
   return fallback;
@@ -160,6 +163,9 @@ async function main(): Promise<void> {
       "  train-composite --scope all --generations 20 --population 24 --phaseSeeds 16 --nUnits 4",
       "  train-composite --scope shoot --shootSource new --movementSource baseline --targetSource baseline",
       "  train-composite --scope shoot --shootSource new --shootFamily dt-shoot-atan",
+      "  train-composite --scope shoot --shootSource new --shootFamily w11-shoot",
+      "  train-composite --scope shoot --shootSource new --shootFamily autoreg-shoot",
+      "  train-composite --scope shoot --shootSource new --shootFamily history-shoot",
       "  train-composite --phaseConfig composite-training.phases.json",
       "  replay --file match.json",
       "",

@@ -3,6 +3,9 @@ import {
 } from "../../../packages/game-core/src/config/balance/range.ts";
 import { structureIntegrity } from "../../../packages/game-core/src/simulation/units/structure-grid.ts";
 import {
+  createAutoregShootAi,
+  createHistoryWeightedShootAi,
+  createWeightedLagShootAi,
   createBaselineMovementAi,
   createBaselineShootAi,
   createBaselineTargetAi,
@@ -30,6 +33,7 @@ export type CompositeConfig = {
 };
 
 type ModuleKind = "target" | "movement" | "shoot";
+type ShootFamilyId = "dt-shoot" | "dt-shoot-atan" | "w11-shoot" | "autoreg-shoot" | "history-shoot";
 
 function pickNumber(params: Params, key: string, fallback: number): number {
   const value = params[key];
@@ -90,8 +94,38 @@ void DT_MOVEMENT_SCHEMA;
 void DT_SHOOT_SCHEMA;
 void DT_SHOOT_ATAN_SCHEMA;
 
-export function getModuleSchema(kind: ModuleKind): ParamSchema {
-  void kind;
+const W11_SHOOT_SCHEMA: ParamSchema = {
+  "shoot.alpha1": { kind: "number", min: 0, max: 1, def: 11 / 66, sigma: 0.08 },
+  "shoot.alpha2": { kind: "number", min: 0, max: 1, def: 10 / 66, sigma: 0.08 },
+  "shoot.alpha3": { kind: "number", min: 0, max: 1, def: 9 / 66, sigma: 0.08 },
+  "shoot.alpha4": { kind: "number", min: 0, max: 1, def: 8 / 66, sigma: 0.08 },
+  "shoot.alpha5": { kind: "number", min: 0, max: 1, def: 7 / 66, sigma: 0.08 },
+  "shoot.alpha6": { kind: "number", min: 0, max: 1, def: 6 / 66, sigma: 0.08 },
+  "shoot.alpha7": { kind: "number", min: 0, max: 1, def: 5 / 66, sigma: 0.08 },
+  "shoot.alpha8": { kind: "number", min: 0, max: 1, def: 4 / 66, sigma: 0.08 },
+  "shoot.alpha9": { kind: "number", min: 0, max: 1, def: 3 / 66, sigma: 0.08 },
+  "shoot.alpha10": { kind: "number", min: 0, max: 1, def: 2 / 66, sigma: 0.08 },
+  "shoot.alpha11": { kind: "number", min: 0, max: 1, def: 1 / 66, sigma: 0.08 },
+};
+
+const AUTOREG_SHOOT_SCHEMA: ParamSchema = {
+  alpha: { kind: "number", min: 0, max: 1, def: 0.5, sigma: 0.1 },
+};
+
+const HISTORY_SHOOT_SCHEMA: ParamSchema = {
+  "history.recencyPower": { kind: "number", min: 0.2, max: 4, def: 1.0, sigma: 0.25 },
+};
+
+export function getModuleSchema(kind: ModuleKind, shootFamily: ShootFamilyId = "dt-shoot"): ParamSchema {
+  if (kind === "shoot" && shootFamily === "w11-shoot") {
+    return W11_SHOOT_SCHEMA;
+  }
+  if (kind === "shoot" && shootFamily === "autoreg-shoot") {
+    return AUTOREG_SHOOT_SCHEMA;
+  }
+  if (kind === "shoot" && shootFamily === "history-shoot") {
+    return HISTORY_SHOOT_SCHEMA;
+  }
   return {};
 }
 
@@ -411,7 +445,19 @@ function createMovementModule(spec: CompositeModuleSpec): MovementAiModule {
 }
 
 function createShootModule(spec: CompositeModuleSpec): ShootAiModule {
-  void spec;
+  const familyId = spec.familyId.trim().toLowerCase();
+  if (familyId === "history-shoot" || familyId === "history-weighted-shoot") {
+    const recencyPower = pickNumber(spec.params, "history.recencyPower", 1.0);
+    return createHistoryWeightedShootAi(recencyPower);
+  }
+  if (familyId === "autoreg-shoot") {
+    const alpha = pickNumber(spec.params, "alpha", 0.5);
+    return createAutoregShootAi(alpha);
+  }
+  if (familyId === "w11-shoot") {
+    const alphas = new Array(11).fill(0).map((_, index) => pickNumber(spec.params, `shoot.alpha${index + 1}`, (11 - index) / 66));
+    return createWeightedLagShootAi(alphas);
+  }
   return createBaselineShootAi();
 }
 

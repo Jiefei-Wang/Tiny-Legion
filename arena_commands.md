@@ -29,6 +29,7 @@ Current available model family per component:
   - `baseline-shoot`
   - `dt-shoot`
   - `dt-shoot-atan`
+  - `w11-shoot`
 
 For `train-composite`, each component source can be:
 
@@ -40,6 +41,7 @@ Shoot module family can be selected with:
 
 - `--shootFamily dt-shoot` (default)
 - `--shootFamily dt-shoot-atan`
+- `--shootFamily w11-shoot` (11-lag weighted speed predictor; trainable `shoot.alpha1..shoot.alpha11`, normalized at runtime)
 
 Composite phases (`p1`..`p4`) are loaded from:
 

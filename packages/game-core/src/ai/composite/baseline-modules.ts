@@ -1,4 +1,7 @@
-import { GROUND_FIRE_Y_TOLERANCE } from "../../config/balance/range.ts";
+import {
+  AI_TARGET_HISTORY_SAMPLE_INTERVAL_S,
+  GROUND_FIRE_Y_TOLERANCE,
+} from "../../config/balance/range.ts";
 import { structureIntegrity } from "../../simulation/units/structure-grid.ts";
 import { clamp } from "../../simulation/physics/impulse-model.ts";
 import { computeMovementDecision } from "../movement/threat-movement.ts";
@@ -35,6 +38,117 @@ type TargetMotionState = {
 
 function wrapAngleDelta(next: number, prev: number): number {
   return Math.atan2(Math.sin(next - prev), Math.cos(next - prev));
+}
+
+function maybeApplyAimDamping(
+  angleRad: number,
+  prevAngle: number | undefined,
+  dt: number,
+  enabled: boolean,
+): number {
+  if (!enabled || prevAngle === undefined) {
+    return angleRad;
+  }
+  const delta = wrapAngleDelta(angleRad, prevAngle);
+  if (Math.abs(delta) <= AIM_DEADBAND_RAD) {
+    return prevAngle;
+  }
+  const maxDelta = AIM_SLEW_RAD_PER_S * Math.max(1e-3, dt);
+  return prevAngle + clamp(delta, -maxDelta, maxDelta);
+}
+
+function estimateWeightedVelocityFromHistory(
+  history: ReadonlyArray<{ x: number; y: number }>,
+  sampleIntervalS: number,
+  recencyPower = 1,
+): { vx: number; vy: number } {
+  const n = history.length;
+  if (n < 2) {
+    return { vx: 0, vy: 0 };
+  }
+  const dt = Math.max(1e-3, sampleIntervalS);
+  const safeRecencyPower = Number.isFinite(recencyPower) ? Math.max(0.05, recencyPower) : 1;
+  let weightSum = 0;
+  let weightedT = 0;
+  let weightedX = 0;
+  let weightedY = 0;
+  for (let i = 0; i < n; i += 1) {
+    const w = (i + 1) ** safeRecencyPower;
+    const t = (i - (n - 1)) * dt;
+    weightSum += w;
+    weightedT += w * t;
+    weightedX += w * history[i].x;
+    weightedY += w * history[i].y;
+  }
+  if (weightSum <= 0) {
+    return { vx: 0, vy: 0 };
+  }
+  const meanT = weightedT / weightSum;
+  const meanX = weightedX / weightSum;
+  const meanY = weightedY / weightSum;
+  let covTX = 0;
+  let covTY = 0;
+  let varT = 0;
+  for (let i = 0; i < n; i += 1) {
+    const w = (i + 1) ** safeRecencyPower;
+    const t = (i - (n - 1)) * dt - meanT;
+    const x = history[i].x - meanX;
+    const y = history[i].y - meanY;
+    covTX += w * t * x;
+    covTY += w * t * y;
+    varT += w * t * t;
+  }
+  if (Math.abs(varT) < 1e-9) {
+    return { vx: 0, vy: 0 };
+  }
+  return { vx: covTX / varT, vy: covTY / varT };
+}
+
+function normalizeNonNegativeWeights(raw: ReadonlyArray<number>, fallback: ReadonlyArray<number>): number[] {
+  const clamped = raw.map((value) => (Number.isFinite(value) ? Math.max(0, value) : 0));
+  const sum = clamped.reduce((acc, value) => acc + value, 0);
+  if (sum > 1e-9) {
+    return clamped.map((value) => value / sum);
+  }
+  const fallbackClamped = fallback.map((value) => (Number.isFinite(value) ? Math.max(0, value) : 0));
+  const fallbackSum = fallbackClamped.reduce((acc, value) => acc + value, 0);
+  if (fallbackSum <= 1e-9) {
+    return new Array(Math.max(1, raw.length)).fill(1 / Math.max(1, raw.length));
+  }
+  return fallbackClamped.map((value) => value / fallbackSum);
+}
+
+function estimateLagVelocitiesFromHistory(
+  currentVx: number,
+  currentVy: number,
+  history: ReadonlyArray<{ x: number; y: number }> | null | undefined,
+  sampleIntervalS: number,
+  count: number,
+): Array<{ vx: number; vy: number }> {
+  const desired = Math.max(1, Math.floor(count));
+  const dt = Math.max(1e-3, sampleIntervalS);
+  const out: Array<{ vx: number; vy: number }> = [{ vx: currentVx, vy: currentVy }];
+  if (!history || history.length < 2) {
+    while (out.length < desired) {
+      out.push({ vx: currentVx, vy: currentVy });
+    }
+    return out;
+  }
+  const segmentVelocities: Array<{ vx: number; vy: number }> = [];
+  for (let i = 1; i < history.length; i += 1) {
+    const prev = history[i - 1]!;
+    const next = history[i]!;
+    segmentVelocities.push({
+      vx: (next.x - prev.x) / dt,
+      vy: (next.y - prev.y) / dt,
+    });
+  }
+  for (let lagIndex = 1; lagIndex < desired; lagIndex += 1) {
+    const segIdxFromEnd = Math.max(0, Math.min(segmentVelocities.length - 1, segmentVelocities.length - lagIndex));
+    const seg = segmentVelocities[segIdxFromEnd] ?? segmentVelocities[0] ?? { vx: currentVx, vy: currentVy };
+    out.push({ vx: seg.vx, vy: seg.vy });
+  }
+  return out;
 }
 
 function canHitByAxis(unit: BattleAiInput["unit"], target: { y: number; type: BattleAiInput["unit"]["type"] } | null): boolean {
@@ -212,15 +326,7 @@ export function createBaselineShootAi(): ShootAiModule {
         let angleRad = solved?.firingAngleRad ?? Math.atan2(correctedTargetY - weaponInput.firepointY, correctedTargetX - weaponInput.firepointX);
         const angleKey = `${unit.id}:${slot}`;
         const prevAngle = lastAngleByWeaponKey.get(angleKey);
-        if (prevAngle !== undefined) {
-          const delta = wrapAngleDelta(angleRad, prevAngle);
-          if (Math.abs(delta) <= AIM_DEADBAND_RAD) {
-            angleRad = prevAngle;
-          } else {
-            const maxDelta = AIM_SLEW_RAD_PER_S * Math.max(1e-3, input.dt);
-            angleRad = prevAngle + clamp(delta, -maxDelta, maxDelta);
-          }
-        }
+        angleRad = maybeApplyAimDamping(angleRad, prevAngle, input.dt, true);
         lastAngleByWeaponKey.set(angleKey, angleRad);
         const aimDistance = solved
           ? Math.max(90, Math.min(effectiveRange, weaponInput.projectileSpeed * solved.leadTimeS))
@@ -277,6 +383,366 @@ export function createBaselineCompositeAiController(): BattleAiController {
     movement: createBaselineMovementAi(),
     shoot: createBaselineShootAi(),
   });
+}
+
+export function createHistoryWeightedShootAi(recencyPowerRaw = 1): ShootAiModule {
+  const recencyPower = Number.isFinite(recencyPowerRaw) ? Math.max(0.05, recencyPowerRaw) : 1;
+  const lastAngleByWeaponKey = new Map<string, number>();
+  return {
+    decideShoot: (input, target) => {
+      const unit = input.unit;
+      const primary = target.rankedTargets[0] ?? null;
+      if (!canHitByAxis(unit, primary)) {
+        return {
+          firePlan: null,
+          fireBlockedReason: "axis-mismatch",
+          debugTag: "shoot.history.blocked-axis",
+        };
+      }
+      const correctedTargetX = target.attackPoint.x;
+      const correctedTargetY = target.attackPoint.y;
+      let best: FirePlan | null = null;
+      let bestScore = Number.NEGATIVE_INFINITY;
+      let blockedReason: string | null = "no-ready-weapon";
+
+      let historyVx = 0;
+      let historyVy = 0;
+      if (primary) {
+        const targetUnit = input.state.units.find((entry) => entry.id === primary.targetId) ?? null;
+        if (targetUnit?.targetHistory && targetUnit.targetHistory.length > 1) {
+          const estimated = estimateWeightedVelocityFromHistory(
+            targetUnit.targetHistory,
+            AI_TARGET_HISTORY_SAMPLE_INTERVAL_S,
+            recencyPower,
+          );
+          historyVx = estimated.vx;
+          historyVy = estimated.vy;
+        } else {
+          historyVx = primary.vx;
+          historyVy = primary.vy;
+        }
+      }
+
+      for (let slot = 0; slot < unit.weaponAttachmentIds.length; slot += 1) {
+        if (!unit.weaponAutoFire[slot]) continue;
+        if ((unit.weaponFireTimers[slot] ?? 0) > 0) continue;
+        const weaponInput = input.getWeaponFireInput(slot);
+        if (!weaponInput) continue;
+        const distanceToTarget = Math.hypot(
+          correctedTargetX - weaponInput.firepointX,
+          correctedTargetY - weaponInput.firepointY,
+        );
+        const effectiveRange = weaponInput.effectiveRange;
+        if (distanceToTarget > effectiveRange * 1.05) {
+          blockedReason = "out-of-range";
+          continue;
+        }
+        const solved = solveBallisticAim(
+          weaponInput.firepointX,
+          weaponInput.firepointY,
+          correctedTargetX,
+          correctedTargetY,
+          historyVx,
+          historyVy,
+          effectiveRange,
+          weaponInput.projectileSpeed,
+          weaponInput.projectileGravity,
+        );
+        const leadTimeS = solved?.leadTimeS ?? 0;
+        let angleRad = solved?.firingAngleRad ?? Math.atan2(correctedTargetY - weaponInput.firepointY, correctedTargetX - weaponInput.firepointX);
+        const angleKey = `hist:${unit.id}:${slot}`;
+        const prevAngle = lastAngleByWeaponKey.get(angleKey);
+        angleRad = maybeApplyAimDamping(angleRad, prevAngle, input.dt, false);
+        lastAngleByWeaponKey.set(angleKey, angleRad);
+        const aimDistance = solved
+          ? Math.max(90, Math.min(effectiveRange, weaponInput.projectileSpeed * solved.leadTimeS))
+          : Math.min(effectiveRange, Math.max(90, distanceToTarget));
+        const baseAim = {
+          x: weaponInput.firepointX + Math.cos(angleRad) * aimDistance,
+          y: weaponInput.firepointY + Math.sin(angleRad) * aimDistance,
+        };
+        const aim = adjustAimForWeaponPolicy(weaponInput.componentId, baseAim);
+        const angleAllowed = input.canShootAtAngle(
+          weaponInput.componentId,
+          aim.x - weaponInput.firepointX,
+          aim.y - weaponInput.firepointY,
+          weaponInput.shootAngleDeg,
+        );
+        if (!angleAllowed) {
+          blockedReason = "angle-locked";
+          continue;
+        }
+        const rangeAlignment = 1 - Math.min(1, Math.abs(distanceToTarget - effectiveRange * 0.72) / Math.max(1, effectiveRange));
+        const leadBonus = solved ? 1.18 : 0.62;
+        const score = weaponInput.damage * 1.2 + rangeAlignment * 25 + leadBonus * 18;
+        if (score > bestScore) {
+          bestScore = score;
+          best = {
+            preferredSlot: slot,
+            intendedTargetId: primary?.targetId ?? null,
+            intendedTargetY: solved?.y ?? (primary ? target.attackPoint.y : null),
+            angleRad,
+            leadTimeS,
+            effectiveRange,
+          };
+        }
+      }
+      if (!best) {
+        return {
+          firePlan: null,
+          fireBlockedReason: blockedReason,
+          debugTag: blockedReason === "out-of-range" ? "shoot.history.reposition-range" : "shoot.history.no-plan",
+        };
+      }
+      return {
+        firePlan: best,
+        fireBlockedReason: null,
+        debugTag: `shoot.history.p${recencyPower.toFixed(2)}`,
+      };
+    },
+  };
+}
+
+export function createHistoryWeightedCompositeAiController(): BattleAiController {
+  return createCompositeAiController({
+    target: createBaselineTargetAi(),
+    movement: createBaselineMovementAi(),
+    shoot: createHistoryWeightedShootAi(),
+  });
+}
+
+export function createAutoregShootAi(alphaRaw: number): ShootAiModule {
+  const alpha = clamp(alphaRaw, 0, 1);
+  const vHatByTargetId = new Map<string, { vx: number; vy: number }>();
+  const lastAngleByWeaponKey = new Map<string, number>();
+  return {
+    decideShoot: (input, target) => {
+      const unit = input.unit;
+      const primary = target.rankedTargets[0] ?? null;
+      if (!canHitByAxis(unit, primary)) {
+        return {
+          firePlan: null,
+          fireBlockedReason: "axis-mismatch",
+          debugTag: "shoot.autoreg.blocked-axis",
+        };
+      }
+      const correctedTargetX = target.attackPoint.x;
+      const correctedTargetY = target.attackPoint.y;
+      let best: FirePlan | null = null;
+      let bestScore = Number.NEGATIVE_INFINITY;
+      let blockedReason: string | null = "no-ready-weapon";
+
+      let leadVx = 0;
+      let leadVy = 0;
+      if (primary) {
+        const prev = vHatByTargetId.get(primary.targetId) ?? { vx: primary.vx, vy: primary.vy };
+        const next = {
+          vx: (1 - alpha) * prev.vx + alpha * primary.vx,
+          vy: (1 - alpha) * prev.vy + alpha * primary.vy,
+        };
+        vHatByTargetId.set(primary.targetId, next);
+        leadVx = next.vx;
+        leadVy = next.vy;
+      }
+
+      for (let slot = 0; slot < unit.weaponAttachmentIds.length; slot += 1) {
+        if (!unit.weaponAutoFire[slot]) continue;
+        if ((unit.weaponFireTimers[slot] ?? 0) > 0) continue;
+        const weaponInput = input.getWeaponFireInput(slot);
+        if (!weaponInput) continue;
+        const distanceToTarget = Math.hypot(
+          correctedTargetX - weaponInput.firepointX,
+          correctedTargetY - weaponInput.firepointY,
+        );
+        const effectiveRange = weaponInput.effectiveRange;
+        if (distanceToTarget > effectiveRange * 1.05) {
+          blockedReason = "out-of-range";
+          continue;
+        }
+        const solved = solveBallisticAim(
+          weaponInput.firepointX,
+          weaponInput.firepointY,
+          correctedTargetX,
+          correctedTargetY,
+          leadVx,
+          leadVy,
+          effectiveRange,
+          weaponInput.projectileSpeed,
+          weaponInput.projectileGravity,
+        );
+        const leadTimeS = solved?.leadTimeS ?? 0;
+        let angleRad = solved?.firingAngleRad ?? Math.atan2(correctedTargetY - weaponInput.firepointY, correctedTargetX - weaponInput.firepointX);
+        const angleKey = `ar:${unit.id}:${slot}`;
+        const prevAngle = lastAngleByWeaponKey.get(angleKey);
+        angleRad = maybeApplyAimDamping(angleRad, prevAngle, input.dt, false);
+        lastAngleByWeaponKey.set(angleKey, angleRad);
+        const aimDistance = solved
+          ? Math.max(90, Math.min(effectiveRange, weaponInput.projectileSpeed * solved.leadTimeS))
+          : Math.min(effectiveRange, Math.max(90, distanceToTarget));
+        const baseAim = {
+          x: weaponInput.firepointX + Math.cos(angleRad) * aimDistance,
+          y: weaponInput.firepointY + Math.sin(angleRad) * aimDistance,
+        };
+        const aim = adjustAimForWeaponPolicy(weaponInput.componentId, baseAim);
+        const angleAllowed = input.canShootAtAngle(
+          weaponInput.componentId,
+          aim.x - weaponInput.firepointX,
+          aim.y - weaponInput.firepointY,
+          weaponInput.shootAngleDeg,
+        );
+        if (!angleAllowed) {
+          blockedReason = "angle-locked";
+          continue;
+        }
+        const rangeAlignment = 1 - Math.min(1, Math.abs(distanceToTarget - effectiveRange * 0.72) / Math.max(1, effectiveRange));
+        const leadBonus = solved ? 1.18 : 0.62;
+        const score = weaponInput.damage * 1.2 + rangeAlignment * 25 + leadBonus * 18;
+        if (score > bestScore) {
+          bestScore = score;
+          best = {
+            preferredSlot: slot,
+            intendedTargetId: primary?.targetId ?? null,
+            intendedTargetY: solved?.y ?? (primary ? target.attackPoint.y : null),
+            angleRad,
+            leadTimeS,
+            effectiveRange,
+          };
+        }
+      }
+      if (!best) {
+        return {
+          firePlan: null,
+          fireBlockedReason: blockedReason,
+          debugTag: blockedReason === "out-of-range" ? "shoot.autoreg.reposition-range" : "shoot.autoreg.no-plan",
+        };
+      }
+      return {
+        firePlan: best,
+        fireBlockedReason: null,
+        debugTag: `shoot.autoreg.a${alpha.toFixed(2)}`,
+      };
+    },
+  };
+}
+
+export function createWeightedLagShootAi(alphaRaw: ReadonlyArray<number>): ShootAiModule {
+  const fallbackWeights = new Array(11).fill(0).map((_, index) => 11 - index);
+  const baseWeights = normalizeNonNegativeWeights(alphaRaw, fallbackWeights);
+  const lastAngleByWeaponKey = new Map<string, number>();
+  return {
+    decideShoot: (input, target) => {
+      const unit = input.unit;
+      const primary = target.rankedTargets[0] ?? null;
+      if (!canHitByAxis(unit, primary)) {
+        return {
+          firePlan: null,
+          fireBlockedReason: "axis-mismatch",
+          debugTag: "shoot.w11.blocked-axis",
+        };
+      }
+      const correctedTargetX = target.attackPoint.x;
+      const correctedTargetY = target.attackPoint.y;
+      let best: FirePlan | null = null;
+      let bestScore = Number.NEGATIVE_INFINITY;
+      let blockedReason: string | null = "no-ready-weapon";
+
+      let leadVx = 0;
+      let leadVy = 0;
+      if (primary) {
+        const targetUnit = input.state.units.find((entry) => entry.id === primary.targetId) ?? null;
+        const lagVelocities = estimateLagVelocitiesFromHistory(
+          primary.vx,
+          primary.vy,
+          targetUnit?.targetHistory,
+          AI_TARGET_HISTORY_SAMPLE_INTERVAL_S,
+          baseWeights.length,
+        );
+        for (let i = 0; i < baseWeights.length; i += 1) {
+          const lag = lagVelocities[i] ?? lagVelocities[lagVelocities.length - 1] ?? { vx: primary.vx, vy: primary.vy };
+          const w = baseWeights[i] ?? 0;
+          leadVx += lag.vx * w;
+          leadVy += lag.vy * w;
+        }
+      }
+
+      for (let slot = 0; slot < unit.weaponAttachmentIds.length; slot += 1) {
+        if (!unit.weaponAutoFire[slot]) continue;
+        if ((unit.weaponFireTimers[slot] ?? 0) > 0) continue;
+        const weaponInput = input.getWeaponFireInput(slot);
+        if (!weaponInput) continue;
+        const distanceToTarget = Math.hypot(
+          correctedTargetX - weaponInput.firepointX,
+          correctedTargetY - weaponInput.firepointY,
+        );
+        const effectiveRange = weaponInput.effectiveRange;
+        if (distanceToTarget > effectiveRange * 1.05) {
+          blockedReason = "out-of-range";
+          continue;
+        }
+        const solved = solveBallisticAim(
+          weaponInput.firepointX,
+          weaponInput.firepointY,
+          correctedTargetX,
+          correctedTargetY,
+          leadVx,
+          leadVy,
+          effectiveRange,
+          weaponInput.projectileSpeed,
+          weaponInput.projectileGravity,
+        );
+        const leadTimeS = solved?.leadTimeS ?? 0;
+        let angleRad = solved?.firingAngleRad ?? Math.atan2(correctedTargetY - weaponInput.firepointY, correctedTargetX - weaponInput.firepointX);
+        const angleKey = `w11:${unit.id}:${slot}`;
+        const prevAngle = lastAngleByWeaponKey.get(angleKey);
+        angleRad = maybeApplyAimDamping(angleRad, prevAngle, input.dt, false);
+        lastAngleByWeaponKey.set(angleKey, angleRad);
+        const aimDistance = solved
+          ? Math.max(90, Math.min(effectiveRange, weaponInput.projectileSpeed * solved.leadTimeS))
+          : Math.min(effectiveRange, Math.max(90, distanceToTarget));
+        const baseAim = {
+          x: weaponInput.firepointX + Math.cos(angleRad) * aimDistance,
+          y: weaponInput.firepointY + Math.sin(angleRad) * aimDistance,
+        };
+        const aim = adjustAimForWeaponPolicy(weaponInput.componentId, baseAim);
+        const angleAllowed = input.canShootAtAngle(
+          weaponInput.componentId,
+          aim.x - weaponInput.firepointX,
+          aim.y - weaponInput.firepointY,
+          weaponInput.shootAngleDeg,
+        );
+        if (!angleAllowed) {
+          blockedReason = "angle-locked";
+          continue;
+        }
+        const rangeAlignment = 1 - Math.min(1, Math.abs(distanceToTarget - effectiveRange * 0.72) / Math.max(1, effectiveRange));
+        const leadBonus = solved ? 1.18 : 0.62;
+        const score = weaponInput.damage * 1.2 + rangeAlignment * 25 + leadBonus * 18;
+        if (score > bestScore) {
+          bestScore = score;
+          best = {
+            preferredSlot: slot,
+            intendedTargetId: primary?.targetId ?? null,
+            intendedTargetY: solved?.y ?? (primary ? target.attackPoint.y : null),
+            angleRad,
+            leadTimeS,
+            effectiveRange,
+          };
+        }
+      }
+      if (!best) {
+        return {
+          firePlan: null,
+          fireBlockedReason: blockedReason,
+          debugTag: blockedReason === "out-of-range" ? "shoot.w11.reposition-range" : "shoot.w11.no-plan",
+        };
+      }
+      return {
+        firePlan: best,
+        fireBlockedReason: null,
+        debugTag: "shoot.w11.plan",
+      };
+    },
+  };
 }
 
 export function pickBaselineTarget(unit: BattleAiInput["unit"], state: BattleAiInput["state"]): BattleAiInput["state"]["units"][number] | null {

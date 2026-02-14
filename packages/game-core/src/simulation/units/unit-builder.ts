@@ -367,6 +367,8 @@ export function instantiateUnit(
     loaderStates,
     deploymentGasCost: options.deploymentGasCost ?? template.gasCost,
     returnedToBase: false,
+    targetHistory: [{ x, y }],
+    targetHistorySampleTimerS: 0,
     aiTimer: 0,
     aiState: "engage",
     aiStateTimer: 0,

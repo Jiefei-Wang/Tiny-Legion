@@ -222,7 +222,7 @@ Arena-specific architecture notes:
 - Replay UI (`arena-ui/src/main.ts`) still uses game interface bootstrap (`game/src/app/bootstrap.ts`) while consuming AI/simulation primitives from `packages/game-core`.
 - Game dev server exposes `/__arena/composite/latest` for Test Arena to load latest trained composite spec from `arena/.arena-data/runs/*/best-composite.json`.
 - Game dev server exposes `/__arena/composite/leaderboard` for in-game ranking entries backed by persistent match-based rating storage (`arena/.arena-data/leaderboard/composite-elo.json`).
-- Game dev server exposes `/__arena/composite/models` (saved composed-model inventory with score/rounds/spec, including built-in `baseline-game-ai` wired as baseline composite modules) and `/__arena/composite/leaderboard/compete` (run head-to-head leaderboard matches from UI controls).
+- Game dev server exposes `/__arena/composite/models` (saved composed-model inventory with score/rounds/spec, including built-in `baseline-game-ai` and `baseline-history-shoot-ai` composite module bundles) and `/__arena/composite/leaderboard/compete` (run head-to-head leaderboard matches from UI controls).
 - Leaderboard compete endpoint executes batched rounds in parallel using arena worker threads (`arena/.dist/.../worker-pool.js`) with all detected CPU cores when available, and falls back to single-thread execution if worker runtime is unavailable.
 - Leaderboard compete endpoint loads `p4-leaderboard` scenario from `arena/composite-training.phases.json` (global `phases` first, then optional `byComponent` fallback) and applies those template/battlefield settings to ranking matches.
 - Elo ratings use pairwise diminishing-K updates (tracked by per-pair match count in leaderboard store) so repeated battles between the same two models converge without hard rating caps.
@@ -461,6 +461,13 @@ Editor UX implementation details:
 - Projectile runtime state also carries penetration state (`remainingPenetration`) plus per-part hit keys so one projectile can pass through multiple parts while never damaging the same part twice.
 - AI shot-feedback correction has been removed from runtime projectile state and despawn handling; projectile aim now remains purely command/solver-driven for deterministic behavior.
 - Baseline shoot module now applies anti-jitter lead smoothing (filtered target velocity, partial lead gain with acceleration guard, and per-weapon aim slew/deadband) before issuing fire angles.
+- Battle runtime now maintains per-unit target history buffers (`targetHistory`) sampled by elapsed time (default 10 samples over 1 second; no frame-number coupling).
+- Composite shoot module resolver now supports `history-shoot`/`history-weighted-shoot`, which derives lead velocity from weighted historical coordinates (newest-biased) instead of instantaneous velocity.
+- Composite shoot module resolver now also supports `autoreg-shoot`, which uses autoregressive velocity smoothing (`v_hat = (1-alpha)*old + alpha*current`) via module param `alpha`.
+- Composite shoot module resolver now supports `w11-shoot`, which computes lead velocity as a normalized weighted blend of 11 lag velocities (`v1..v11`) driven by trainable module params `shoot.alpha1..shoot.alpha11`.
+- AI-side angle deadband/slew damping is intentionally scoped to `baseline-shoot` only; `history-shoot`, `autoreg-shoot`, and `w11-shoot` keep ballistic solve output angles without additional per-tick angle-change clamping.
+- `train-composite` supports `--shootFamily history-shoot`, `--shootFamily w11-shoot`, and `--shootFamily autoreg-shoot`; when `shootSource=new`, Arena seeds default params (`history`: `history.recencyPower=1.0`, `w11`: descending alpha weights, `autoreg`: `alpha=0.5`) and mutates them during optimization.
+- Dev leaderboard model inventory keeps baseline and history built-ins; `autoreg-shoot` appears in leaderboard only from saved trained run artifacts.
 - Air units compute lift from air propulsion thrust (`jetEngine` omni, `propeller` directional cone) and compare against gravity hold.
 - Air movement reserves thrust for vertical hold first, then spends remaining thrust for horizontal/intentional altitude movement.
 - If lift becomes critically low, units transition into an air-drop crash path, pushing horizontally toward base; propeller aircraft can use remaining lift to slow descent during the crash, otherwise they fall at full crash gravity.

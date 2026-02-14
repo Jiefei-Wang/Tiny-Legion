@@ -10,7 +10,7 @@ import { crossover, defaultParams, mutate, randomParams } from "./param-genetics
 type ModuleKind = "shoot" | "movement" | "target";
 type TrainScope = ModuleKind | "all";
 type ModuleSourceArg = "baseline" | "new" | `trained:${string}`;
-type ShootFamilyId = "dt-shoot" | "dt-shoot-atan";
+type ShootFamilyId = "dt-shoot" | "dt-shoot-atan" | "w11-shoot" | "autoreg-shoot" | "history-shoot";
 
 type Candidate = {
   params: Params;
@@ -221,7 +221,7 @@ function resolveSource(
     return baselineCompositeConfig()[moduleKind];
   }
   if (source === "new") {
-    const schema = getModuleSchema(moduleKind);
+    const schema = getModuleSchema(moduleKind, shootFamily);
     return {
       familyId: familyIdFor(moduleKind, shootFamily),
       params: defaultParams(schema),
@@ -390,7 +390,15 @@ export async function runCompositeTraining(opts: {
   shootFamily?: ShootFamilyId;
   quiet?: boolean;
 }): Promise<void> {
-  const shootFamily: ShootFamilyId = opts.shootFamily === "dt-shoot-atan" ? "dt-shoot-atan" : "dt-shoot";
+  const shootFamily: ShootFamilyId = opts.shootFamily === "autoreg-shoot"
+    ? "autoreg-shoot"
+    : opts.shootFamily === "history-shoot"
+    ? "history-shoot"
+    : opts.shootFamily === "dt-shoot-atan"
+    ? "dt-shoot-atan"
+    : opts.shootFamily === "w11-shoot"
+    ? "w11-shoot"
+    : "dt-shoot";
   const scope: TrainScope = opts.scope ?? "all";
   const order: ModuleKind[] = scope === "all" ? ["shoot", "movement", "target"] : [scope];
 
@@ -419,7 +427,7 @@ export async function runCompositeTraining(opts: {
   const leaderboardOpponents = loadLeaderboardOpponents(dataRoot);
   try {
     for (const moduleKind of order) {
-      const schema = getModuleSchema(moduleKind);
+      const schema = getModuleSchema(moduleKind, shootFamily);
       let currentBestParams = best[moduleKind].familyId === familyIdFor(moduleKind, shootFamily)
         ? best[moduleKind].params
         : defaultParams(schema);
