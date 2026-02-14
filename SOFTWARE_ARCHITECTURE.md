@@ -34,7 +34,7 @@ Implemented gameplay architecture highlights:
 - `Test Arena` is a dedicated top-level tab for debug battles (not part of the map node list)
 - Display layer visibility is debug-controlled (top-bar `Debug Options`) and defaults to OFF in battle runtime
 - In-app debug options plus local runtime log pipeline (`/__debug/*` -> `game/.debug/runtime.log`)
-- Battle simulation defaults are centralized in shared balance config (`battlefield.ts`) including dimensions, ground height, air layer ratios, air physics constants, and battle rules (salvage refund factor) - all reused by browser + headless/arena paths
+- Battle simulation defaults are centralized in shared balance config (`battlefield.ts`) including dimensions, ground height, air layer ratios, air physics constants, battle rules (salvage refund factor), and unit soft-separation tuning constants - all reused by browser + headless/arena paths
 - Test Arena supports runtime battlefield simulation-size overrides (`W`/`H`) and ground-height tuning in the browser app; display zoom remains a separate view-only transform
 - Strategic layer is turn-based: **Next Round** advances gas economy, construction, and resolves campaign battles (Test Arena skips round resolution)
 
@@ -292,6 +292,11 @@ Encode your game rules as explicit modules (not scattered checks):
   - lift-vs-gravity deficit drives altitude loss.
   - non-descent commands reserve thrust for vertical hold and spend spare thrust on horizontal movement.
   - air-drop state uses 50/50 thrust split: half for horizontal, half for fighting gravity.
+- `battle-session.ts` (unit overlap management)
+  - same-layer units (`ground-ground`, `air-air`) use soft separation after movement integration.
+  - partial overlap is allowed via configurable overlap allowance ratio, but deep stacking is pushed apart.
+  - pair search uses uniform-grid broad phase to avoid O(n^2) full pair scans at typical battle unit counts.
+  - separation weighting uses inverse mass and only damps normal closing velocity, preserving slide-like movement.
 - `battle-session.ts` (unified command system)
   - all unit control (player input, combat AI, retreat AI, air-drop AI) produces a `UnitCommand` each tick.
   - `UnitCommand` contains `move` (direction), `facing`, and `fire` (list of `FireRequest`).

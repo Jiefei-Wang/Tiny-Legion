@@ -323,6 +323,7 @@ Recommended starter values:
 - Test Arena zoom only changes display scale (camera/view transform), not simulation dimensions.
 - Ground units move freely on X and Y axes inside the ground combat zone.
 - Ground maneuver is continuous positioning (flank, intercept, disengage), not discrete lane switching.
+- Unit-vs-unit body overlap is soft-limited: partial overlap is allowed for flow, but deep/full stacking is resolved by runtime separation.
 
 ## 6.3 Air Battle Space
 
@@ -629,6 +630,7 @@ The current playable implementation already includes:
   - armor `hp` metadata is translated into effective attachment durability scaling.
 - Projectile gravity, range-limited lifetime, and debris persistence.
 - Ground-vehicle-fired non-tracking projectiles now auto-terminate after falling `200` Y-units below their firing Y origin only when the shot was fired above horizontal (`initialVy < 0`); downward-fired shots are excluded. Termination triggers blast when explosive data exists.
+- Runtime now applies soft same-layer unit separation (ground-ground, air-air) with overlap allowance, inverse-mass push-out, and broad-phase spatial grid lookup to prevent full unit stacking while preserving movement flow.
 - AI split into targeting, movement, and shooting modules with a shared composite interface in `packages/game-core/src/ai/composite/`.
 - Baseline combat AI now runs through `createCompositeAiController(...)` (target -> movement -> shoot), and the legacy decision-tree entrypoint is kept as a compatibility wrapper.
 - Baseline shoot AI now receives per-slot runtime fire inputs from battle runtime (`effectiveRange`, resolved projectile speed/gravity, and world-space firepoint), and no longer assumes a global projectile model.

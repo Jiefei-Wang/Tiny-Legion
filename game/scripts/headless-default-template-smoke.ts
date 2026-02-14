@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { BattleSession } from "../src/gameplay/battle/battle-session.ts";
-import { BATTLEFIELD_HEIGHT, BATTLEFIELD_WIDTH } from "../src/config/balance/battlefield.ts";
+import { BATTLEFIELD_HEIGHT, BATTLEFIELD_WIDTH, UNIT_OVERLAP_ALLOWANCE_RATIO } from "../src/config/balance/battlefield.ts";
 import { COMPONENTS } from "../src/config/balance/weapons.ts";
 import { createInitialTemplates } from "../src/simulation/units/unit-builder.ts";
 import { mergeTemplates, parseTemplate, validateTemplateDetailed } from "../src/app/template-store.ts";
@@ -13,7 +13,7 @@ declare const process: { exit: (code?: number) => void; cwd: () => string };
 type Failure = {
   templateId: number;
   templateName: string;
-  check: "validation" | "movement" | "firing";
+  check: "validation" | "movement" | "firing" | "overlap";
   detail: string;
 };
 
@@ -307,6 +307,79 @@ function runSmoke(): Failure[] {
         check: "firing",
         detail: `no projectile observed and no manual fire log emitted within 5.0s simulation window; ${blocker}`,
       });
+    }
+  }
+
+  const overlapTemplate = testTemplates.find((template) => template.type === "ground") ?? testTemplates[0] ?? null;
+  if (overlapTemplate) {
+    const overlapLogs: string[] = [];
+    const overlapBattle = new BattleSession(canvas, makeHooks(overlapLogs), templates, {
+      partCatalog,
+      disableAutoEnemySpawns: true,
+      disableEnemyMinimumPresence: true,
+      disableDefaultStarters: true,
+    });
+    overlapBattle.start(node);
+
+    const deployA = overlapBattle.arenaDeploy("player", overlapTemplate.id, {
+      chargeGas: false,
+      deploymentGasCost: 0,
+      ignoreCap: true,
+      y: overlapBattle.getBattlefieldInfo().laneBounds.groundMinY + 20,
+    });
+    const deployB = overlapBattle.arenaDeploy("player", overlapTemplate.id, {
+      chargeGas: false,
+      deploymentGasCost: 0,
+      ignoreCap: true,
+      y: overlapBattle.getBattlefieldInfo().laneBounds.groundMinY + 20,
+    });
+    if (!deployA || !deployB) {
+      failures.push({
+        templateId: overlapTemplate.id,
+        templateName: overlapTemplate.name,
+        check: "overlap",
+        detail: "failed to deploy overlap test units",
+      });
+    } else {
+      const stacked = overlapBattle.getState().units
+        .filter((unit) => unit.side === "player" && unit.templateId === overlapTemplate.id)
+        .slice(-2);
+      if (stacked.length < 2) {
+        failures.push({
+          templateId: overlapTemplate.id,
+          templateName: overlapTemplate.name,
+          check: "overlap",
+          detail: "could not identify two spawned units for overlap test",
+        });
+      } else {
+        const [a, b] = stacked;
+        const forcedX = 320;
+        const forcedY = overlapBattle.getBattlefieldInfo().laneBounds.groundMinY + 24;
+        a.x = forcedX;
+        a.y = forcedY;
+        b.x = forcedX;
+        b.y = forcedY;
+        a.vx = 0;
+        a.vy = 0;
+        b.vx = 0;
+        b.vy = 0;
+
+        for (let i = 0; i < 20; i += 1) {
+          overlapBattle.update(dt, idleKeys);
+        }
+        const dx = b.x - a.x;
+        const dy = b.y - a.y;
+        const finalDistance = Math.hypot(dx, dy);
+        const minAllowed = (a.radius + b.radius) - Math.min(a.radius, b.radius) * UNIT_OVERLAP_ALLOWANCE_RATIO;
+        if (finalDistance < minAllowed * 0.92) {
+          failures.push({
+            templateId: overlapTemplate.id,
+            templateName: overlapTemplate.name,
+            check: "overlap",
+            detail: `units stayed too overlapped after resolution: distance=${finalDistance.toFixed(2)}, minAllowed=${minAllowed.toFixed(2)}`,
+          });
+        }
+      }
     }
   }
 

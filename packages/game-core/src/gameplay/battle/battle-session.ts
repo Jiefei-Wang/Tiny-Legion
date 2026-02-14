@@ -12,6 +12,12 @@ import {
   GROUND_PROJECTILE_MAX_DROP_BELOW_FIRE_Y,
   BATTLE_SALVAGE_REFUND_FACTOR,
   PENETRATION_ARMOR_SCALER,
+  UNIT_SEPARATION_ENABLED,
+  UNIT_OVERLAP_ALLOWANCE_RATIO,
+  UNIT_SEPARATION_POSITION_FACTOR,
+  UNIT_SEPARATION_VELOCITY_DAMPING,
+  UNIT_SEPARATION_GRID_SIZE,
+  UNIT_SPAWN_PLACEMENT_ATTEMPTS,
 } from "../../config/balance/battlefield.ts";
 import { COMPONENTS } from "../../config/balance/weapons.ts";
 import {
@@ -549,13 +555,13 @@ export class BattleSession {
     }
 
     if (!this.disableDefaultStarters) {
-      const starterA = instantiateUnit(this.templates, 1, "player", 140, 300, {
+      const starterA = this.instantiateSpawnWithSpacing(1, "player", 140, this.getLaneBounds(), {
         deploymentGasCost: 0,
-        partCatalog: this.partCatalog,
+        preferredY: 300,
       });
-      const starterB = instantiateUnit(this.templates, 2, "player", 150, 430, {
+      const starterB = this.instantiateSpawnWithSpacing(2, "player", 150, this.getLaneBounds(), {
         deploymentGasCost: 0,
-        partCatalog: this.partCatalog,
+        preferredY: 430,
       });
       if (starterA) {
         this.state.units.push(starterA);
@@ -605,12 +611,7 @@ export class BattleSession {
     }
 
     const laneBounds = this.getLaneBounds();
-    const y = template.type === "air"
-      ? laneBounds.airMinZ + Math.random() * (laneBounds.airMaxZ - laneBounds.airMinZ)
-      : laneBounds.groundMinY + Math.random() * (laneBounds.groundMaxY - laneBounds.groundMinY);
-    const unit = instantiateUnit(this.templates, templateId, "player", 120, y, {
-      partCatalog: this.partCatalog,
-    });
+    const unit = this.instantiateSpawnWithSpacing(templateId, "player", 120, laneBounds);
     if (!unit) {
       this.hooks.addLog(`Cannot deploy ${template.name}: instantiate failed`, "bad");
       return;
@@ -740,16 +741,7 @@ export class BattleSession {
       unit.vibrate *= 0.85;
       applyStructureRecovery(unit, dt);
 
-      if (unit.type === "ground") {
-        unit.y = clamp(unit.y, laneBounds.groundMinY, laneBounds.groundMaxY);
-      } else {
-        if (unit.airDropActive) {
-          unit.y = clamp(unit.y, laneBounds.airMinZ, unit.airDropTargetY);
-        } else {
-          unit.y = clamp(unit.y, laneBounds.airMinZ, laneBounds.groundMinY);
-        }
-      }
-      unit.x = clamp(unit.x, 44, this.canvas.width - 44);
+      this.clampUnitToBattlefield(unit, laneBounds);
 
       if (unit.airDropActive) {
         const base = unit.side === "player" ? this.state.playerBase : this.state.enemyBase;
@@ -769,6 +761,7 @@ export class BattleSession {
         }
       }
     }
+    this.resolveUnitSeparation();
 
     for (const projectile of this.state.projectiles) {
       projectile.ttl -= dt;
@@ -1118,15 +1111,196 @@ export class BattleSession {
       if (!unit.alive) {
         continue;
       }
-      if (unit.type === "ground") {
-        unit.y = clamp(unit.y, bounds.groundMinY, bounds.groundMaxY);
-      } else if (unit.airDropActive) {
-        unit.airDropTargetY = clamp(unit.airDropTargetY, bounds.groundMinY, bounds.groundMaxY);
-        unit.y = clamp(unit.y, bounds.airMinZ, unit.airDropTargetY);
-      } else {
-        unit.y = clamp(unit.y, bounds.airMinZ, bounds.groundMinY);
+      this.clampUnitToBattlefield(unit, bounds);
+    }
+  }
+
+  private clampUnitToBattlefield(
+    unit: UnitInstance,
+    bounds: { airMinZ: number; airMaxZ: number; groundMinY: number; groundMaxY: number; airTargetTolerance: number },
+  ): void {
+    if (unit.type === "ground") {
+      unit.y = clamp(unit.y, bounds.groundMinY, bounds.groundMaxY);
+    } else if (unit.airDropActive) {
+      unit.airDropTargetY = clamp(unit.airDropTargetY, bounds.groundMinY, bounds.groundMaxY);
+      unit.y = clamp(unit.y, bounds.airMinZ, unit.airDropTargetY);
+    } else {
+      unit.y = clamp(unit.y, bounds.airMinZ, bounds.groundMinY);
+    }
+    unit.x = clamp(unit.x, 44, this.canvas.width - 44);
+  }
+
+  private minAllowedCenterDistance(a: UnitInstance, b: UnitInstance): number {
+    const overlapAllowance = Math.max(0, Math.min(0.95, UNIT_OVERLAP_ALLOWANCE_RATIO));
+    const penetrationAllowance = Math.min(a.radius, b.radius) * overlapAllowance;
+    return Math.max(4, a.radius + b.radius - penetrationAllowance);
+  }
+
+  private hasBlockingSpawnOverlap(candidate: UnitInstance): boolean {
+    for (const other of this.state.units) {
+      if (!other.alive || other.type !== candidate.type) {
+        continue;
       }
-      unit.x = clamp(unit.x, 44, this.canvas.width - 44);
+      const dx = other.x - candidate.x;
+      const dy = other.y - candidate.y;
+      const minDist = this.minAllowedCenterDistance(candidate, other);
+      if ((dx * dx + dy * dy) < (minDist * minDist)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private instantiateSpawnWithSpacing(templateId: number, side: Side, spawnX: number, laneBounds: {
+    airMinZ: number;
+    airMaxZ: number;
+    groundMinY: number;
+    groundMaxY: number;
+    airTargetTolerance: number;
+  }, options?: { deploymentGasCost?: number; preferredY?: number }): UnitInstance | null {
+    const maxAttempts = Math.max(1, Math.floor(UNIT_SPAWN_PLACEMENT_ATTEMPTS));
+    let fallback: UnitInstance | null = null;
+    for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+      const preferredY = options?.preferredY;
+      const y = attempt === 0 && preferredY !== undefined
+        ? preferredY
+        : this.pickSpawnYForTemplate(templateId, laneBounds);
+      const unit = instantiateUnit(this.templates, templateId, side, spawnX, y, {
+        deploymentGasCost: options?.deploymentGasCost,
+        partCatalog: this.partCatalog,
+      });
+      if (!unit) {
+        continue;
+      }
+      this.clampUnitToBattlefield(unit, laneBounds);
+      if (!fallback) {
+        fallback = unit;
+      }
+      if (!this.hasBlockingSpawnOverlap(unit)) {
+        return unit;
+      }
+    }
+    return fallback;
+  }
+
+  private pickSpawnYForTemplate(templateId: number, laneBounds: {
+    airMinZ: number;
+    airMaxZ: number;
+    groundMinY: number;
+    groundMaxY: number;
+    airTargetTolerance: number;
+  }): number {
+    const template = this.templates.find((entry) => entry.id === templateId);
+    if (!template) {
+      return laneBounds.groundMinY + Math.random() * (laneBounds.groundMaxY - laneBounds.groundMinY);
+    }
+    if (template.type === "air") {
+      return laneBounds.airMinZ + Math.random() * (laneBounds.airMaxZ - laneBounds.airMinZ);
+    }
+    return laneBounds.groundMinY + Math.random() * (laneBounds.groundMaxY - laneBounds.groundMinY);
+  }
+
+  private resolveUnitOverlapBetween(
+    a: UnitInstance,
+    b: UnitInstance,
+    laneBounds: { airMinZ: number; airMaxZ: number; groundMinY: number; groundMaxY: number; airTargetTolerance: number },
+  ): void {
+    if (!a.alive || !b.alive || a.type !== b.type) {
+      return;
+    }
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    const minDist = this.minAllowedCenterDistance(a, b);
+    const distSq = dx * dx + dy * dy;
+    if (distSq >= minDist * minDist) {
+      return;
+    }
+    const distance = Math.sqrt(Math.max(distSq, 1e-9));
+    const nx = distance > 1e-6 ? dx / distance : (a.id < b.id ? 1 : -1);
+    const ny = distance > 1e-6 ? dy / distance : 0;
+    const penetrationDepth = minDist - distance;
+    const correction = penetrationDepth * Math.max(0, UNIT_SEPARATION_POSITION_FACTOR);
+    if (correction <= 0) {
+      return;
+    }
+    const invMassA = 1 / Math.max(1, a.mass);
+    const invMassB = 1 / Math.max(1, b.mass);
+    const invMassSum = invMassA + invMassB;
+    const weightA = invMassA / Math.max(1e-6, invMassSum);
+    const weightB = invMassB / Math.max(1e-6, invMassSum);
+
+    a.x -= nx * correction * weightA;
+    a.y -= ny * correction * weightA;
+    b.x += nx * correction * weightB;
+    b.y += ny * correction * weightB;
+    this.clampUnitToBattlefield(a, laneBounds);
+    this.clampUnitToBattlefield(b, laneBounds);
+
+    const relVx = b.vx - a.vx;
+    const relVy = b.vy - a.vy;
+    const relAlongNormal = relVx * nx + relVy * ny;
+    if (relAlongNormal >= 0) {
+      return;
+    }
+    const damping = Math.max(0, Math.min(1, UNIT_SEPARATION_VELOCITY_DAMPING));
+    const normalSpeedDelta = -relAlongNormal * damping;
+    a.vx -= nx * normalSpeedDelta * weightA;
+    a.vy -= ny * normalSpeedDelta * weightA;
+    b.vx += nx * normalSpeedDelta * weightB;
+    b.vy += ny * normalSpeedDelta * weightB;
+  }
+
+  private resolveUnitSeparation(): void {
+    if (!UNIT_SEPARATION_ENABLED) {
+      return;
+    }
+    const alive = this.state.units.filter((unit) => unit.alive);
+    if (alive.length <= 1) {
+      return;
+    }
+    const cellSize = Math.max(24, UNIT_SEPARATION_GRID_SIZE);
+    const grid = new Map<string, number[]>();
+    const cellKey = (cellX: number, cellY: number): string => `${cellX}:${cellY}`;
+    for (let i = 0; i < alive.length; i += 1) {
+      const unit = alive[i];
+      const cellX = Math.floor(unit.x / cellSize);
+      const cellY = Math.floor(unit.y / cellSize);
+      const key = cellKey(cellX, cellY);
+      const bucket = grid.get(key);
+      if (bucket) {
+        bucket.push(i);
+      } else {
+        grid.set(key, [i]);
+      }
+    }
+
+    const laneBounds = this.getLaneBounds();
+    const neighborOffsets = [
+      [1, 0],
+      [0, 1],
+      [1, 1],
+      [1, -1],
+    ];
+    for (const [key, bucket] of grid.entries()) {
+      const [cxRaw, cyRaw] = key.split(":");
+      const cx = Number(cxRaw);
+      const cy = Number(cyRaw);
+      for (let i = 0; i < bucket.length; i += 1) {
+        for (let j = i + 1; j < bucket.length; j += 1) {
+          this.resolveUnitOverlapBetween(alive[bucket[i]], alive[bucket[j]], laneBounds);
+        }
+      }
+      for (const [ox, oy] of neighborOffsets) {
+        const other = grid.get(cellKey(cx + ox, cy + oy));
+        if (!other) {
+          continue;
+        }
+        for (const indexA of bucket) {
+          for (const indexB of other) {
+            this.resolveUnitOverlapBetween(alive[indexA], alive[indexB], laneBounds);
+          }
+        }
+      }
     }
   }
 
@@ -1160,12 +1334,7 @@ export class BattleSession {
     }
 
     const bounds = this.getLaneBounds();
-    const y = template.type === "air"
-      ? bounds.airMinZ + Math.random() * (bounds.airMaxZ - bounds.airMinZ)
-      : bounds.groundMinY + Math.random() * (bounds.groundMaxY - bounds.groundMinY);
-    const enemy = instantiateUnit(this.templates, template.id, "enemy", this.canvas.width - 120, y, {
-      partCatalog: this.partCatalog,
-    });
+    const enemy = this.instantiateSpawnWithSpacing(template.id, "enemy", this.canvas.width - 120, bounds);
     if (!enemy) {
       return false;
     }
@@ -1174,15 +1343,13 @@ export class BattleSession {
     }
     this.state.units.push(enemy);
     if (this.autoSpawnEnemyTemplateOnPlayerSide) {
-      this.spawnMirroredPlayerTemplate(template, y);
+      this.spawnMirroredPlayerTemplate(template);
     }
     return true;
   }
 
-  private spawnMirroredPlayerTemplate(template: UnitTemplate, y: number): void {
-    const player = instantiateUnit(this.templates, template.id, "player", 120, y, {
-      partCatalog: this.partCatalog,
-    });
+  private spawnMirroredPlayerTemplate(template: UnitTemplate): void {
+    const player = this.instantiateSpawnWithSpacing(template.id, "player", 120, this.getLaneBounds());
     if (!player) {
       return;
     }
@@ -1249,14 +1416,9 @@ export class BattleSession {
         return false;
       }
       const bounds = this.getLaneBounds();
-      const y = typeof opts.y === "number" && Number.isFinite(opts.y)
-        ? opts.y
-        : template.type === "air"
-            ? bounds.airMinZ + Math.random() * (bounds.airMaxZ - bounds.airMinZ)
-            : bounds.groundMinY + Math.random() * (bounds.groundMaxY - bounds.groundMinY);
-      const unit = instantiateUnit(this.templates, templateId, "player", 120, y, {
+      const unit = this.instantiateSpawnWithSpacing(templateId, "player", 120, bounds, {
         deploymentGasCost: typeof opts.deploymentGasCost === "number" && Number.isFinite(opts.deploymentGasCost) ? opts.deploymentGasCost : undefined,
-        partCatalog: this.partCatalog,
+        preferredY: typeof opts.y === "number" && Number.isFinite(opts.y) ? opts.y : undefined,
       });
       if (!unit) {
         return false;
@@ -1278,14 +1440,9 @@ export class BattleSession {
       return false;
     }
     const bounds = this.getLaneBounds();
-    const y = typeof opts.y === "number" && Number.isFinite(opts.y)
-      ? opts.y
-      : template.type === "air"
-          ? bounds.airMinZ + Math.random() * (bounds.airMaxZ - bounds.airMinZ)
-          : bounds.groundMinY + Math.random() * (bounds.groundMaxY - bounds.groundMinY);
-    const enemy = instantiateUnit(this.templates, templateId, "enemy", this.canvas.width - 120, y, {
+    const enemy = this.instantiateSpawnWithSpacing(templateId, "enemy", this.canvas.width - 120, bounds, {
       deploymentGasCost: typeof opts.deploymentGasCost === "number" && Number.isFinite(opts.deploymentGasCost) ? opts.deploymentGasCost : undefined,
-      partCatalog: this.partCatalog,
+      preferredY: typeof opts.y === "number" && Number.isFinite(opts.y) ? opts.y : undefined,
     });
     if (!enemy) {
       return false;
