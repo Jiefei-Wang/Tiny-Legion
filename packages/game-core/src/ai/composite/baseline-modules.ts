@@ -108,8 +108,8 @@ export function createBaselineShootAi(): ShootAiModule {
           debugTag: "shoot.axis-blocked",
         };
       }
-      const correctedTargetX = target.attackPoint.x + unit.aiAimCorrectionX;
-      const correctedTargetY = target.attackPoint.y + unit.aiAimCorrectionY;
+      const correctedTargetX = target.attackPoint.x;
+      const correctedTargetY = target.attackPoint.y;
       let best: FirePlan | null = null;
       let bestScore = Number.NEGATIVE_INFINITY;
       let blockedReason: string | null = "no-ready-weapon";

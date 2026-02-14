@@ -38,7 +38,8 @@
     "cooldown": 0.1,
     "shootAngleDeg": 360,
     "projectileSpeed": 500,
-    "penetration": 500
+    "penetration": 500,
+    "spreadDeg": 0
   },
   "properties": {
     "category": "weapon",

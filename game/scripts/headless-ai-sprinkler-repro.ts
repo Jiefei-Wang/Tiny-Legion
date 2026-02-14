@@ -265,7 +265,6 @@ function runSingleDegreeCase(
   partCatalog: ReadonlyArray<PartDefinition>,
   deg: number,
   options: {
-    resetAimCorrectionEachTick: boolean;
     enemyController: BattleAiController;
   },
 ): CaseResult {
@@ -352,10 +351,6 @@ function runSingleDegreeCase(
       beforeShooter.vy = 0;
       beforeShooter.maxSpeed = 0;
       beforeShooter.accel = 0;
-      if (options.resetAimCorrectionEachTick) {
-        beforeShooter.aiAimCorrectionX = 0;
-        beforeShooter.aiAimCorrectionY = 0;
-      }
     }
     if (beforeTarget) {
       beforeTarget.x = tx;
@@ -474,7 +469,6 @@ function runSweep(
   partCatalog: ReadonlyArray<PartDefinition>,
   label: string,
   options: {
-    resetAimCorrectionEachTick: boolean;
     enemyController: BattleAiController;
   },
 ): SweepResult {
@@ -605,7 +599,6 @@ function main(): void {
   const restoreWeaponPatch = patchRapidGunRuntime(partCatalog);
   try {
     const baseline = runSweep(templates, partCatalog, "baseline", {
-      resetAimCorrectionEachTick: false,
       enemyController: createBaselineCompositeAiController(),
     });
     const baselinePass = printSweepSummary(baseline);

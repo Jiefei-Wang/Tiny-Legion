@@ -289,8 +289,6 @@ export interface UnitInstance {
   deploymentGasCost: number;
   returnedToBase: boolean;
   aiTimer: number;
-  aiAimCorrectionX: number;
-  aiAimCorrectionY: number;
   aiState: "engage" | "evade";
   aiStateTimer: number;
   aiDodgeCooldown: number;
@@ -330,14 +328,8 @@ export interface Projectile {
   traveledDistance: number;
   maxDistance: number;
   hitPartKeys: string[];
-  shooterWasAI: boolean;
-  intendedTargetId: string | null;
   intendedTargetX: number;
   intendedTargetY: number;
-  closestTargetDx: number;
-  closestTargetDy: number;
-  closestTargetDistance: number;
-  hitIntendedTarget: boolean;
   axisY: number;
   allowAirPierce: boolean;
   gravity: number;
@@ -456,7 +448,7 @@ export interface FireRequest {
   slot: number;
   /** Desired world firing angle in radians. The executor clamps to weapon limits. */
   angleRad: number;
-  /** For AI shot-feedback tracking. */
+  /** Optional target id used by homing weapons to prefer a specific target. */
   intendedTargetId: string | null;
   intendedTargetY: number | null;
   /** true = player manual click, false = AI / auto-fire. */

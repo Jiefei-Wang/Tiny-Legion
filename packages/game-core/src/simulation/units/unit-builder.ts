@@ -368,8 +368,6 @@ export function instantiateUnit(
     deploymentGasCost: options.deploymentGasCost ?? template.gasCost,
     returnedToBase: false,
     aiTimer: 0,
-    aiAimCorrectionX: 0,
-    aiAimCorrectionY: 0,
     aiState: "engage",
     aiStateTimer: 0,
     aiDodgeCooldown: 0,

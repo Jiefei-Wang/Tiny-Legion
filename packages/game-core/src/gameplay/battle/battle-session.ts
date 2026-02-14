@@ -15,10 +15,7 @@ import {
 } from "../../config/balance/battlefield.ts";
 import { COMPONENTS } from "../../config/balance/weapons.ts";
 import {
-  AI_GRAVITY_CORRECTION_CLAMP,
-  AI_GRAVITY_CORRECTION_STEP,
   GLOBAL_WEAPON_RANGE_MULTIPLIER,
-  GROUND_FIRE_Y_TOLERANCE,
   PROJECTILE_GRAVITY,
   PROJECTILE_SPEED,
   getAircraftAltitudeBonus,
@@ -29,7 +26,6 @@ import { clamp } from "../../simulation/physics/impulse-model.ts";
 import { canOperate } from "../../simulation/units/control-unit-rules.ts";
 import { instantiateUnit } from "../../simulation/units/unit-builder.ts";
 import { selectBestTarget } from "../../ai/targeting/target-selector.ts";
-import { solveBallisticAim } from "../../ai/shooting/ballistic-aim.ts";
 import { createBaselineCompositeAiController } from "../../ai/composite/baseline-modules.ts";
 import { validateTemplateDetailed } from "../../templates/template-validation.ts";
 import { createDefaultPartDefinitions, mergePartCatalogs } from "../../parts/part-schema.ts";
@@ -680,31 +676,7 @@ export class BattleSession {
           }
           unit.aiStateTimer += dt;
           unit.aiDodgeCooldown = Math.max(0, unit.aiDodgeCooldown - dt);
-
-          const desiredRange = this.getDesiredEngageRange(unit);
-          const baseTarget = this.getEnemyBaseCenter(unit.side);
-          const controller = this.aiControllers[unit.side] ?? null;
-          const decision = controller
-            ? controller.decide({
-                unit,
-                state: this.state,
-                dt,
-                desiredRange,
-                baseTarget,
-                canShootAtAngle: (componentId, dx, dy, shootAngleDegOverride) => this.canShootAtAngle(unit, componentId, dx, dy, shootAngleDegOverride),
-                getEffectiveWeaponRange: (baseRange) => this.getEffectiveWeaponRange(unit, baseRange),
-                getWeaponFireInput: (slot) => this.getWeaponFireInput(unit, slot),
-              })
-            : this.baselineController.decide({
-                unit,
-                state: this.state,
-                dt,
-                desiredRange,
-                baseTarget,
-                canShootAtAngle: (componentId, dx, dy, shootAngleDegOverride) => this.canShootAtAngle(unit, componentId, dx, dy, shootAngleDegOverride),
-                getEffectiveWeaponRange: (baseRange) => this.getEffectiveWeaponRange(unit, baseRange),
-                getWeaponFireInput: (slot) => this.getWeaponFireInput(unit, slot),
-              });
+          const decision = this.getCombatDecision(unit, dt);
           command = this.aiDecisionToCommand(unit, decision);
         }
       } else if (unit.type === "air") {
@@ -823,7 +795,6 @@ export class BattleSession {
       const stepY = projectile.vy * dt;
       projectile.x += stepX;
       projectile.y += stepY;
-      this.updateProjectileClosestTargetError(projectile);
       projectile.traveledDistance += Math.hypot(stepX, stepY);
       if (projectile.traveledDistance >= projectile.maxDistance) {
         projectile.ttl = -1;
@@ -872,9 +843,6 @@ export class BattleSession {
               applyHitToUnit(target, projectile.damage, projectile.hitImpulse, impactSide, hitCellId);
             }
             projectile.hitPartKeys.push(hitPartKey);
-            if (projectile.intendedTargetId === target.id) {
-              projectile.hitIntendedTarget = true;
-            }
             this.hooks.addLog(`Hit ${target.name} (air) by projectile from ${projectile.sourceId}`, "warn");
             this.spawnBreakDebris(target, beforeDestroyed, beforeAliveAttachments, wasAlive);
             this.state.particles.push({
@@ -920,9 +888,6 @@ export class BattleSession {
             applyHitToUnit(target, projectile.damage, projectile.hitImpulse, impactSide, hitCellId);
           }
           projectile.hitPartKeys.push(hitPartKey);
-          if (projectile.intendedTargetId === target.id) {
-            projectile.hitIntendedTarget = true;
-          }
           this.hooks.addLog(`Hit ${target.name} (ground) by projectile from ${projectile.sourceId}`, "warn");
           this.spawnBreakDebris(target, beforeDestroyed, beforeAliveAttachments, wasAlive);
           this.state.particles.push({
@@ -951,13 +916,9 @@ export class BattleSession {
       }
     }
 
-    this.state.projectiles = this.state.projectiles.filter((projectile) => {
-      const keep = projectile.ttl > 0 && projectile.x > 0 && projectile.x < this.canvas.width;
-      if (!keep) {
-        this.applyAiShotFeedback(projectile);
-      }
-      return keep;
-    });
+    this.state.projectiles = this.state.projectiles.filter(
+      (projectile) => projectile.ttl > 0 && projectile.x > 0 && projectile.x < this.canvas.width,
+    );
     for (const effect of this.state.particles) {
       effect.life -= dt;
     }
@@ -1516,14 +1477,8 @@ export class BattleSession {
       traveledDistance: 0,
       maxDistance: effectiveRange,
       hitPartKeys: [],
-      shooterWasAI: !manual,
-      intendedTargetId,
       intendedTargetX: finalIntendedTargetX,
       intendedTargetY: finalIntendedTargetY,
-      closestTargetDx: 0,
-      closestTargetDy: 0,
-      closestTargetDistance: Number.POSITIVE_INFINITY,
-      hitIntendedTarget: false,
       axisY: finalIntendedTargetY,
       allowAirPierce: unit.type === "ground",
       gravity,
@@ -1560,24 +1515,6 @@ export class BattleSession {
       this.hooks.addLog(`${unit.name} fired weapon #${slot + 1}`, "warn");
     }
     return true;
-  }
-
-  private updateProjectileClosestTargetError(projectile: BattleState["projectiles"][number]): void {
-    if (!projectile.shooterWasAI || projectile.intendedTargetId === null || projectile.hitIntendedTarget) {
-      return;
-    }
-    const target = this.state.units.find((unit) => unit.id === projectile.intendedTargetId && unit.alive && unit.side !== projectile.side);
-    if (!target) {
-      return;
-    }
-    const dx = projectile.x - target.x;
-    const dy = projectile.y - target.y;
-    const distance = Math.hypot(dx, dy);
-    if (distance < projectile.closestTargetDistance) {
-      projectile.closestTargetDistance = distance;
-      projectile.closestTargetDx = dx;
-      projectile.closestTargetDy = dy;
-    }
   }
 
   private clampAndAdjustAngle(
@@ -2114,77 +2051,51 @@ export class BattleSession {
       }
     }
 
-    // Auto-fire for non-suppressed slots
+    // Auto-fire for non-manual slots uses the same fire decision path as AI units.
     const suppressedAutoSlots = this.getManualControlSuppressedSlots(unit);
-    const target = this.pickTarget(unit);
-    const baseTarget = this.getEnemyBaseCenter(unit.side);
-    const attackTarget = target ?? baseTarget;
-    unit.aiDebugTargetId = target?.id ?? null;
-
-    let bestRange = 0;
-    const slotCount = unit.weaponAttachmentIds.length;
-    for (let slot = 0; slot < slotCount; slot += 1) {
-      if (!unit.weaponAutoFire[slot]) continue;
-      if (suppressedAutoSlots.has(slot)) continue;
-      const attachmentId = unit.weaponAttachmentIds[slot];
-      const attachment = unit.attachments.find((a) => a.id === attachmentId && a.alive) ?? null;
-      if (!attachment) continue;
-      const stats = COMPONENTS[attachment.component];
-      const range = attachment.stats?.range ?? stats.range;
-      if (range === undefined) continue;
-      bestRange = Math.max(bestRange, this.getEffectiveWeaponRange(unit, range));
-    }
-
-    if (bestRange > 0) {
-      unit.aiDebugLastRange = bestRange;
-      const dxToTarget = Math.abs(attackTarget.x - unit.x);
-      const canHitByAxis = !target || unit.type === "air" || target.type === "air" || Math.abs(target.y - unit.y) <= GROUND_FIRE_Y_TOLERANCE;
-      if (dxToTarget < bestRange && canHitByAxis) {
-        const targetVx = target?.vx ?? 0;
-        const targetVy = target?.vy ?? 0;
-        const correctedTargetX = attackTarget.x + unit.aiAimCorrectionX;
-        const correctedTargetY = attackTarget.y + unit.aiAimCorrectionY;
-        const solved = solveBallisticAim(unit.x, unit.y, correctedTargetX, correctedTargetY, targetVx, targetVy, bestRange);
-
-        let aim = { x: correctedTargetX, y: correctedTargetY };
-        let intendedY: number | null = target ? attackTarget.y : null;
-        if (solved) {
-          unit.aiDebugLastAngleRad = solved.firingAngleRad;
-          intendedY = solved.y;
-          const aimDistance = Math.max(90, Math.min(bestRange, PROJECTILE_SPEED * solved.leadTimeS));
-          aim = {
-            x: unit.x + Math.cos(solved.firingAngleRad) * aimDistance,
-            y: unit.y + Math.sin(solved.firingAngleRad) * aimDistance,
-          };
-        } else {
-          unit.aiDebugLastAngleRad = Math.atan2(aim.y - unit.y, aim.x - unit.x);
-        }
-
-        // Add auto-fire request using round-robin
-        for (let offset = 0; offset < slotCount; offset += 1) {
-          const slot = (unit.aiWeaponCycleIndex + offset) % slotCount;
-          if (suppressedAutoSlots.has(slot)) continue;
-          if (!unit.weaponAutoFire[slot]) continue;
-          if ((unit.weaponFireTimers[slot] ?? 0) > 0) continue;
-          fire.push({
-            slot,
-            angleRad: Math.atan2(aim.y - unit.y, aim.x - unit.x),
-            intendedTargetId: target ? target.id : null,
-            intendedTargetY: intendedY,
-            manual: false,
-          });
-          break; // Only one auto slot per tick
-        }
-      }
-    }
+    unit.aiStateTimer += _dt;
+    unit.aiDodgeCooldown = Math.max(0, unit.aiDodgeCooldown - _dt);
+    const decision = this.getCombatDecision(unit, _dt);
+    this.appendFireRequestsFromDecision(unit, decision, fire, suppressedAutoSlots);
 
     return { move: { dirX: dx, dirY: dy, allowDescend: keys.s }, facing: null, fire };
   }
 
   private aiDecisionToCommand(unit: UnitInstance, decision: CombatDecision): UnitCommand {
     const fire: FireRequest[] = [];
+    this.appendFireRequestsFromDecision(unit, decision, fire, null);
 
-    // Debug fields
+    return {
+      move: { dirX: decision.movement.ax, dirY: decision.movement.ay },
+      facing: decision.facing,
+      fire,
+    };
+  }
+
+  private getCombatDecision(unit: UnitInstance, dt: number): CombatDecision {
+    const desiredRange = this.getDesiredEngageRange(unit);
+    const baseTarget = this.getEnemyBaseCenter(unit.side);
+    const controller = this.aiControllers[unit.side] ?? null;
+    const input = {
+      unit,
+      state: this.state,
+      dt,
+      desiredRange,
+      baseTarget,
+      canShootAtAngle: (componentId: keyof typeof COMPONENTS, dx: number, dy: number, shootAngleDegOverride?: number) =>
+        this.canShootAtAngle(unit, componentId, dx, dy, shootAngleDegOverride),
+      getEffectiveWeaponRange: (baseRange: number) => this.getEffectiveWeaponRange(unit, baseRange),
+      getWeaponFireInput: (slot: number) => this.getWeaponFireInput(unit, slot),
+    };
+    return controller ? controller.decide(input) : this.baselineController.decide(input);
+  }
+
+  private appendFireRequestsFromDecision(
+    unit: UnitInstance,
+    decision: CombatDecision,
+    fire: FireRequest[],
+    suppressedAutoSlots: ReadonlySet<number> | null,
+  ): void {
     unit.aiState = decision.state;
     unit.aiDebugShouldEvade = decision.movement.shouldEvade;
     unit.aiDebugTargetId = decision.debug.targetId;
@@ -2196,37 +2107,33 @@ export class BattleSession {
       unit.aiDebugLastAngleRad = 0;
       unit.aiDebugPreferredWeaponSlot = -1;
       unit.aiDebugLeadTimeS = 0;
-    } else {
-      unit.aiDebugLastRange = decision.firePlan.effectiveRange;
-      unit.aiDebugLastAngleRad = decision.firePlan.angleRad;
-      unit.aiDebugPreferredWeaponSlot = decision.firePlan.preferredSlot;
-      unit.aiDebugLeadTimeS = decision.firePlan.leadTimeS;
-
-      // Build fire request using priority cycling
-      const slotCount = unit.weaponAttachmentIds.length;
-      if (slotCount > 0) {
-        const start = ((decision.firePlan.preferredSlot % slotCount) + slotCount) % slotCount;
-        for (let offset = 0; offset < slotCount; offset += 1) {
-          const slot = (start + offset) % slotCount;
-          if (!unit.weaponAutoFire[slot]) continue;
-          if ((unit.weaponFireTimers[slot] ?? 0) > 0) continue;
-          fire.push({
-            slot,
-            angleRad: decision.firePlan.angleRad,
-            intendedTargetId: decision.firePlan.intendedTargetId,
-            intendedTargetY: decision.firePlan.intendedTargetY,
-            manual: false,
-          });
-          break; // Only one slot per tick
-        }
-      }
+      return;
     }
 
-    return {
-      move: { dirX: decision.movement.ax, dirY: decision.movement.ay },
-      facing: decision.facing,
-      fire,
-    };
+    unit.aiDebugLastRange = decision.firePlan.effectiveRange;
+    unit.aiDebugLastAngleRad = decision.firePlan.angleRad;
+    unit.aiDebugPreferredWeaponSlot = decision.firePlan.preferredSlot;
+    unit.aiDebugLeadTimeS = decision.firePlan.leadTimeS;
+
+    const slotCount = unit.weaponAttachmentIds.length;
+    if (slotCount <= 0) {
+      return;
+    }
+    const start = ((decision.firePlan.preferredSlot % slotCount) + slotCount) % slotCount;
+    for (let offset = 0; offset < slotCount; offset += 1) {
+      const slot = (start + offset) % slotCount;
+      if (suppressedAutoSlots?.has(slot)) continue;
+      if (!unit.weaponAutoFire[slot]) continue;
+      if ((unit.weaponFireTimers[slot] ?? 0) > 0) continue;
+      fire.push({
+        slot,
+        angleRad: decision.firePlan.angleRad,
+        intendedTargetId: decision.firePlan.intendedTargetId,
+        intendedTargetY: decision.firePlan.intendedTargetY,
+        manual: false,
+      });
+      break;
+    }
   }
 
   private airDropReturnToCommand(unit: UnitInstance, _dt: number): UnitCommand {
@@ -2570,29 +2477,6 @@ export class BattleSession {
     } else {
       this.hooks.addLog(`${unit.name} returned to base`, "good");
     }
-  }
-
-  private applyAiShotFeedback(projectile: BattleState["projectiles"][number]): void {
-    if (!projectile.shooterWasAI || projectile.intendedTargetId === null || projectile.hitIntendedTarget) {
-      return;
-    }
-    const shooter = this.state.units.find((unit) => unit.id === projectile.sourceId && unit.alive);
-    if (!shooter) {
-      return;
-    }
-    if (!Number.isFinite(projectile.closestTargetDistance)) {
-      return;
-    }
-    const distance = projectile.closestTargetDistance;
-    if (distance <= 0.01) {
-      return;
-    }
-    const maxStep = AI_GRAVITY_CORRECTION_STEP * 3;
-    const gain = 0.2;
-    const adjustX = clamp(-projectile.closestTargetDx * gain, -maxStep, maxStep);
-    const adjustY = clamp(-projectile.closestTargetDy * gain, -maxStep, maxStep);
-    shooter.aiAimCorrectionX = clamp(shooter.aiAimCorrectionX + adjustX, -AI_GRAVITY_CORRECTION_CLAMP, AI_GRAVITY_CORRECTION_CLAMP);
-    shooter.aiAimCorrectionY = clamp(shooter.aiAimCorrectionY + adjustY, -AI_GRAVITY_CORRECTION_CLAMP, AI_GRAVITY_CORRECTION_CLAMP);
   }
 
   private shouldIgnoreDamageForUnit(unit: UnitInstance): boolean {

@@ -35,7 +35,8 @@
     "recoil": 10,
     "range": 500,
     "shootAngleDeg": 360,
-    "projectileSpeed": 500
+    "projectileSpeed": 500,
+    "spreadDeg": 0
   },
   "properties": {
     "category": "weapon",
