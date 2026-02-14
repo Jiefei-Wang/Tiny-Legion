@@ -833,6 +833,13 @@ function arenaModelPlugin() {
       height?: number;
       groundHeight?: number;
     };
+    maxSimSeconds?: number;
+    nodeDefense?: number;
+    baseHp?: number;
+    playerGas?: number;
+    enemyGas?: number;
+    spawnBurst?: number;
+    spawnMaxActive?: number;
   };
 
   const round2 = (value: number): number => Math.round(value * 100) / 100;
@@ -988,6 +995,13 @@ function arenaModelPlugin() {
       initialUnitsPerSide: 4,
       templateNames: ["*"],
       battlefield: { width: 2000, height: 1000 },
+      maxSimSeconds: 180,
+      nodeDefense: 1,
+      baseHp: 1200,
+      playerGas: 10000,
+      enemyGas: 10000,
+      spawnBurst: 1,
+      spawnMaxActive: 5,
     };
     if (!existsSync(phaseConfigFile)) {
       return fallback;
@@ -1023,11 +1037,26 @@ function arenaModelPlugin() {
           ...(typeof bf.groundHeight === "number" ? { groundHeight: Math.max(80, Math.floor(bf.groundHeight)) } : {}),
         }
         : fallback.battlefield;
+      // Parse additional match parameters from config
+      const maxSimSeconds = typeof source.maxSimSeconds === "number" ? Math.max(10, Math.floor(source.maxSimSeconds)) : fallback.maxSimSeconds;
+      const nodeDefense = typeof source.nodeDefense === "number" ? Math.max(0, Math.floor(source.nodeDefense)) : fallback.nodeDefense;
+      const baseHp = typeof source.baseHp === "number" ? Math.max(100, Math.floor(source.baseHp)) : fallback.baseHp;
+      const playerGas = typeof source.playerGas === "number" ? Math.max(0, Math.floor(source.playerGas)) : fallback.playerGas;
+      const enemyGas = typeof source.enemyGas === "number" ? Math.max(0, Math.floor(source.enemyGas)) : fallback.enemyGas;
+      const spawnBurst = typeof source.spawnBurst === "number" ? Math.max(1, Math.floor(source.spawnBurst)) : fallback.spawnBurst;
+      const spawnMaxActive = typeof source.spawnMaxActive === "number" ? Math.max(1, Math.floor(source.spawnMaxActive)) : fallback.spawnMaxActive;
       return {
         withBase,
         initialUnitsPerSide,
         templateNames,
         ...(battlefield ? { battlefield } : {}),
+        maxSimSeconds,
+        nodeDefense,
+        baseHp,
+        playerGas,
+        enemyGas,
+        spawnBurst,
+        spawnMaxActive,
       };
     } catch {
       return fallback;
@@ -1286,7 +1315,9 @@ function arenaModelPlugin() {
             ? "unranked-vs-random"
             : payload.mode === "manual-pair"
               ? "manual-pair"
-              : "random-pair";
+              : payload.mode === "manual-vs-random"
+                ? "manual-vs-random"
+                : "random-pair";
           const runsRequested = clampInt(payload.runs, 1, 1_000_000_000, 10);
           const runAId = typeof payload.runAId === "string" ? payload.runAId.trim() : "";
           const runBId = typeof payload.runBId === "string" ? payload.runBId.trim() : "";
@@ -1312,6 +1343,18 @@ function arenaModelPlugin() {
                 return null;
               }
               return { a, b };
+            }
+            if (mode === "manual-vs-random") {
+              const a = entries.find((entry) => entry.runId === runAId) ?? null;
+              if (!a) {
+                return null;
+              }
+              const opponents = entries.filter((entry) => entry.runId !== a.runId);
+              if (opponents.length <= 0) {
+                return null;
+              }
+              const b = opponents[randomIndex(opponents.length)] ?? null;
+              return b ? { a, b } : null;
             }
             if (mode === "unranked-vs-random") {
               const unranked = entries.filter((entry) => entry.isUnranked);
@@ -1374,22 +1417,22 @@ function arenaModelPlugin() {
                 modelA,
                 modelB,
                 spec: {
-                seed: Date.now() + i * 9973 + Math.floor(Math.random() * 1000),
-                maxSimSeconds: 180,
-                nodeDefense: 1,
-                baseHp: 1200,
-                playerGas: 10000,
-                enemyGas: 10000,
-                spawnBurst: 1,
-                spawnMaxActive: 5,
-                aiPlayer: modelA.spec,
-                aiEnemy: modelB.spec,
-                scenario: {
-                  withBase: phaseScenario.withBase,
-                  initialUnitsPerSide: phaseScenario.initialUnitsPerSide,
-                },
-                templateNames: phaseScenario.templateNames,
-                ...(phaseScenario.battlefield ? { battlefield: phaseScenario.battlefield } : {}),
+                  seed: Date.now() + i * 9973 + Math.floor(Math.random() * 1000),
+                  maxSimSeconds: phaseScenario.maxSimSeconds ?? 180,
+                  nodeDefense: phaseScenario.nodeDefense ?? 1,
+                  baseHp: phaseScenario.baseHp ?? 1200,
+                  playerGas: phaseScenario.playerGas ?? 10000,
+                  enemyGas: phaseScenario.enemyGas ?? 10000,
+                  spawnBurst: phaseScenario.spawnBurst ?? 1,
+                  spawnMaxActive: phaseScenario.spawnMaxActive ?? 5,
+                  aiPlayer: modelA.spec,
+                  aiEnemy: modelB.spec,
+                  scenario: {
+                    withBase: phaseScenario.withBase,
+                    initialUnitsPerSide: phaseScenario.initialUnitsPerSide,
+                  },
+                  templateNames: phaseScenario.templateNames,
+                  ...(phaseScenario.battlefield ? { battlefield: phaseScenario.battlefield } : {}),
                 },
               });
             }

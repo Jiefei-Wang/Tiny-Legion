@@ -470,12 +470,13 @@ export function bootstrap(options: BootstrapOptions = {}): void {
   };
   let testArenaLeaderboardLoading = false;
   let testArenaLeaderboardEntries: TestArenaLeaderboardEntry[] = [];
-  let testArenaLeaderboardCompeteMode: "random-pair" | "unranked-vs-random" | "manual-pair" = "random-pair";
+  let testArenaLeaderboardCompeteMode: "random-pair" | "unranked-vs-random" | "manual-pair" | "manual-vs-random" = "random-pair";
   let testArenaLeaderboardCompeteRuns = 100;
   let testArenaLeaderboardCompeteBusy = false;
   let testArenaLeaderboardCompeteStatus = "";
   let testArenaLeaderboardManualPairA = "";
   let testArenaLeaderboardManualPairB = "";
+  let testArenaLeaderboardManualVsRandom = "";
   let testArenaPanelSections: Record<TestArenaPanelSection, boolean> = {
     unit: true,
     ai: false,
@@ -1137,10 +1138,14 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       if (!availableIds.includes(testArenaLeaderboardManualPairB) || testArenaLeaderboardManualPairB === testArenaLeaderboardManualPairA) {
         testArenaLeaderboardManualPairB = availableIds.find((id) => id !== testArenaLeaderboardManualPairA) ?? (availableIds[1] ?? "");
       }
+      if (!availableIds.includes(testArenaLeaderboardManualVsRandom)) {
+        testArenaLeaderboardManualVsRandom = availableIds[0] ?? "";
+      }
     } catch {
       testArenaLeaderboardEntries = [];
       testArenaLeaderboardManualPairA = "";
       testArenaLeaderboardManualPairB = "";
+      testArenaLeaderboardManualVsRandom = "";
     } finally {
       testArenaLeaderboardLoading = false;
     }
@@ -1273,7 +1278,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
   };
 
   const runLeaderboardCompetition = async (
-    mode: "random-pair" | "unranked-vs-random" | "manual-pair",
+    mode: "random-pair" | "unranked-vs-random" | "manual-pair" | "manual-vs-random",
     runs: number,
     runAId?: string,
     runBId?: string,
@@ -1284,6 +1289,13 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     if (mode === "manual-pair") {
       if (!runAId || !runBId || runAId === runBId) {
         testArenaLeaderboardCompeteStatus = "Select two different models for manual pair mode.";
+        renderPanels();
+        return;
+      }
+    }
+    if (mode === "manual-vs-random") {
+      if (!runAId) {
+        testArenaLeaderboardCompeteStatus = "Select a model for manual vs random mode.";
         renderPanels();
         return;
       }
@@ -4341,6 +4353,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     const competeModeOptions = `
       <option value="random-pair" ${testArenaLeaderboardCompeteMode === "random-pair" ? "selected" : ""}>Random pair</option>
       <option value="unranked-vs-random" ${testArenaLeaderboardCompeteMode === "unranked-vs-random" ? "selected" : ""}>Unranked vs random</option>
+      <option value="manual-vs-random" ${testArenaLeaderboardCompeteMode === "manual-vs-random" ? "selected" : ""}>Manual vs random</option>
       <option value="manual-pair" ${testArenaLeaderboardCompeteMode === "manual-pair" ? "selected" : ""}>Manual pair</option>
     `;
     const manualPairOptionsA = testArenaLeaderboardEntries
@@ -4348,6 +4361,9 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       .join("");
     const manualPairOptionsB = testArenaLeaderboardEntries
       .map((entry) => `<option value="${escapeHtml(entry.runId)}" ${entry.runId === testArenaLeaderboardManualPairB ? "selected" : ""}>${escapeHtml(entry.runId)}</option>`)
+      .join("");
+    const manualVsRandomOptions = testArenaLeaderboardEntries
+      .map((entry) => `<option value="${escapeHtml(entry.runId)}" ${entry.runId === testArenaLeaderboardManualVsRandom ? "selected" : ""}>${escapeHtml(entry.runId)}</option>`)
       .join("");
     leaderboardPanel.innerHTML = `
       <h3>Leaderboard Options</h3>
@@ -4367,6 +4383,11 @@ export function bootstrap(options: BootstrapOptions = {}): void {
           </label>
           <label class="small">Model B
             <select id="leaderboardManualPairB">${manualPairOptionsB}</select>
+          </label>
+        ` : ""}
+        ${testArenaLeaderboardCompeteMode === "manual-vs-random" ? `
+          <label class="small">Model
+            <select id="leaderboardManualVsRandom">${manualVsRandomOptions}</select>
           </label>
         ` : ""}
         <div class="row">
@@ -5002,7 +5023,9 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         ? "unranked-vs-random"
         : next === "manual-pair"
           ? "manual-pair"
-          : "random-pair";
+          : next === "manual-vs-random"
+            ? "manual-vs-random"
+            : "random-pair";
       renderPanels();
     });
 
@@ -5012,6 +5035,10 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     });
     getOptionalElement<HTMLSelectElement>("#leaderboardManualPairB")?.addEventListener("change", (event) => {
       testArenaLeaderboardManualPairB = (event.currentTarget as HTMLSelectElement).value;
+      renderPanels();
+    });
+    getOptionalElement<HTMLSelectElement>("#leaderboardManualVsRandom")?.addEventListener("change", (event) => {
+      testArenaLeaderboardManualVsRandom = (event.currentTarget as HTMLSelectElement).value;
       renderPanels();
     });
 
@@ -5038,10 +5065,13 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     });
 
     getOptionalElement<HTMLButtonElement>("#btnLeaderboardCompete")?.addEventListener("click", async () => {
+      const runA = testArenaLeaderboardCompeteMode === "manual-vs-random"
+        ? testArenaLeaderboardManualVsRandom
+        : testArenaLeaderboardManualPairA;
       await runLeaderboardCompetition(
         testArenaLeaderboardCompeteMode,
         testArenaLeaderboardCompeteRuns,
-        testArenaLeaderboardManualPairA,
+        runA,
         testArenaLeaderboardManualPairB,
       );
     });
