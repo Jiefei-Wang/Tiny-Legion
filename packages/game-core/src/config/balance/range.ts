@@ -1,7 +1,7 @@
 import type { UnitInstance } from "../../types.ts";
 
 export const GLOBAL_WEAPON_RANGE_MULTIPLIER = 1.5;
-export const AIRCRAFT_RANGE_BONUS_MAX = 1.0;
+export const AIRCRAFT_RANGE_BONUS_MAX = 0;
 export const PROJECTILE_SPEED = 260;
 export const PROJECTILE_GRAVITY = 95;
 export const GROUND_FIRE_Y_TOLERANCE = 92;
