@@ -18,6 +18,7 @@ export function solveBallisticAim(
   maxRange: number,
   projectileSpeed: number = PROJECTILE_SPEED,
   projectileGravity: number = PROJECTILE_GRAVITY,
+  simulationStepS: number = 1 / 60,
 ): AimSolution | null {
   const MIN_T = 0.08;
   const safeProjectileSpeed = Math.max(1, projectileSpeed);
@@ -34,7 +35,10 @@ export function solveBallisticAim(
     const dx = px - shooterX;
     const dy = py - shooterY;
     const vx = dx / t;
-    const vy = (dy - 0.5 * projectileGravity * t * t) / t;
+    // Runtime projectile integration is semi-implicit Euler:
+    // vy += g*dt; y += vy*dt.
+    // Match this in solve to avoid systematic edge-angle miss at long range.
+    const vy = (dy - 0.5 * projectileGravity * (t * t + t * simulationStepS)) / t;
     return vx * vx + vy * vy - safeProjectileSpeed * safeProjectileSpeed;
   };
 
@@ -91,7 +95,7 @@ export function solveBallisticAim(
   }
 
   const vx = (aimX - shooterX) / Math.max(0.001, t);
-  const vy = (aimY - shooterY - 0.5 * projectileGravity * t * t) / Math.max(0.001, t);
+  const vy = (aimY - shooterY - 0.5 * projectileGravity * (t * t + t * simulationStepS)) / Math.max(0.001, t);
   const firingAngleRad = Math.atan2(vy, vx);
   return { x: aimX, y: aimY, firingAngleRad, leadTimeS: t };
 }

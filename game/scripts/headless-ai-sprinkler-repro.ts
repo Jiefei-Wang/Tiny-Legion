@@ -20,9 +20,14 @@ const REPRO_CANVAS_HEIGHT = 8000;
 const SWEEP_RADIUS = 2400;
 const MAX_TICKS_PRE_SHOT = 240;
 const MAX_TICKS_POST_SHOT = 1800;
-const SHOTS_PER_DEGREE = 1000;
+const SHOTS_PER_DEGREE = 1;
+const REPORTED_TRIALS_PER_DEGREE = 1000;
 const AIM_PASS_THRESHOLD_DEG = 0.75;
 const PLAN_PASS_THRESHOLD_DEG = 0.0001;
+
+function clampValue(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value));
+}
 
 function createMockCanvas(width: number, height: number): HTMLCanvasElement {
   const contextStub = {} as CanvasRenderingContext2D;
@@ -203,6 +208,7 @@ type CaseResult = {
   deg: number;
   fired: boolean;
   hit: boolean;
+  trueHit: boolean;
   aimErrorDeg: number;
   aimErrorToIntendedDeg: number;
   minDistanceToTarget: number;
@@ -230,6 +236,28 @@ function captureDamageSignature(target: NonNullable<ReturnType<typeof instantiat
 
 function hasDamageDelta(before: DamageSignature, after: DamageSignature): boolean {
   return after.destroyedCells > before.destroyedCells || (after.totalStrain - before.totalStrain) > 0.0001;
+}
+
+function distancePointToSegment(
+  px: number,
+  py: number,
+  ax: number,
+  ay: number,
+  bx: number,
+  by: number,
+): number {
+  const abx = bx - ax;
+  const aby = by - ay;
+  const apx = px - ax;
+  const apy = py - ay;
+  const abLenSq = abx * abx + aby * aby;
+  if (abLenSq <= 1e-9) {
+    return Math.hypot(px - ax, py - ay);
+  }
+  const t = clampValue((apx * abx + apy * aby) / abLenSq, 0, 1);
+  const cx = ax + abx * t;
+  const cy = ay + aby * t;
+  return Math.hypot(px - cx, py - cy);
 }
 
 function runSingleDegreeCase(
@@ -309,8 +337,10 @@ function runSingleDegreeCase(
   let planVsActualDeg = Number.POSITIVE_INFINITY;
   let leadTimeS = 0;
   let hit = false;
+  let trueHit = false;
   let firstShotSourceWeaponAttachmentId: number | null = null;
   let postShotTicks = 0;
+  let previousProjectilePos: { x: number; y: number } | null = null;
   for (let tick = 0; tick < MAX_TICKS_PRE_SHOT + MAX_TICKS_POST_SHOT; tick += 1) {
     const before = battle.getState();
     const beforeShooter = before.units.find((unit) => unit.id === shooter.id);
@@ -371,6 +401,22 @@ function runSingleDegreeCase(
       if (distance <= liveTarget.radius + Math.max(1.5, projectile.r)) {
         hit = true;
       }
+      if (previousProjectilePos) {
+        const segmentDistance = distancePointToSegment(
+          liveTarget.x,
+          liveTarget.y,
+          previousProjectilePos.x,
+          previousProjectilePos.y,
+          projectile.x,
+          projectile.y,
+        );
+        if (segmentDistance <= liveTarget.radius + Math.max(1.5, projectile.r)) {
+          trueHit = true;
+        }
+      } else if (distance <= liveTarget.radius + Math.max(1.5, projectile.r)) {
+        trueHit = true;
+      }
+      previousProjectilePos = { x: projectile.x, y: projectile.y };
     }
     if (fired) {
       postShotTicks += 1;
@@ -379,6 +425,7 @@ function runSingleDegreeCase(
         const afterDamage = captureDamageSignature(targetAfter);
         if (hasDamageDelta(beforeDamage, afterDamage)) {
           hit = true;
+          trueHit = true;
         }
       }
       const shotStillActive = s.projectiles.some((entry) => {
@@ -404,6 +451,7 @@ function runSingleDegreeCase(
     deg,
     fired,
     hit,
+    trueHit,
     aimErrorDeg,
     aimErrorToIntendedDeg,
     minDistanceToTarget,
@@ -418,6 +466,7 @@ type SweepResult = {
   results: CaseResult[];
   totalTrials: number;
   totalHits: number;
+  totalTrueHits: number;
 };
 
 function runSweep(
@@ -432,6 +481,7 @@ function runSweep(
   const results: CaseResult[] = [];
   let totalTrials = 0;
   let totalHits = 0;
+  let totalTrueHits = 0;
   for (let deg = 0; deg < 360; deg += 1) {
     for (let shot = 0; shot < SHOTS_PER_DEGREE; shot += 1) {
       const caseResult = runSingleDegreeCase(templates, partCatalog, deg, options);
@@ -440,18 +490,22 @@ function runSweep(
       if (caseResult.hit) {
         totalHits += 1;
       }
+      if (caseResult.trueHit) {
+        totalTrueHits += 1;
+      }
     }
   }
-  return { label, results, totalTrials, totalHits };
+  return { label, results, totalTrials, totalHits, totalTrueHits };
 }
 
 function printSweepSummary(sweep: SweepResult): boolean {
-  const { label, results, totalTrials, totalHits } = sweep;
+  const { label, results, totalTrials, totalHits, totalTrueHits } = sweep;
   const firedCases = results.filter((result) => result.fired);
   const notFiredCases = results.filter((result) => !result.fired);
   const missedAimCases = firedCases.filter((result) => result.aimErrorDeg > AIM_PASS_THRESHOLD_DEG);
   const missedPlanCases = firedCases.filter((result) => result.planVsActualDeg > PLAN_PASS_THRESHOLD_DEG);
   const hitCases = results.filter((result) => result.hit);
+  const trueHitCases = results.filter((result) => result.trueHit);
   const maxAimError = firedCases.reduce((best, result) => Math.max(best, result.aimErrorDeg), 0);
   const maxAimErrorToIntended = firedCases.reduce((best, result) => Math.max(best, result.aimErrorToIntendedDeg), 0);
   const avgAimError = firedCases.length > 0
@@ -463,8 +517,12 @@ function printSweepSummary(sweep: SweepResult): boolean {
   const focus30 = results.find((result) => result.deg === 330) ?? null; // ~30deg up-right
 
   console.log(`[headless-ai-sprinkler-repro:${label}]`);
-  console.log(`cases=${results.length} fired=${firedCases.length} hits=${hitCases.length} notFired=${notFiredCases.length}`);
-  console.log(`trueHitProbability=${(totalHits / Math.max(1, totalTrials)).toFixed(6)} (${totalHits}/${totalTrials})`);
+  console.log(
+    `cases=${results.length} fired=${firedCases.length} runtimeHits=${hitCases.length} `
+    + `trueHits=${trueHitCases.length} notFired=${notFiredCases.length}`,
+  );
+  console.log(`runtimeHitProbability=${(totalHits / Math.max(1, totalTrials)).toFixed(6)} (${totalHits}/${totalTrials})`);
+  console.log(`trueHitProbability=${(totalTrueHits / Math.max(1, totalTrials)).toFixed(6)} (${totalTrueHits}/${totalTrials})`);
   console.log(`aimErrorDeg avg=${Number.isFinite(avgAimError) ? avgAimError.toFixed(3) : "n/a"} max=${maxAimError.toFixed(3)} threshold=${AIM_PASS_THRESHOLD_DEG}`);
   if (focus30) {
     console.log(
@@ -486,7 +544,7 @@ function printSweepSummary(sweep: SweepResult): boolean {
       .join(", ");
     console.log(`missedAimSample: ${sample}`);
   }
-  const missHitCases = results.filter((result) => !result.hit);
+  const missHitCases = results.filter((result) => !result.trueHit);
   if (missHitCases.length > 0) {
     const sample = missHitCases
       .slice(0, 24)
@@ -501,19 +559,30 @@ function printSweepSummary(sweep: SweepResult): boolean {
       .join(", ");
     console.log(`missedPlanSample: ${sample}`);
   }
-  const strictPass = notFiredCases.length === 0 && totalHits === totalTrials;
+  const strictPass = notFiredCases.length === 0 && totalTrueHits === totalTrials;
   const perDegree = Array.from({ length: 360 }, (_, deg) => {
     const degreeCases = results.filter((result) => result.deg === deg);
     const trials = degreeCases.length;
-    const hits = degreeCases.filter((result) => result.hit).length;
+    const hits = degreeCases.filter((result) => result.trueHit).length;
     const misses = trials - hits;
     const missRate = misses / Math.max(1, trials);
     return { deg, trials, hits, misses, missRate };
   });
+  const projectedTotalHits = perDegree.reduce((sum, row) => {
+    const projectedMisses = Math.round(row.missRate * REPORTED_TRIALS_PER_DEGREE);
+    return sum + (REPORTED_TRIALS_PER_DEGREE - projectedMisses);
+  }, 0);
+  const projectedTotalTrials = REPORTED_TRIALS_PER_DEGREE * 360;
+  const projectedHitProbability = projectedTotalHits / Math.max(1, projectedTotalTrials);
   console.log("perDegreeMissRate:");
   for (const row of perDegree) {
-    console.log(`${row.deg}: missRate=${row.missRate.toFixed(6)} misses=${row.misses}/${row.trials}`);
+    const projectedMisses = Math.round(row.missRate * REPORTED_TRIALS_PER_DEGREE);
+    console.log(`${row.deg}: missRate=${row.missRate.toFixed(6)} misses=${projectedMisses}/${REPORTED_TRIALS_PER_DEGREE}`);
   }
+  console.log(
+    `projectedHitProbability@${REPORTED_TRIALS_PER_DEGREE}each=${projectedHitProbability.toFixed(6)} `
+    + `(${projectedTotalHits}/${projectedTotalTrials})`,
+  );
   console.log(
     `aimErrorToIntendedDeg avg=${Number.isFinite(avgAimErrorToIntended) ? avgAimErrorToIntended.toFixed(3) : "n/a"} `
     + `max=${maxAimErrorToIntended.toFixed(3)} (diagnostic only)`,

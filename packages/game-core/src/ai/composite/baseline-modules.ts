@@ -110,7 +110,6 @@ export function createBaselineShootAi(): ShootAiModule {
       }
       const correctedTargetX = target.attackPoint.x + unit.aiAimCorrectionX;
       const correctedTargetY = target.attackPoint.y + unit.aiAimCorrectionY;
-      const distanceToTarget = Math.hypot(correctedTargetX - unit.x, correctedTargetY - unit.y);
       let best: FirePlan | null = null;
       let bestScore = Number.NEGATIVE_INFINITY;
       let blockedReason: string | null = "no-ready-weapon";
@@ -127,6 +126,10 @@ export function createBaselineShootAi(): ShootAiModule {
         if (!weaponInput) {
           continue;
         }
+        const distanceToTarget = Math.hypot(
+          correctedTargetX - weaponInput.firepointX,
+          correctedTargetY - weaponInput.firepointY,
+        );
         const effectiveRange = weaponInput.effectiveRange;
         if (distanceToTarget > effectiveRange * 1.05) {
           blockedReason = "out-of-range";
