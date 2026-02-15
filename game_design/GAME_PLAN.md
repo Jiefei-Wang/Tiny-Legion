@@ -213,7 +213,6 @@ Attachment rules:
 - A unit can have only one Control Unit.
 
 ### Functional Module Catalog
-
 - Mobility
   - Wheel Drive
   - Track Drive

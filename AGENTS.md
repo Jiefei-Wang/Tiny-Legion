@@ -4,8 +4,8 @@ This file is the session bootstrap for this repository.
 
 If you are a new coding agent/session, read this file first, then read:
 
-1. `GAME_PLAN.md`
-2. `SOFTWARE_ARCHITECTURE.md`
+1. `game_design/GAME_PLAN.md`
+2. `game_design/SOFTWARE_ARCHITECTURE.md`
 
 ## Project Snapshot
 
@@ -13,7 +13,7 @@ If you are a new coding agent/session, read this file first, then read:
 - Active game app: `game/` (TypeScript + Vite + Canvas)
 - Shared game logic: `packages/game-core/`
 - Legacy prototype: `webgame/` (reference only)
-- Command reference: `game_command.md`
+- Command reference: `game_design/game_command.md`
 - Composite AI arena training command: `npm --prefix arena run train:composite -- --phaseSeeds 16 --nUnits 4`
 - Unified training wrapper script: `./train_ai.sh help` (module-only and full composite compare/optimization with per-module source selection)
 
@@ -89,8 +89,8 @@ If shell does not support inline env assignment, set env var in shell first, the
 ## Session Best Practice
 
 - Keep design docs and architecture docs in sync with implemented behavior.
-- Hard rule: if you change gameplay design, player/AI rules, balance logic, or any user-facing behavior, update `GAME_PLAN.md` in the same change.
-- Hard rule: if you change code structure (new modules, moving responsibilities, new data flows/types, new debug endpoints), update `SOFTWARE_ARCHITECTURE.md` in the same change.
+- Hard rule: if you change gameplay design, player/AI rules, balance logic, or any user-facing behavior, update `game_design/GAME_PLAN.md` in the same change.
+- Hard rule: if you change code structure (new modules, moving responsibilities, new data flows/types, new debug endpoints), update `game_design/SOFTWARE_ARCHITECTURE.md` in the same change.
 - If both apply, update both docs; prefer small, surgical doc edits over letting them drift.
 - Add durable agent instructions to this `AGENTS.md` so new sessions can discover workflow quickly.
 - Put temporary images and other temporary outputs under `.tmp/` instead of the project root.
