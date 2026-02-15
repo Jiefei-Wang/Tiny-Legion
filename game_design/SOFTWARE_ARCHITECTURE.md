@@ -254,10 +254,10 @@ Template/editor architecture notes:
 - The left mode pane tab strip is rendered as a 2x3 grid and routes directly to each screen.
 - `template-validation.ts` is an isolated validation module with severity output (`errors` + `warnings`).
 - `template-schema.ts` parse pipeline supports placement sanitization plus loader coverage normalization, and middleware/headless flows persist the normalized JSON so editor/headless/runtime stay aligned.
-- Functional placement and validation now resolve through part catalog definitions (`partId` + `baseComponent`) rather than component-only hardcoding.
+- Functional placement and validation now resolve through part catalog definitions (`partId` + normalized runtime component mapping), with `partType`/`partCategory`/`partProperties` as primary authoring fields.
 - `parts/part-schema.ts` + `parts/part-validation.ts` define part parsing and validation severity output.
 - Runtime/editor part catalog merge order is file-backed defaults -> user overrides (no implicit built-in part entries in `/__parts/*` payloads).
-- Part Designer uses dedicated default-config helpers (`game/src/app/part-default-config.ts`) to seed values when creating a new part or switching base component.
+- Part Designer uses dedicated default-config helpers (`game/src/app/part-default-config.ts`) to seed values when creating a new part or switching part type/category.
 - Loader injection remains configurable in parse options; current dev/headless normalization persists the injected-loader result to template JSON.
 - Editor save does not block on warnings/errors; categories are surfaced in UI/logs for developer feedback.
 - Battle deploy/spawn paths validate templates and block creation when `errors` are present.
@@ -495,30 +495,26 @@ Developer Part Designer UX:
 - Primary access is the top-level `Part Editor` mode tab.
 - Top-bar `Debug Options` -> `Part Designer` is a shortcut into the same `Part Editor` screen.
 - Dedicated editor workspace for authoring a single reusable part definition.
-- Part Designer layer mode is integrated into `Base Component` selection using a `structure-layer` pseudo-option instead of a separate layer selector.
+- Part Designer uses `partType` and optional `partCategory` as the primary authoring selectors; runtime `baseComponent` is derived/mapped internally for compatibility.
 - `Open Part` rows include explicit layer labels and structure defaults are provided as explicit file-backed material parts (`material-basic`, `material-reinforced`, `material-ceramic`, `material-reactive`, `material-combined`).
 - `Open Part` modal includes tab-style filtering by part kind (`all`, `structure`, and functional component types).
-- In `structure-layer` mode, functional-only part-property and placement controls are hidden.
-- Category/subcategory auto-sync to base defaults only while those fields remain unmodified by the user.
+- In `partType=structure`, functional-only part-property and placement controls are hidden.
+- Part type/category default values auto-seed `partProperties` for new drafts and type/category switches.
 - Material runtime defaults are sourced from balance config and can still be overridden by file-backed structure-material part definitions when present.
 - Part `Open` window mirrors template open-row actions with right-aligned `Copy` / `Delete` controls.
 - Part definitions use integer IDs internally (`id` and all template/attachment `partId` references).
 - Part Editor does not expose editable ID input; new/copy flows auto-assign next available integer ID.
 - UI split:
-  - left panel edits part-level fields (`name`, `id`, `baseComponent`, `directional`, `direction`) plus grouped controls:
-    - `Editor Meta` (`category` dropdown + `subcategory` text),
-    - `Part Properties` (`tags` and checkbox-enabled groups for engine/weapon/loader/armor/core tuning with conditional parameter blocks),
-    - weapon group exposes projectile + class-specific params (explosive/tracking/control-utility),
-    - loader group exposes supports + full reload cadence/capacity params.
-  - right panel edits per-box properties for the currently selected grid cell.
-- Per-box properties include:
-  - occupies structure space,
-  - occupies functional space,
-  - needs structure behind (functional-only),
-  - takes damage,
-  - attach point,
-  - anchor point (single),
-  - shooting point.
+  - left panel edits part-level fields (`name`, `id`, `partType`, optional `partCategory`) and type-aware `partProperties` controls.
+  - right panel edits per-cell properties for the currently selected grid cell.
+- Per-cell properties include:
+  - `structureOccupy`,
+  - `functionalOccupy`,
+  - `needStructureBehind` (functional-only),
+  - `takeDamage`,
+  - `attachPoint`,
+  - `anchorPoint` (single),
+  - `firePoint` (single; weapon-only).
 - Canonical default part set is stored under `game/parts/default/*.json`, and default template `partId` values align with those explicit IDs.
 
 In-app debug UI:

@@ -2,6 +2,8 @@
   "id": 5,
   "name": "Engine M",
   "layer": "functional",
+  "partType": "engine",
+  "partCategory": "vehicle",
   "baseComponent": "engineM",
   "directional": false,
   "direction": "up",
@@ -9,6 +11,19 @@
     "x": 0,
     "y": 0
   },
+  "cells": [
+    {
+      "x": 0,
+      "y": 0,
+      "structureOccupy": false,
+      "functionalOccupy": true,
+      "needStructureBehind": true,
+      "takeDamage": false,
+      "attachPoint": false,
+      "anchorPoint": true,
+      "firePoint": false
+    }
+  ],
   "boxes": [
     {
       "x": 0,
@@ -19,7 +34,8 @@
       "isAttachPoint": false,
       "isAnchorPoint": true,
       "isShootingPoint": false,
-      "takesDamage": false
+      "takesDamage": false,
+      "takesFunctionalDamage": false
     }
   ],
   "placement": {

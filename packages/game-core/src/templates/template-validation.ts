@@ -66,6 +66,30 @@ function unique(items: string[]): string[] {
   return Array.from(new Set(items));
 }
 
+function engineSupportsAir(part: PartDefinition | null, component: keyof typeof COMPONENTS): boolean {
+  if (part?.partType === "engine") {
+    if (part.partProperties?.powerAir !== undefined) {
+      return part.partProperties.powerAir === true;
+    }
+    if (part.properties?.engineType) {
+      return part.properties.engineType === "air";
+    }
+  }
+  return COMPONENTS[component].propulsion?.platform === "air";
+}
+
+function engineSupportsGround(part: PartDefinition | null, component: keyof typeof COMPONENTS): boolean {
+  if (part?.partType === "engine") {
+    if (part.partProperties?.powerGround !== undefined) {
+      return part.partProperties.powerGround === true;
+    }
+    if (part.properties?.engineType) {
+      return part.properties.engineType === "ground";
+    }
+  }
+  return COMPONENTS[component].propulsion?.platform === "ground";
+}
+
 function computeAirLiftAccel(template: UnitTemplate, partCatalog: ReadonlyArray<PartDefinition>): number {
   let mass = 0;
   for (const cell of template.structure) {
@@ -94,12 +118,16 @@ function computeAirLiftAccel(template: UnitTemplate, partCatalog: ReadonlyArray<
       continue;
     }
     const stats = COMPONENTS[component];
-    if (stats.type !== "engine" || stats.propulsion?.platform !== "air") {
+    if (stats.type !== "engine" || !engineSupportsAir(part, component)) {
+      continue;
+    }
+    const propulsion = stats.propulsion;
+    if (!propulsion) {
       continue;
     }
     const power = Math.max(0, part?.stats?.power ?? stats.power ?? 0);
     const baseAccel = (power / mass) * AIR_THRUST_ACCEL_SCALE;
-    if (stats.propulsion.mode === "omni") {
+    if (propulsion.mode === "omni") {
       liftAccel += baseAccel;
       continue;
     }
@@ -117,7 +145,7 @@ function computeAirLiftAccel(template: UnitTemplate, partCatalog: ReadonlyArray<
     const propDir = getPropellerDirection(facingQuarter);
     // Propeller facing represents push/airflow direction; lift/thrust is opposite.
     const dot = (-propDir.x) * 0 + (-propDir.y) * -1;
-    const angleLimitDeg = stats.propulsion.thrustAngleDeg ?? 25;
+    const angleLimitDeg = part?.partProperties?.thrustAngleDeg ?? propulsion.thrustAngleDeg ?? 25;
     const cosLimit = Math.cos((angleLimitDeg * Math.PI) / 180);
     if (dot < cosLimit) {
       continue;
@@ -305,9 +333,10 @@ export function validateTemplateDetailed(
       controlCount += 1;
     } else if (componentType === "engine") {
       totalEngineCount += 1;
-      if (stats.propulsion?.platform === "air") {
+      if (engineSupportsAir(part, component)) {
         airEngineCount += 1;
-      } else {
+      }
+      if (engineSupportsGround(part, component)) {
         groundEngineCount += 1;
       }
     } else if (componentType === "weapon") {

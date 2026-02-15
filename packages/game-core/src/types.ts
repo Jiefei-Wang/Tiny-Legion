@@ -26,6 +26,9 @@ export type WeaponClass =
   | "beam-precision"
   | "control-utility";
 
+export type PartType = "structure" | "control" | "engine" | "weapon" | "loader" | "ammo";
+export type PartCategory = "vehicle" | "jet" | "propeller" | "bullet" | "explosive" | "missile" | "beam" | "emp";
+
 export type ExplosiveDeliveryMode = "shell" | "bomb";
 
 export type UnitType = "ground" | "air";
@@ -152,6 +155,60 @@ export interface PartStats {
   loaderMinBurstInterval?: number;
 }
 
+export interface PartPropertySet {
+  gasCost?: number;
+  mass?: number;
+  hp?: number;
+  tag?: string;
+  armor?: number;
+  recover?: number;
+  color?: string;
+  computing?: number;
+  powerAssumption?: number;
+  power?: number;
+  maxSpeed?: number;
+  powerGround?: boolean;
+  powerAir?: boolean;
+  directional?: boolean;
+  defaultDirection?: PartDirection;
+  thrustAngleDeg?: number;
+  bulletType?: "bullet" | "missile" | "laser";
+  damage?: number;
+  range?: number;
+  cooldown?: number;
+  recoil?: number;
+  hitImpulse?: number;
+  penetration?: number;
+  spreadAngleDeg?: number;
+  explodeOnHit?: boolean;
+  explodeRadius?: number;
+  projectileSpeed?: number;
+  projectileGravity?: number;
+  tracking?: boolean;
+  trackingTurnRate?: number;
+  shootAngleDeg?: number;
+  needLoader?: boolean;
+  supportedWeaponTags?: string[];
+  loadMultiplier?: number;
+  minLoadTime?: number;
+  minBurstInterval?: number;
+  maxCapacity?: number;
+  explosionDamage?: number;
+  explosionRadius?: number;
+}
+
+export interface PartCellTemplate {
+  x: number;
+  y: number;
+  structureOccupy?: boolean;
+  functionalOccupy?: boolean;
+  needStructureBehind?: boolean;
+  takeDamage?: boolean;
+  attachPoint?: boolean;
+  anchorPoint?: boolean;
+  firePoint?: boolean;
+}
+
 export interface PartDesignerProperties {
   category?: string;
   subcategory?: string;
@@ -177,12 +234,16 @@ export interface PartDefinition {
   id: number;
   name: string;
   layer: "functional" | "structure";
+  partType?: PartType;
+  partCategory?: PartCategory;
   baseComponent: ComponentId;
   directional?: boolean;
   direction?: PartDirection;
   anchor: { x: number; y: number };
+  cells?: PartCellTemplate[];
   boxes: PartBoxTemplate[];
   placement?: PartPlacementTemplate;
+  partProperties?: PartPropertySet;
   stats?: PartStats;
   properties?: PartDesignerProperties;
   tags?: string[];

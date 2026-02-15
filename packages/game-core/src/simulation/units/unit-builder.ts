@@ -255,7 +255,17 @@ export function instantiateUnit(
   if (template.type === "air") {
     const hasAirPropulsion = attachments.some((attachment) => {
       const stats = COMPONENTS[attachment.component];
-      return stats.type === "engine" && stats.propulsion?.platform === "air";
+      if (stats.type !== "engine") {
+        return false;
+      }
+      const part = attachment.partId ? partCatalog.find((entry) => entry.id === attachment.partId) : null;
+      if (part?.partType === "engine" && part.partProperties?.powerAir !== undefined) {
+        return part.partProperties.powerAir === true;
+      }
+      if (part?.properties?.engineType) {
+        return part.properties.engineType === "air";
+      }
+      return stats.propulsion?.platform === "air";
     });
     if (!hasAirPropulsion) {
       return null;

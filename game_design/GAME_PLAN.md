@@ -5,10 +5,10 @@
 Build a 2D strategic-combat game where the player designs modular army units, expands a top-down base, and fights for map control.
 
 - Units have **three layers**:
-  - **Structure Layer**: simple boxes that hold damage and define survivability.
+  - **Structure Layer**: simple cells that hold damage and define survivability.
   - **Functional Layer**: internal modules (engine, weapon, utility) that can be placed inside the structure.
   - **Display Layer**: purely visual shell/skin for readability and style; does not affect physics, armor, or functional performance.
-- Player grows from weak starter units (small basic boxes) to advanced composite structures and high-tier materials.
+- Player grows from weak starter units (small basic cells) to advanced composite structures and high-tier materials.
 - Battles can be fought by direct control or AI automation.
 - Every unit has exactly one Control Unit; if it is destroyed, the whole unit becomes non-operational.
 
@@ -94,19 +94,18 @@ Current implementation includes dedicated in-app editor tabs where the player ca
 - For propellers, combined facing represents airflow/push direction; actual thrust (including lift contribution) is applied in the opposite direction.
 - Functional placement supports `center place on click` mode in template editor (developer/user toggle).
 - Editor canvas uses a resizable grid up to `10x10` with right-drag panning.
-- Editor viewport input now supports right-click delete/erase on the targeted cell/box; right-click drag still pans (click vs drag), and mouse-wheel zoom is supported in both Template Editor and Part Editor.
+- Editor viewport input supports right-click delete/erase on the targeted cell; right-click drag still pans (click vs drag), and mouse-wheel zoom is supported in editor views.
 - Template Editor shows a 50% alpha placement ghost under the mouse for the currently selected part when the hovered placement is valid.
 - Template Editor labels structure part names at cell top and functional anchor parts at cell bottom using `partId + "." + initials` (for example, `18.P` and `16.ML`).
 - In Template Editor, right-click delete is staged per cell: delete functional first; if no functional remains, delete structure (and attached display) on the next click.
-- Battle, Template Editor, and Part Editor each render to their own canvas while sharing the same viewport window.
-- Template Editor and Part Editor canvas overlays show the current template/part name at top-left.
+- Battle and editor views each render to their own canvas while sharing the same viewport window.
+- Editor canvas overlays show the current working template/part name at top-left.
 - Template Editor bottom-left combat preview shows `Achievable speed` and (for air templates) `Lift` vs hold-gravity threshold.
-- First opening of Template Editor/Part Editor without a valid existing selection starts from an empty editor grid.
-- Template Editor and Part Editor now keep independent pan/view memory; switching tabs restores each editor's last view.
+- First opening an editor view without a valid existing selection starts from an empty editor grid.
+- Editor views keep independent pan/view memory; switching tabs restores each view's last camera state.
 - Editor view defaults to centered origin (`0,0`) on first load and recenters only when loading a different template/part.
 - Battle rendering and hitboxes now honor stored structure/display/functional coordinates instead of compacting to a fixed index grid.
 - Template gas cost defaults to the sum of part gas values (structure material parts + functional parts).
-- Part Designer includes editable part gas override (`stats.gasCost`); clearing the value resets to default computed gas for that part family.
 - Save templates from editor with a single `Save` action (default storage) and deploy them in battle.
 - Saving to default storage (`Save`) removes any user-storage templates with the same template name (case-insensitive), then writes the default template.
 - Template Editor shows computed template gas info (sum of part gas values); template-level gas override input is removed.
@@ -122,59 +121,266 @@ Current implementation includes dedicated in-app editor tabs where the player ca
 
 - Developer-only Part Designer is available in the top-level `Part Editor` tab.
 - Top-bar `Debug Options` -> `Part Designer` is a shortcut that switches directly to the `Part Editor` tab.
-- Part `Open` window supports direct open, one-click `Copy`, and `Delete` for file-backed entries.
-- Part IDs are internal positive integers; Part Editor no longer exposes manual ID input.
-- Creating a new part or copying a part auto-allocates the next available integer ID.
 - Part Designer edits a **single reusable part definition** (not a full unit template).
-- Part Designer integrates layer mode into the `Base Component` selector via a `structure-layer` option (no separate layer control).
-- `Open Part` now shows each row with explicit `[layer]`; structure defaults are explicit file-backed material parts (`material-basic`, `material-reinforced`, `material-ceramic`, `material-reactive`, `material-combined`).
-- `Open Part` includes top filter tabs for `All`, `Structure`, and functional base-component types (`control`/`engine`/`weapon`/`loader`/`ammo`).
-- In `structure-layer` mode, functional-only metadata/constraints are hidden (for example engine/weapon/loader toggles, category/subcategory, and require-structure placement flags).
-- When base component changes in functional mode, category/subcategory auto-follow defaults unless the user has manually edited those fields.
-- Part catalog now includes editable default structure-material parts for `basic`, `reinforced`, `ceramic`, `reactive`, and `combined` (as structure-layer entries), and their edited material stats drive runtime material balance.
-- UI split:
-  - left panel edits part-level properties grouped as:
-    - `Editor Meta`: category (dropdown) + subcategory (free text),
-    - `Part Properties`: tags + checkbox-enabled property groups with conditional parameter inputs (instead of always showing all parameters; `air`/`ground` tags mark template-type-specific palette visibility),
-  - right panel edits per-box properties of the currently selected grid cell.
-- Part Designer box editing keeps a persistent box-property brush: right-click erase does not reset the next created box to defaults, so repeated left-click placements reuse the current box property profile.
-- Part Designer per-cell box creation/deletion is driven by canvas clicks (left apply / right erase); the old `Create Box` and `Delete Box` buttons are removed from the right panel.
-- Part Designer box flags include a unique `Fire point` marker (weapon muzzle spawn reference). Each part can define at most one fire point.
-- Each part definition includes:
-  - `baseComponent` (runtime behavior family),
-  - `direction` (default facing: `up`/`right`/`down`/`left`; Part Editor defaults to `right`, with per-component overrides such as `propeller` defaulting to `down`),
-  - developer metadata (`category`, `subcategory`, `tags`),
-  - part-property groups (`is_engine`, `is_weapon`, `is_loader`, `is_armor`, core tuning) with scoped parameters:
-    - engine: `engineType`, power/speed tuning,
-    - weapon: `weaponType`, recoil/hit impulse, damage/range/cooldown/angle, projectile speed/gravity, spread, plus class-specific tuning (`explosive` blast/fuse, `tracking` turn rate, `control-utility` impair factor/duration),
-    - loader: supported weapon classes + load multiplier + fast-operation + min-load-time + store-capacity + min-burst-interval,
-    - armor: hp,
-    - core tuning: mass/hp multiplier,
-  - footprint boxes (`boxes`) with per-box flags:
-    - occupies structure space,
-    - occupies functional space,
-    - needs structure behind (functional-only box support),
-    - takes damage,
-    - attach point (requires structure but does not occupy space),
-    - anchor point (single center reference),
-    - shooting point (weapon muzzle reference),
-  - anchor coordinate (`anchor`),
-  - placement constraints:
-    - require structure below anchor,
-    - require structure support offsets,
-    - require empty structure offsets,
-    - require empty functional offsets,
-    - whether functional/structure-occupied boxes require structure support,
-  - optional runtime parameter overrides (`gasCost`, `mass`, `hpMul`, `power`, `maxSpeed`, `damage`, `range`, `cooldown`, `shootAngleDeg`, `spreadDeg`).
-- Template editor consumes this part catalog for placement/validation; battle runtime consumes the same catalog for instancing, damage semantics, and shooting-origin offsets.
-- Enemy auto-spawn selection samples from the current loaded template set (default + user overrides), not a fixed hardcoded shortlist.
+- Part IDs are internal positive integers.
+
+#### 4.0.1 Meaning of Part Types
+
+Canonical part type list:
+
+- `structure`
+  - Structural shell and survivability container for a unit.
+  - Defines durability/material behavior and structure occupancy.
+- `control`
+  - Unit command/compute core.
+  - Exactly one is required for a valid template.
+- `engine`
+  - Mobility and thrust provider.
+  - Supports ground propulsion and/or air propulsion.
+  - Can be directional for air thrust-cone behavior.
+- `weapon`
+  - Damage/control output module.
+  - Handles projectile/beam behavior, firing constraints, and loader dependency.
+- `loader`
+  - Reload service module.
+  - Loads one weapon per cycle using weapon cooldown * load multiplier with minimum load time enforcement.
+- `ammo`
+  - Shared extra ammunition pool.
+  - Can be loaded by free loaders when no weapon is pending load, and can detonate when damaged/destroyed.
+
+#### 4.0.2 Property Meaning
+
+Part-level properties:
+
+- `gas cost`: deployment/resource cost contribution of this part.
+- `mass`: mass contribution to unit total mass.
+- `tag`: semantic label(s) used by loaders/ammo/category filtering.
+- `HP`: part health baseline where applicable.
+- `armor`: flat mitigation value (structure-focused).
+- `recover`: structure self-recovery per second.
+- `color`: structure render/debug color.
+- `computing`: control processing capability budget.
+- `power assumption`: control-side assumed system power baseline.
+- `power`: engine thrust power source, provide power to other parts which has power assumption property.
+- `max speed`: engine speed cap contribution.
+- `power ground`: engine can provide ground propulsion.
+- `power air`: engine can provide air propulsion/lift.
+- `directional`:
+  - engine: directional air thrust mode.
+  - weapon: directional firing mode.
+- `default direction`: default facing (`up|down|left|right`) before template rotation.
+- `thrust angle`: one-sided directional air-thrust cone half-angle.
+- `bullet type`: weapon projectile family (`bullet|missile|laser`).
+- `damage`: base hit damage.
+- `range`: maximum effective range.
+- `cooldown`: base firing cooldown.
+- `recoil`: self-impulse on fire.
+- `hit impulse`: impulse applied to hit target.
+- `penetration`: armor penetration value.
+- `spread angle`: random angular spread.
+- `explode on hit`: whether projectile explodes on impact.
+- `explode radius`: explosive radius.
+- `projectile speed`: flight speed for non-laser projectiles.
+- `projectile gravity`: gravity/drop for non-laser projectiles.
+- `tracking`: projectile can seek targets (non-laser).
+- `tracking turn rate`: homing turn acceleration/rate.
+- `shoot angle`: one-sided directional shoot cone half-angle (`180` means omni).
+- `need loader`: weapon requires loader participation to reload/fire cycle.
+- `supported weapon tags`: weapon tags that a loader/ammo can service.
+- `load multiplier`: loader time multiplier on weapon cooldown.
+- `min load time`: minimum enforced loader cycle time.
+- `min burst interval`: minimum interval for burst/charge transfer cadence.
+- `max capacity`: ammo storage capacity.
+- `explosion damage`: ammo explosion damage.
+- `explosion radius`: ammo explosion radius.
+
+Cell-level properties:
+
+- `structure occupy`: occupies structure layer space.
+- `functional occupy`: occupies functional layer space.
+- `need structure behind`: requires structure support for functional-only cells.
+- `take damage`: for non-structure parts, if there is no structure behind the functional part, incoming damage is shared through attached structure points.
+- `attach point`: attachment support marker on functional parts; if multiple attach points exist, all must attach to structure.
+- `anchor point`: unique part center reference (mouse placement center).
+- `fire point`: unique muzzle/spawn point for weapon projectiles.
+
+#### 4.0.3 Part Type Property Set (By Category)
+
+`structure` should expose:
+
+- `gas cost`, `mass`, `HP`, `tag`, `armor`, `recover`, `color`.
+
+`control` should expose:
+
+- `gas cost`, `mass`, `tag`, `computing`, `power assumption`.
+
+`engine` should expose:
+
+- `gas cost`, `mass`, `tag`, `power`, `max speed`, `power ground`, `power air`, `directional` (air only), `default direction`, `thrust angle` (air directional only).
+
+`weapon` should expose:
+
+- `gas cost`, `mass`, `tag`, `bullet type`, `damage`, `range`, `cooldown`, `recoil`, `hit impulse`, `penetration`, `spread angle`, `explode on hit`, `explode radius` (explosive only), `projectile speed` (non-laser), `projectile gravity` (non-laser), `tracking` (non-laser), `tracking turn rate` (tracking only), `directional`, `shoot angle` (directional only), `need loader`, `default direction`.
+
+`loader` should expose:
+
+- `gas cost`, `mass`, `tag`, `supported weapon tags`, `load multiplier`, `min load time`, `min burst interval`.
+
+`ammo` should expose:
+
+- `gas cost`, `supported weapon tags`, `max capacity`, `explosion damage`, `explosion radius`.
+
+#### 4.0.4 Default Values (By Category)
+
+`structure` defaults:
+
+- `gas cost`: `10`
+- `mass`: `5`
+- `HP`: `25`
+- `tag`: `structure`
+- `armor`: `0`
+- `recover`: `0`
+- `color`: `#95a4b8`
+
+`control` defaults:
+
+- `gas cost`: `10`
+- `mass`: `2`
+- `tag`: `control`
+- `computing`: `100`
+- `power assumption`: `100`
+
+`engine` defaults:
+
+- `gas cost`: `10`
+- `mass`: `10`
+- `tag`: `engine`
+- `power`: `200`
+- `max speed`: `100`
+- `power ground`: `true`
+- `power air`: `false`
+- `directional` (air only): `true`
+- `default direction`: `down`
+- `thrust angle` (air directional): `30`
+
+`weapon` defaults:
+
+- `gas cost`: `10`
+- `mass`: `8`
+- `tag`: `weapon`
+- `bullet type`: `bullet`
+- `damage`: `20`
+- `range`: `300`
+- `cooldown`: `1.0`
+- `recoil`: `10`
+- `hit impulse`: `10`
+- `penetration`: `0`
+- `spread angle`: `0`
+- `explode on hit`: `false`
+- `explode radius` (explosive only): `50`
+- `projectile speed` (non-laser): `400`
+- `projectile gravity` (non-laser): `100`
+- `tracking` (non-laser): `false`
+- `tracking turn rate` (tracking only): `50`
+- `directional`: `true`
+- `shoot angle` (directional only): `30` (`180` for omni)
+- `need loader`: `false`
+- `default direction`: `right`
+
+`loader` defaults:
+
+- `gas cost`: `10`
+- `mass`: `5`
+- `tag`: `loader`
+- `supported weapon tags`: `cannon`
+- `load multiplier`: `1.0`
+- `min load time`: `0.5`
+- `min burst interval`: `0.2`
+
+`ammo` defaults:
+
+- `gas cost`: `10`
+- `supported weapon tags`: `cannon`
+- `max capacity`: `1`
+- `explosion damage`: `100`
+- `explosion radius`: `100`
+
+#### 4.0.5 Unified Part Editor Behavior (Authoritative)
+
+This subsection is the single source of truth for Part Editor behavior.
+
+File operations:
+
+- `New -> Save`:
+  - Creates a new part JSON file.
+  - If the draft id collides with an existing part id, the editor auto-allocates a new id before saving.
+- `Load -> Save`:
+  - Overwrites the existing part JSON for the same id.
+- `Load -> Rename -> Save`:
+  - Keeps the same id.
+  - Deletes the old file path for that id (old name-based filename) and writes a new file using the renamed filename.
+- `Load/Select -> Copy -> Save`:
+  - Copy creates a new draft with a new id.
+  - Save writes a new JSON file for that new id.
+
+Part-level property visibility (left pane):
+
+- Always show:
+  - `part name`
+  - `part type`
+  - `tags`
+  - part-type default/common fields (`gas cost`, and other per-type defaults)
+- `structure` selected:
+  - Show structure-only fields: `mass`, `HP`, `armor`, `recover`, `color`.
+  - Hide engine/weapon/loader/ammo-only fields.
+- `control` selected:
+  - Show: `mass`, `computing`, `power assumption`.
+- `engine` selected:
+  - Show: `mass`, `power`, `max speed`, `power ground`, `power air`.
+  - Show `directional`, `default direction`, `thrust angle` only when air propulsion is enabled (`power air = true`).
+- `weapon` selected:
+  - Show: `mass`, `bullet type`, `damage`, `range`, `cooldown`, `recoil`, `hit impulse`, `penetration`, `spread angle`, `need loader`, `directional`.
+  - Show `projectile speed` and `projectile gravity` only for non-laser bullets.
+  - Show `explode radius` only when `explode on hit = true`.
+  - Show `tracking` only for non-laser bullets; show `tracking turn rate` only when `tracking = true`.
+  - Show `shoot angle` and `default direction` only when `directional = true`.
+- `loader` selected:
+  - Show: `mass`, `supported weapon tags`, `load multiplier`, `min load time`, `min burst interval`.
+- `ammo` selected:
+  - Show: `supported weapon tags`, `max capacity`, `explosion damage`, `explosion radius`.
+
+Cell-level property visibility (right pane):
+
+- Always show for selected cell:
+  - `structure occupy`
+  - `functional occupy`
+  - `take damage`
+  - `anchor point` (unique)
+- Show `need structure behind` only when cell is functional-only (`functional occupy = true` and `structure occupy = false` and not an attach-point-only cell).
+- Show `attach point` only for functional parts/cells.
+- Show `fire point` only for weapon parts; must be unique per part.
+
+Ghost cell behavior:
+
+- Before left-click placement, the editor renders a ghost cell preview at the hovered grid cell.
+- Ghost preview is non-committal (no data mutation until click).
+- Valid target: normal ghost style.
+- Invalid target: blocked/alert ghost style.
+
+Validation and message placement:
+
+- Part validation produces `Error` and `Warning` severities.
+- Message placement in Part Editor:
+  - summary counts near the top status/header area of the Part Editor canvas.
+  - detailed issue list in the Part Editor canvas issue panel (right-buttom).
+- Save is allowed even when warnings/errors are present; messages are still shown so designers can iterate quickly.
 
 ## 4.1 Structure Layer (Outer)
 
 Rules:
 
-- Only simple boxes and box combinations.
-- Box cells connect on a 2D grid.
+- Only simple cells and cell combinations.
+- Cells connect on a 2D grid.
 - Structure receives collision damage first.
 - Shape affects hit profile, mass, and handling.
 
@@ -185,9 +391,9 @@ Materials (example):
 - Ceramic Composite: high armor vs kinetic, brittle vs explosive
 - Reactive Layered Plate: high blast resistance, expensive
 
-### Combined Box Mechanic
+### Combined Cell Mechanic
 
-Combined boxes are crafted from multiple basic boxes/materials and have improved properties.
+Combined cells are crafted from multiple basic cells/materials and have improved properties.
 
 - Property bonus examples:
   - +durability multiplier
@@ -197,9 +403,9 @@ Combined boxes are crafted from multiple basic boxes/materials and have improved
 
 Progression requirement:
 
-- Early game: only Small Basic Box
+- Early game: only Small Basic Cell
 - Mid game: unlock material variants
-- Later: unlock combined box recipes and advanced composites
+- Later: unlock combined cell recipes and advanced composites
 
 ## 4.2 Functional Layer (Inner)
 
@@ -207,7 +413,7 @@ Functional modules are placed inside structure cells. If surrounding structure i
 
 Attachment rules:
 
-- Every functional component must be attached to at least one structure box cell.
+- Every functional component must be attached to at least one structure cell.
 - Functional components contribute to **mass** and performance only; they do **not** add armor.
 - A detached or destroyed structure cell takes all attached functional components with it.
 - A unit can have only one Control Unit.
@@ -240,7 +446,7 @@ Attachment rules:
 Design constraints:
 
 - Mass and power budget must be valid.
-- Air unit validity rule: at least one `jetEngine` or `propeller` is required. Ground engines do not provide lift/thrust to aircraft.
+- Air unit validity rule: at least one engine with `power air = true` is required. Engines with only `power ground = true` do not provide lift/thrust to aircraft.
 - Weapon recoil/stability depends on structure and module placement.
 - Exposed ammo modules create high-risk weak points.
 - The unit blueprint is invalid without exactly one Control Unit.
@@ -275,14 +481,13 @@ Display layer provides optional visual mesh/sprite styling and silhouette polish
 
 - Developer default part definitions are file-based under `game/parts/default/`.
 - Developer/user part overrides are stored under `game/parts/user/`.
-- Current workflow: Part Designer saves to default part storage only (single `Save` action).
-- Canonical default part definitions are now explicitly authored in `game/parts/default/*.json` (one per current component family).
+- Canonical default part definitions are explicitly authored in `game/parts/default/*.json` and are being migrated to the new type-centric schema.
 - Default templates reference these explicit part IDs in `partId` so runtime/editor behavior matches configured part semantics.
 - Runtime part catalog merge order:
   1. file-backed defaults (`game/parts/default`),
   2. user part overrides (`game/parts/user`).
 - Part save filenames are derived from part name (illegal filename characters removed); runtime identity remains integer `id`.
-- Part Designer default values for `new part` and `base component switch` come from dedicated config defaults (component/material balance config), not from implicit built-in catalog entries.
+- Part Designer save/load/copy/rename behavior is defined in `4.0.5 Unified Part Editor Behavior (Authoritative)`.
 
 ---
 
@@ -330,11 +535,11 @@ Recommended starter values:
 - Air objects do not use ground Y axis for hit eligibility.
 - On 2D screen, altitude Z is rendered on vertical axis; combat logic treats air layer separately from ground Y matching.
 - Air thrust model:
-  - Aircraft use only `jetEngine`/`propeller` thrust for movement and anti-gravity.
+  - Aircraft use only engines with `power air = true` for movement and anti-gravity.
   - If upward thrust is below gravity, aircraft lose altitude with fall acceleration based on thrust deficit.
   - Unless the player requests descent, flight control prioritizes maintaining altitude and uses spare thrust for horizontal movement.
   - Air movement is thrust-speed driven (direct speed from thrust), not acceleration-ramp driven.
-  - When lift becomes critically low, aircraft enter a crash state: they push horizontally toward their base, then use any remaining lift (propellers only) to slow descent; otherwise they fall at full crash gravity and are destroyed on ground impact unless they reach base in time.
+  - When lift becomes critically low, aircraft enter a crash state: they push horizontally toward their base, then use any remaining directional thrust to slow descent; otherwise they fall at full crash gravity and are destroyed on ground impact unless they reach base in time.
 - Altitude affects:
   - weapon effectiveness
   - bomb accuracy
@@ -441,7 +646,7 @@ Control Unit outcome:
 
 ## 7.3 Why This Works
 
-- Keeps structure simple (boxes) while enabling deep outcomes.
+- Keeps structure simple (cells) while enabling deep outcomes.
 - Makes placement and armor layering meaningful.
 - Supports readable battle feedback and player learning.
 
@@ -548,7 +753,7 @@ Recommended balancing principles:
 
 ## 11.1 Early Game
 
-- Small basic box only
+- Small basic cell only
 - Basic engine + machine gun modules
 - Small squad cap
 - Focus: learn structure protection and module placement
@@ -561,7 +766,7 @@ Recommended balancing principles:
 
 ## 11.3 Late Game
 
-- Unlock combined box recipes and advanced composites
+- Unlock combined cell recipes and advanced composites
 - Unlock high-impact weapons and elite commander skills
 - Multi-front defense and high upkeep pressure
 
@@ -592,7 +797,7 @@ Exclude for MVP:
 ## 13. Implementation Notes (2D Performance)
 
 - Use fixed timestep simulation for deterministic combat feel.
-- Use broad-phase collision grid for box cells and projectiles.
+- Use broad-phase collision grid for cells and projectiles.
 - Pool projectiles, effects, and destroyed fragments.
 - Keep structure destruction cell-based, not pixel-fracture.
 - Run AI updates at lower frequency than physics where possible.
@@ -745,16 +950,16 @@ This preserves your desired physical rule: heavier units move less.
 
 | Material | Density (mass/cell) | ArmorResist | PenThreshold | BlastResist | Cost/cell | Unlock Stage |
 | --- | ---: | ---: | ---: | ---: | ---: | --- |
-| Basic Steel Box | 1.00 | 1.00 | 1.00 | 1.00 | 10 | Start |
-| Reinforced Steel Box | 1.30 | 1.35 | 1.25 | 1.10 | 18 | Early-Mid |
-| Ceramic Composite Box | 0.90 | 1.25 | 1.45 | 0.85 | 24 | Mid |
-| Layered Reactive Box | 1.45 | 1.55 | 1.30 | 1.60 | 34 | Mid-Late |
-| Combined Box Mk1 | 1.25 | 1.50 | 1.40 | 1.25 | 30 | Mid |
-| Combined Box Mk2 | 1.55 | 1.80 | 1.65 | 1.50 | 46 | Late |
+| Basic Steel Cell | 1.00 | 1.00 | 1.00 | 1.00 | 10 | Start |
+| Reinforced Steel Cell | 1.30 | 1.35 | 1.25 | 1.10 | 18 | Early-Mid |
+| Ceramic Composite Cell | 0.90 | 1.25 | 1.45 | 0.85 | 24 | Mid |
+| Layered Reactive Cell | 1.45 | 1.55 | 1.30 | 1.60 | 34 | Mid-Late |
+| Combined Cell Mk1 | 1.25 | 1.50 | 1.40 | 1.25 | 30 | Mid |
+| Combined Cell Mk2 | 1.55 | 1.80 | 1.65 | 1.50 | 46 | Late |
 
-Combined box rule (starter):
+Combined cell rule (starter):
 
-- Combined boxes require recipe materials and workshop level.
+- Combined cells require recipe materials and workshop level.
 - They gain a global bonus: `+15% durability`, `+10% stress distribution`.
 
 ## 15.3 Functional Component Mass and Vulnerability (Starter)

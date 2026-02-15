@@ -2,6 +2,8 @@
   "id": 20,
   "name": "rapid gun",
   "layer": "functional",
+  "partType": "weapon",
+  "partCategory": "bullet",
   "baseComponent": "rapidGun",
   "directional": true,
   "direction": "right",
@@ -9,6 +11,19 @@
     "x": 0,
     "y": 0
   },
+  "cells": [
+    {
+      "x": 0,
+      "y": 0,
+      "structureOccupy": false,
+      "functionalOccupy": true,
+      "needStructureBehind": true,
+      "takeDamage": true,
+      "attachPoint": false,
+      "anchorPoint": true,
+      "firePoint": true
+    }
+  ],
   "boxes": [
     {
       "x": 0,

@@ -2,6 +2,7 @@
   "id": 2,
   "name": "Cannon Loader",
   "layer": "functional",
+  "partType": "loader",
   "baseComponent": "cannonLoader",
   "directional": false,
   "direction": "up",
@@ -9,6 +10,19 @@
     "x": 0,
     "y": 0
   },
+  "cells": [
+    {
+      "x": 0,
+      "y": 0,
+      "structureOccupy": false,
+      "functionalOccupy": true,
+      "needStructureBehind": true,
+      "takeDamage": false,
+      "attachPoint": false,
+      "anchorPoint": true,
+      "firePoint": false
+    }
+  ],
   "boxes": [
     {
       "x": 0,

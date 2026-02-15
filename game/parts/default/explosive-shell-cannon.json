@@ -2,6 +2,8 @@
   "id": 7,
   "name": "Explosive Shell Cannon",
   "layer": "functional",
+  "partType": "weapon",
+  "partCategory": "explosive",
   "baseComponent": "explosiveShell",
   "directional": true,
   "direction": "right",
@@ -9,6 +11,30 @@
     "x": 0,
     "y": 0
   },
+  "cells": [
+    {
+      "x": 0,
+      "y": 0,
+      "structureOccupy": false,
+      "functionalOccupy": true,
+      "needStructureBehind": true,
+      "takeDamage": true,
+      "attachPoint": false,
+      "anchorPoint": true,
+      "firePoint": false
+    },
+    {
+      "x": 1,
+      "y": 0,
+      "structureOccupy": false,
+      "functionalOccupy": true,
+      "needStructureBehind": false,
+      "takeDamage": true,
+      "attachPoint": false,
+      "anchorPoint": false,
+      "firePoint": true
+    }
+  ],
   "boxes": [
     {
       "x": 0,
@@ -19,7 +45,8 @@
       "isAttachPoint": false,
       "isAnchorPoint": true,
       "isShootingPoint": false,
-      "takesDamage": true
+      "takesDamage": true,
+      "takesFunctionalDamage": true
     },
     {
       "x": 1,
@@ -30,7 +57,8 @@
       "isAttachPoint": false,
       "isAnchorPoint": false,
       "isShootingPoint": true,
-      "takesDamage": true
+      "takesDamage": true,
+      "takesFunctionalDamage": true
     }
   ],
   "placement": {

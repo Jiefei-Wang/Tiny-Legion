@@ -2,6 +2,8 @@
   "id": 17,
   "name": "Precision Beam",
   "layer": "functional",
+  "partType": "weapon",
+  "partCategory": "beam",
   "baseComponent": "precisionBeam",
   "directional": true,
   "direction": "right",
@@ -9,6 +11,19 @@
     "x": 0,
     "y": 0
   },
+  "cells": [
+    {
+      "x": 0,
+      "y": 0,
+      "structureOccupy": false,
+      "functionalOccupy": true,
+      "needStructureBehind": true,
+      "takeDamage": true,
+      "attachPoint": false,
+      "anchorPoint": true,
+      "firePoint": true
+    }
+  ],
   "boxes": [
     {
       "x": 0,
@@ -19,7 +34,8 @@
       "isAttachPoint": false,
       "isAnchorPoint": true,
       "isShootingPoint": true,
-      "takesDamage": true
+      "takesDamage": true,
+      "takesFunctionalDamage": true
     }
   ],
   "placement": {

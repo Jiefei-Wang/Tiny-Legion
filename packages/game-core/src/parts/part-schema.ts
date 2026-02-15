@@ -2,10 +2,69 @@ import { COMPONENTS } from "../config/balance/weapons.ts";
 import { MATERIALS } from "../config/balance/materials.ts";
 import { normalizeRotateQuarter, getPartFootprintCells } from "./part-geometry.ts";
 import { validatePartDefinitionDetailed } from "./part-validation.ts";
-import type { ComponentId, MaterialId, PartDefinition, PartDirection, UnitType } from "../types.ts";
+import type { ComponentId, MaterialId, PartCategory, PartDefinition, PartDirection, PartPropertySet, PartType, UnitType } from "../types.ts";
 
 export { normalizeRotateQuarter, rotateOffsetByQuarter, getPartFootprintCells } from "./part-geometry.ts";
 export { validatePartDefinitionDetailed, validatePartDefinition } from "./part-validation.ts";
+
+function resolvePartTypeFromComponent(component: ComponentId): PartType {
+  const stats = COMPONENTS[component];
+  if (stats.type === "control" || stats.type === "engine" || stats.type === "weapon" || stats.type === "loader" || stats.type === "ammo") {
+    return stats.type;
+  }
+  return "weapon";
+}
+
+function resolvePartCategoryFromComponent(component: ComponentId): PartCategory | undefined {
+  if (component === "engineS" || component === "engineM") {
+    return "vehicle";
+  }
+  if (component === "jetEngine") {
+    return "jet";
+  }
+  if (component === "propeller") {
+    return "propeller";
+  }
+  if (component === "rapidGun" || component === "heavyCannon") {
+    return "bullet";
+  }
+  if (component === "explosiveShell") {
+    return "explosive";
+  }
+  if (component === "trackingMissile") {
+    return "missile";
+  }
+  if (component === "precisionBeam") {
+    return "beam";
+  }
+  if (component === "empEmitter") {
+    return "emp";
+  }
+  return undefined;
+}
+
+function mapPartTypeAndCategoryToComponent(partType: PartType, partCategory?: PartCategory): ComponentId {
+  if (partType === "structure" || partType === "control") {
+    return "control";
+  }
+  if (partType === "engine") {
+    if (partCategory === "jet") return "jetEngine";
+    if (partCategory === "propeller") return "propeller";
+    return "engineS";
+  }
+  if (partType === "weapon") {
+    if (partCategory === "explosive") return "explosiveShell";
+    if (partCategory === "missile") return "trackingMissile";
+    if (partCategory === "beam") return "precisionBeam";
+    if (partCategory === "emp") return "empEmitter";
+    return "rapidGun";
+  }
+  if (partType === "loader") {
+    return "cannonLoader";
+  }
+  return "ammo";
+}
+
 
 function collectPartTags(part: PartDefinition): Set<string> {
   const tags = part.tags ?? [];
@@ -23,15 +82,16 @@ export function isPartCompatibleWithUnitType(part: PartDefinition, unitType: Uni
     return unitType === "ground" ? hasGroundTag : hasAirTag;
   }
 
-  const isEngine = part.properties?.isEngine === true || COMPONENTS[part.baseComponent].type === "engine";
+  const isEngine = part.partType === "engine" || part.properties?.isEngine === true || COMPONENTS[part.baseComponent].type === "engine";
   if (!isEngine) {
     return true;
   }
-  const engineType = part.properties?.engineType ?? COMPONENTS[part.baseComponent].propulsion?.platform;
-  if (engineType === "ground" || engineType === "air") {
-    return engineType === unitType;
+  const supportsGround = part.partProperties?.powerGround ?? ((part.properties?.engineType ?? COMPONENTS[part.baseComponent].propulsion?.platform) === "ground");
+  const supportsAir = part.partProperties?.powerAir ?? ((part.properties?.engineType ?? COMPONENTS[part.baseComponent].propulsion?.platform) === "air");
+  if (unitType === "ground") {
+    return supportsGround;
   }
-  return true;
+  return supportsAir;
 }
 
 function isComponentId(value: unknown): value is ComponentId {
@@ -167,6 +227,29 @@ function readOptionalPartDirection(value: unknown): PartDirection | undefined {
   return undefined;
 }
 
+function readOptionalPartType(value: unknown): PartType | undefined {
+  if (value === "structure" || value === "control" || value === "engine" || value === "weapon" || value === "loader" || value === "ammo") {
+    return value;
+  }
+  return undefined;
+}
+
+function readOptionalPartCategory(value: unknown): PartCategory | undefined {
+  if (
+    value === "vehicle"
+    || value === "jet"
+    || value === "propeller"
+    || value === "bullet"
+    || value === "explosive"
+    || value === "missile"
+    || value === "beam"
+    || value === "emp"
+  ) {
+    return value;
+  }
+  return undefined;
+}
+
 function getDefaultPartDirection(baseComponent: ComponentId): PartDirection {
   if (baseComponent === "propeller") {
     return "down";
@@ -192,10 +275,22 @@ function createImplicitStructurePartDefinition(component: ComponentId): PartDefi
     id: DEFAULT_PART_ID_BY_COMPONENT[component],
     name: `${component}-structure`,
     layer: "structure",
+    partType: "structure",
     baseComponent: component,
     directional: stats.directional === true,
     direction: getDefaultPartDirection(component),
     anchor: { x: 0, y: 0 },
+    cells: [{
+      x: 0,
+      y: 0,
+      structureOccupy: true,
+      functionalOccupy: false,
+      needStructureBehind: false,
+      takeDamage: true,
+      attachPoint: false,
+      anchorPoint: true,
+      firePoint: false,
+    }],
     boxes: [{
       x: 0,
       y: 0,
@@ -240,10 +335,22 @@ function createImplicitStructureMaterialPartDefinition(materialId: MaterialId): 
     id: DEFAULT_MATERIAL_PART_ID[materialId],
     name: material.label,
     layer: "structure",
+    partType: "structure",
     baseComponent: "control",
     directional: false,
     direction: "up",
     anchor: { x: 0, y: 0 },
+    cells: [{
+      x: 0,
+      y: 0,
+      structureOccupy: true,
+      functionalOccupy: false,
+      needStructureBehind: false,
+      takeDamage: true,
+      attachPoint: false,
+      anchorPoint: true,
+      firePoint: false,
+    }],
     boxes: [{
       x: 0,
       y: 0,
@@ -267,6 +374,15 @@ function createImplicitStructureMaterialPartDefinition(materialId: MaterialId): 
     stats: {
       mass: material.mass,
       gasCost: getDefaultMaterialGasCost(materialId),
+    },
+    partProperties: {
+      gasCost: getDefaultMaterialGasCost(materialId),
+      mass: material.mass,
+      hp: material.hp,
+      tag: "structure",
+      armor: material.armor,
+      recover: material.recoverPerSecond,
+      color: material.color,
     },
     properties: {
       category: "structure",
@@ -312,10 +428,23 @@ export function createImplicitPartDefinition(component: ComponentId): PartDefini
     id: DEFAULT_PART_ID_BY_COMPONENT[component],
     name: component,
     layer: "functional",
+    partType: resolvePartTypeFromComponent(component),
+    partCategory: resolvePartCategoryFromComponent(component),
     baseComponent: component,
     directional: stats.directional === true,
     direction: getDefaultPartDirection(component),
     anchor: { x: 0, y: 0 },
+    cells: boxes.map((box) => ({
+      x: box.x,
+      y: box.y,
+      structureOccupy: box.occupiesStructureSpace,
+      functionalOccupy: box.occupiesFunctionalSpace,
+      needStructureBehind: box.needsStructureBehind,
+      takeDamage: box.takesDamage,
+      attachPoint: box.isAttachPoint,
+      anchorPoint: box.isAnchorPoint,
+      firePoint: box.isShootingPoint,
+    })),
     boxes,
     placement: {
       requireStructureOffsets: stats.placement?.requireStructureBelowAnchor ? [{ x: 0, y: 1 }] : [],
@@ -327,6 +456,43 @@ export function createImplicitPartDefinition(component: ComponentId): PartDefini
     },
     stats: {
       gasCost: stats.gasCost,
+    },
+    partProperties: {
+      gasCost: stats.gasCost ?? 10,
+      mass: stats.mass,
+      tag: resolvePartTypeFromComponent(component),
+      power: stats.power,
+      maxSpeed: stats.maxSpeed,
+      powerGround: stats.type === "engine" ? stats.propulsion?.platform === "ground" : undefined,
+      powerAir: stats.type === "engine" ? stats.propulsion?.platform === "air" : undefined,
+      directional: stats.directional,
+      defaultDirection: getDefaultPartDirection(component),
+      thrustAngleDeg: stats.type === "engine" ? (stats.propulsion?.thrustAngleDeg ?? 30) : undefined,
+      bulletType: stats.type === "weapon"
+        ? ((stats.weaponClass === "tracking")
+            ? "missile"
+            : (stats.weaponClass === "beam-precision" ? "laser" : "bullet"))
+        : undefined,
+      damage: stats.damage,
+      range: stats.range,
+      cooldown: stats.cooldown,
+      recoil: stats.recoil,
+      hitImpulse: stats.hitImpulse,
+      penetration: stats.penetration,
+      spreadAngleDeg: stats.spreadDeg,
+      explodeOnHit: stats.weaponClass === "explosive",
+      explodeRadius: stats.explosive?.blastRadius,
+      projectileSpeed: stats.projectileSpeed,
+      projectileGravity: stats.projectileGravity,
+      tracking: stats.weaponClass === "tracking",
+      trackingTurnRate: stats.tracking?.turnRateDegPerSec,
+      shootAngleDeg: stats.shootAngleDeg,
+      needLoader: stats.weaponClass === "tracking" || stats.weaponClass === "heavy-shot" || stats.weaponClass === "explosive",
+      supportedWeaponTags: stats.type === "loader" ? (stats.loader?.supports ?? []).map((entry) => String(entry)) : undefined,
+      loadMultiplier: stats.loader?.loadMultiplier,
+      minLoadTime: stats.loader?.minLoadTime,
+      minBurstInterval: stats.loader?.minBurstInterval,
+      maxCapacity: stats.type === "ammo" ? 1 : stats.loader?.storeCapacity,
     },
     properties: {
       category: stats.type,
@@ -368,6 +534,9 @@ export function createDefaultPartDefinitions(): PartDefinition[] {
 }
 
 export function resolvePartGasCost(part: PartDefinition): number {
+  if (typeof part.partProperties?.gasCost === "number" && Number.isFinite(part.partProperties.gasCost)) {
+    return Math.max(0, Math.floor(part.partProperties.gasCost));
+  }
   if (typeof part.stats?.gasCost === "number" && Number.isFinite(part.stats.gasCost)) {
     return Math.max(0, Math.floor(part.stats.gasCost));
   }
@@ -438,10 +607,25 @@ export function clonePartDefinition(part: PartDefinition): PartDefinition {
     id: part.id,
     name: part.name,
     layer: part.layer,
+    partType: part.partType,
+    partCategory: part.partCategory,
     baseComponent: part.baseComponent,
     directional: part.directional,
     direction: part.direction,
     anchor: { x: part.anchor.x, y: part.anchor.y },
+    cells: part.cells
+      ? part.cells.map((cell) => ({
+          x: cell.x,
+          y: cell.y,
+          structureOccupy: cell.structureOccupy,
+          functionalOccupy: cell.functionalOccupy,
+          needStructureBehind: cell.needStructureBehind,
+          takeDamage: cell.takeDamage,
+          attachPoint: cell.attachPoint,
+          anchorPoint: cell.anchorPoint,
+          firePoint: cell.firePoint,
+        }))
+      : undefined,
     boxes: part.boxes.map((box) => ({
       x: box.x,
       y: box.y,
@@ -462,6 +646,49 @@ export function clonePartDefinition(part: PartDefinition): PartDefinition {
           requireStructureOnStructureOccupiedBoxes: part.placement.requireStructureOnStructureOccupiedBoxes,
           requireEmptyStructureOffsets: (part.placement.requireEmptyStructureOffsets ?? []).map((offset) => ({ x: offset.x, y: offset.y })),
           requireEmptyFunctionalOffsets: (part.placement.requireEmptyFunctionalOffsets ?? []).map((offset) => ({ x: offset.x, y: offset.y })),
+        }
+      : undefined,
+    partProperties: part.partProperties
+      ? {
+          gasCost: part.partProperties.gasCost,
+          mass: part.partProperties.mass,
+          hp: part.partProperties.hp,
+          tag: part.partProperties.tag,
+          armor: part.partProperties.armor,
+          recover: part.partProperties.recover,
+          color: part.partProperties.color,
+          computing: part.partProperties.computing,
+          powerAssumption: part.partProperties.powerAssumption,
+          power: part.partProperties.power,
+          maxSpeed: part.partProperties.maxSpeed,
+          powerGround: part.partProperties.powerGround,
+          powerAir: part.partProperties.powerAir,
+          directional: part.partProperties.directional,
+          defaultDirection: part.partProperties.defaultDirection,
+          thrustAngleDeg: part.partProperties.thrustAngleDeg,
+          bulletType: part.partProperties.bulletType,
+          damage: part.partProperties.damage,
+          range: part.partProperties.range,
+          cooldown: part.partProperties.cooldown,
+          recoil: part.partProperties.recoil,
+          hitImpulse: part.partProperties.hitImpulse,
+          penetration: part.partProperties.penetration,
+          spreadAngleDeg: part.partProperties.spreadAngleDeg,
+          explodeOnHit: part.partProperties.explodeOnHit,
+          explodeRadius: part.partProperties.explodeRadius,
+          projectileSpeed: part.partProperties.projectileSpeed,
+          projectileGravity: part.partProperties.projectileGravity,
+          tracking: part.partProperties.tracking,
+          trackingTurnRate: part.partProperties.trackingTurnRate,
+          shootAngleDeg: part.partProperties.shootAngleDeg,
+          needLoader: part.partProperties.needLoader,
+          supportedWeaponTags: part.partProperties.supportedWeaponTags ? [...part.partProperties.supportedWeaponTags] : undefined,
+          loadMultiplier: part.partProperties.loadMultiplier,
+          minLoadTime: part.partProperties.minLoadTime,
+          minBurstInterval: part.partProperties.minBurstInterval,
+          maxCapacity: part.partProperties.maxCapacity,
+          explosionDamage: part.partProperties.explosionDamage,
+          explosionRadius: part.partProperties.explosionRadius,
         }
       : undefined,
     stats: part.stats
@@ -527,11 +754,15 @@ export function parsePartDefinition(input: unknown): PartDefinition | null {
     return null;
   }
   const data = input as Record<string, unknown>;
+  const declaredPartType = readOptionalPartType(data.partType ?? data.type);
+  const declaredPartCategory = readOptionalPartCategory(data.partCategory ?? data.categoryType);
   const baseComponent = isComponentId(data.baseComponent)
     ? data.baseComponent
     : isComponentId(data.component)
       ? data.component
-      : null;
+      : declaredPartType
+        ? mapPartTypeAndCategoryToComponent(declaredPartType, declaredPartCategory)
+        : null;
   if (!baseComponent) {
     return null;
   }
@@ -541,17 +772,55 @@ export function parsePartDefinition(input: unknown): PartDefinition | null {
     return null;
   }
   const name = typeof data.name === "string" && data.name.trim().length > 0 ? data.name.trim() : `part-${id}`;
-  const layer = data.layer === "structure" ? "structure" : "functional";
+  const inferredPartType = declaredPartType ?? (data.layer === "structure" ? "structure" : resolvePartTypeFromComponent(baseComponent));
+  const layer = inferredPartType === "structure" || data.layer === "structure" ? "structure" : "functional";
 
   const anchorRecord = data.anchor && typeof data.anchor === "object" ? (data.anchor as Record<string, unknown>) : {};
   const requestedAnchorX = readOptionalInt(anchorRecord.x) ?? 0;
   const requestedAnchorY = readOptionalInt(anchorRecord.y) ?? 0;
 
   const boxesRaw = Array.isArray(data.boxes) ? data.boxes : [];
+  const cellsRaw = Array.isArray(data.cells) ? data.cells : [];
   const defaultOccupiesStructureSpace = layer === "structure";
   const defaultOccupiesFunctionalSpace = layer !== "structure";
   let anchorFromBox: { x: number; y: number } | null = null;
-  const boxes = boxesRaw
+  const cellsAsBoxes = cellsRaw
+    .map((raw) => {
+      if (!raw || typeof raw !== "object") {
+        return null;
+      }
+      const record = raw as Record<string, unknown>;
+      const x = readOptionalInt(record.x);
+      const y = readOptionalInt(record.y);
+      if (x === undefined || y === undefined) {
+        return null;
+      }
+      const isAnchorPoint = record.anchorPoint === true || record.isAnchorPoint === true;
+      if (isAnchorPoint && anchorFromBox === null) {
+        anchorFromBox = { x, y };
+      }
+      const isAttachPoint = record.attachPoint === true;
+      const occupiesStructureSpace = typeof record.structureOccupy === "boolean"
+        ? record.structureOccupy
+        : defaultOccupiesStructureSpace;
+      const occupiesFunctionalSpace = typeof record.functionalOccupy === "boolean"
+        ? record.functionalOccupy
+        : defaultOccupiesFunctionalSpace;
+      return {
+        x,
+        y,
+        occupiesStructureSpace,
+        occupiesFunctionalSpace,
+        needsStructureBehind: record.needStructureBehind === true,
+        isAttachPoint,
+        isAnchorPoint,
+        isShootingPoint: record.firePoint === true,
+        takesDamage: typeof record.takeDamage === "boolean" ? record.takeDamage : undefined,
+        takesFunctionalDamage: typeof record.takeDamage === "boolean" ? record.takeDamage : undefined,
+      };
+    })
+    .filter((entry): entry is NonNullable<typeof entry> => entry !== null);
+  const parsedBoxes = boxesRaw
     .map((raw) => {
       if (!raw || typeof raw !== "object") {
         return null;
@@ -589,6 +858,7 @@ export function parsePartDefinition(input: unknown): PartDefinition | null {
       };
     })
     .filter((entry): entry is NonNullable<typeof entry> => entry !== null);
+  const boxes = cellsAsBoxes.length > 0 ? cellsAsBoxes : parsedBoxes;
 
   const fallback = layer === "structure"
     ? createImplicitStructurePartDefinition(baseComponent)
@@ -619,15 +889,79 @@ export function parsePartDefinition(input: unknown): PartDefinition | null {
   const propertiesRecord = data.properties && typeof data.properties === "object"
     ? (data.properties as Record<string, unknown>)
     : {};
+  const partPropertiesRecord = data.partProperties && typeof data.partProperties === "object"
+    ? (data.partProperties as Record<string, unknown>)
+    : {};
+
+  const normalizedPartType: PartType = inferredPartType;
+  const normalizedPartCategory = declaredPartCategory ?? resolvePartCategoryFromComponent(baseComponent);
+  const partProperties: PartPropertySet = {
+    gasCost: readOptionalNumber(partPropertiesRecord.gasCost),
+    mass: readOptionalNumber(partPropertiesRecord.mass),
+    hp: readOptionalNumber(partPropertiesRecord.hp),
+    tag: readOptionalString(partPropertiesRecord.tag),
+    armor: readOptionalNumber(partPropertiesRecord.armor),
+    recover: readOptionalNumber(partPropertiesRecord.recover),
+    color: readOptionalString(partPropertiesRecord.color),
+    computing: readOptionalNumber(partPropertiesRecord.computing),
+    powerAssumption: readOptionalNumber(partPropertiesRecord.powerAssumption),
+    power: readOptionalNumber(partPropertiesRecord.power),
+    maxSpeed: readOptionalNumber(partPropertiesRecord.maxSpeed),
+    powerGround: readOptionalBoolean(partPropertiesRecord.powerGround),
+    powerAir: readOptionalBoolean(partPropertiesRecord.powerAir),
+    directional: readOptionalBoolean(partPropertiesRecord.directional),
+    defaultDirection: readOptionalPartDirection(partPropertiesRecord.defaultDirection),
+    thrustAngleDeg: readOptionalNumber(partPropertiesRecord.thrustAngleDeg),
+    bulletType: (partPropertiesRecord.bulletType === "bullet" || partPropertiesRecord.bulletType === "missile" || partPropertiesRecord.bulletType === "laser")
+      ? partPropertiesRecord.bulletType
+      : undefined,
+    damage: readOptionalNumber(partPropertiesRecord.damage),
+    range: readOptionalNumber(partPropertiesRecord.range),
+    cooldown: readOptionalNumber(partPropertiesRecord.cooldown),
+    recoil: readOptionalNumber(partPropertiesRecord.recoil),
+    hitImpulse: readOptionalNumber(partPropertiesRecord.hitImpulse),
+    penetration: readOptionalNumber(partPropertiesRecord.penetration),
+    spreadAngleDeg: readOptionalNumber(partPropertiesRecord.spreadAngleDeg),
+    explodeOnHit: readOptionalBoolean(partPropertiesRecord.explodeOnHit),
+    explodeRadius: readOptionalNumber(partPropertiesRecord.explodeRadius),
+    projectileSpeed: readOptionalNumber(partPropertiesRecord.projectileSpeed),
+    projectileGravity: readOptionalNumber(partPropertiesRecord.projectileGravity),
+    tracking: readOptionalBoolean(partPropertiesRecord.tracking),
+    trackingTurnRate: readOptionalNumber(partPropertiesRecord.trackingTurnRate),
+    shootAngleDeg: readOptionalNumber(partPropertiesRecord.shootAngleDeg),
+    needLoader: readOptionalBoolean(partPropertiesRecord.needLoader),
+    supportedWeaponTags: normalizeStringList(partPropertiesRecord.supportedWeaponTags),
+    loadMultiplier: readOptionalNumber(partPropertiesRecord.loadMultiplier),
+    minLoadTime: readOptionalNumber(partPropertiesRecord.minLoadTime),
+    minBurstInterval: readOptionalNumber(partPropertiesRecord.minBurstInterval),
+    maxCapacity: readOptionalNumber(partPropertiesRecord.maxCapacity),
+    explosionDamage: readOptionalNumber(partPropertiesRecord.explosionDamage),
+    explosionRadius: readOptionalNumber(partPropertiesRecord.explosionRadius),
+  };
 
   const parsed: PartDefinition = {
     id,
     name,
     layer,
+    partType: normalizedPartType,
+    partCategory: normalizedPartCategory,
     baseComponent,
-    directional: typeof data.directional === "boolean" ? data.directional : COMPONENTS[baseComponent].directional === true,
-    direction: readOptionalPartDirection(data.direction) ?? getDefaultPartDirection(baseComponent),
+    directional: typeof data.directional === "boolean"
+      ? data.directional
+      : (partProperties.directional ?? COMPONENTS[baseComponent].directional === true),
+    direction: readOptionalPartDirection(data.direction) ?? partProperties.defaultDirection ?? getDefaultPartDirection(baseComponent),
     anchor: { x: resolvedAnchor.x, y: resolvedAnchor.y },
+    cells: resolvedBoxes.map((cell) => ({
+      x: cell.x,
+      y: cell.y,
+      structureOccupy: cell.occupiesStructureSpace,
+      functionalOccupy: cell.occupiesFunctionalSpace,
+      needStructureBehind: cell.needsStructureBehind,
+      takeDamage: cell.takesDamage,
+      attachPoint: cell.isAttachPoint,
+      anchorPoint: cell.isAnchorPoint,
+      firePoint: cell.isShootingPoint,
+    })),
     boxes: resolvedBoxes,
     placement: {
       requireStructureOffsets: normalizeOffsets(placementRecord.requireStructureOffsets),
@@ -638,28 +972,28 @@ export function parsePartDefinition(input: unknown): PartDefinition | null {
       requireEmptyFunctionalOffsets: normalizeOffsets(placementRecord.requireEmptyFunctionalOffsets),
     },
     stats: {
-      gasCost: readOptionalNumber(runtimeRecord.gasCost),
-      mass: readOptionalNumber(runtimeRecord.mass),
+      gasCost: readOptionalNumber(runtimeRecord.gasCost ?? partProperties.gasCost),
+      mass: readOptionalNumber(runtimeRecord.mass ?? partProperties.mass),
       hpMul: readOptionalNumber(runtimeRecord.hpMul),
-      power: readOptionalNumber(runtimeRecord.power),
-      maxSpeed: readOptionalNumber(runtimeRecord.maxSpeed),
-      recoil: readOptionalNumber(runtimeRecord.recoil),
-      hitImpulse: readOptionalNumber(runtimeRecord.hitImpulse),
-      damage: readOptionalNumber(runtimeRecord.damage),
-      range: readOptionalNumber(runtimeRecord.range),
-      cooldown: readOptionalNumber(runtimeRecord.cooldown),
-      shootAngleDeg: readOptionalNumber(runtimeRecord.shootAngleDeg),
-      projectileSpeed: readOptionalNumber(runtimeRecord.projectileSpeed),
-      projectileGravity: readOptionalNumber(runtimeRecord.projectileGravity),
-      penetration: readOptionalNumber(runtimeRecord.penetration),
-      spreadDeg: readOptionalNumber(runtimeRecord.spreadDeg),
+      power: readOptionalNumber(runtimeRecord.power ?? partProperties.power),
+      maxSpeed: readOptionalNumber(runtimeRecord.maxSpeed ?? partProperties.maxSpeed),
+      recoil: readOptionalNumber(runtimeRecord.recoil ?? partProperties.recoil),
+      hitImpulse: readOptionalNumber(runtimeRecord.hitImpulse ?? partProperties.hitImpulse),
+      damage: readOptionalNumber(runtimeRecord.damage ?? partProperties.damage),
+      range: readOptionalNumber(runtimeRecord.range ?? partProperties.range),
+      cooldown: readOptionalNumber(runtimeRecord.cooldown ?? partProperties.cooldown),
+      shootAngleDeg: readOptionalNumber(runtimeRecord.shootAngleDeg ?? partProperties.shootAngleDeg),
+      projectileSpeed: readOptionalNumber(runtimeRecord.projectileSpeed ?? partProperties.projectileSpeed),
+      projectileGravity: readOptionalNumber(runtimeRecord.projectileGravity ?? partProperties.projectileGravity),
+      penetration: readOptionalNumber(runtimeRecord.penetration ?? partProperties.penetration),
+      spreadDeg: readOptionalNumber(runtimeRecord.spreadDeg ?? partProperties.spreadAngleDeg),
       explosiveDeliveryMode: runtimeRecord.explosiveDeliveryMode === "shell" || runtimeRecord.explosiveDeliveryMode === "bomb"
         ? runtimeRecord.explosiveDeliveryMode
         : runtimeExplosiveRecord.deliveryMode === "shell" || runtimeExplosiveRecord.deliveryMode === "bomb"
           ? runtimeExplosiveRecord.deliveryMode
         : undefined,
-      explosiveBlastRadius: readOptionalNumber(runtimeRecord.explosiveBlastRadius ?? runtimeExplosiveRecord.blastRadius),
-      explosiveBlastDamage: readOptionalNumber(runtimeRecord.explosiveBlastDamage ?? runtimeExplosiveRecord.blastDamage),
+      explosiveBlastRadius: readOptionalNumber(runtimeRecord.explosiveBlastRadius ?? runtimeExplosiveRecord.blastRadius ?? partProperties.explodeRadius ?? partProperties.explosionRadius),
+      explosiveBlastDamage: readOptionalNumber(runtimeRecord.explosiveBlastDamage ?? runtimeExplosiveRecord.blastDamage ?? partProperties.explosionDamage),
       explosiveFalloffPower: readOptionalNumber(runtimeRecord.explosiveFalloffPower ?? runtimeExplosiveRecord.falloffPower),
       explosiveFuse: runtimeRecord.explosiveFuse === "impact" || runtimeRecord.explosiveFuse === "timed"
         ? runtimeRecord.explosiveFuse
@@ -667,24 +1001,38 @@ export function parsePartDefinition(input: unknown): PartDefinition | null {
           ? runtimeExplosiveRecord.fuse
         : undefined,
       explosiveFuseTime: readOptionalNumber(runtimeRecord.explosiveFuseTime ?? runtimeExplosiveRecord.fuseTime),
-      trackingTurnRateDegPerSec: readOptionalNumber(runtimeRecord.trackingTurnRateDegPerSec ?? runtimeTrackingRecord.turnRateDegPerSec),
+      trackingTurnRateDegPerSec: readOptionalNumber(runtimeRecord.trackingTurnRateDegPerSec ?? runtimeTrackingRecord.turnRateDegPerSec ?? partProperties.trackingTurnRate),
       controlImpairFactor: readOptionalNumber(runtimeRecord.controlImpairFactor ?? runtimeControlRecord.impairFactor),
       controlDuration: readOptionalNumber(runtimeRecord.controlDuration ?? runtimeControlRecord.duration),
       loaderSupports: Array.isArray(runtimeRecord.loaderSupports)
         ? runtimeRecord.loaderSupports
             .map((entry) => readOptionalWeaponClass(entry))
             .filter((entry): entry is "rapid-fire" | "heavy-shot" | "explosive" | "tracking" | "beam-precision" | "control-utility" => entry !== undefined)
+        : Array.isArray(partProperties.supportedWeaponTags)
+          ? partProperties.supportedWeaponTags
+              .map((entry) => {
+                if (entry === "missile") return "tracking";
+                if (entry === "beam" || entry === "laser") return "beam-precision";
+                if (entry === "emp") return "control-utility";
+                if (entry === "explosive") return "explosive";
+                if (entry === "cannon") return "heavy-shot";
+                return "rapid-fire";
+              })
+              .filter((entry): entry is "rapid-fire" | "heavy-shot" | "explosive" | "tracking" | "beam-precision" | "control-utility" => entry !== undefined)
         : Array.isArray(runtimeLoaderRecord.supports)
           ? runtimeLoaderRecord.supports
               .map((entry) => readOptionalWeaponClass(entry))
               .filter((entry): entry is "rapid-fire" | "heavy-shot" | "explosive" | "tracking" | "beam-precision" | "control-utility" => entry !== undefined)
         : undefined,
-      loaderLoadMultiplier: readOptionalNumber(runtimeRecord.loaderLoadMultiplier ?? runtimeLoaderRecord.loadMultiplier),
+      loaderLoadMultiplier: readOptionalNumber(runtimeRecord.loaderLoadMultiplier ?? runtimeLoaderRecord.loadMultiplier ?? partProperties.loadMultiplier),
       loaderFastOperation: readOptionalBoolean(runtimeRecord.loaderFastOperation ?? runtimeLoaderRecord.fastOperation),
-      loaderMinLoadTime: readOptionalNumber(runtimeRecord.loaderMinLoadTime ?? runtimeLoaderRecord.minLoadTime),
-      loaderStoreCapacity: readOptionalNumber(runtimeRecord.loaderStoreCapacity ?? runtimeLoaderRecord.storeCapacity),
-      loaderMinBurstInterval: readOptionalNumber(runtimeRecord.loaderMinBurstInterval ?? runtimeLoaderRecord.minBurstInterval),
+      loaderMinLoadTime: readOptionalNumber(runtimeRecord.loaderMinLoadTime ?? runtimeLoaderRecord.minLoadTime ?? partProperties.minLoadTime),
+      loaderStoreCapacity: readOptionalNumber(runtimeRecord.loaderStoreCapacity ?? runtimeLoaderRecord.storeCapacity ?? partProperties.maxCapacity),
+      loaderMinBurstInterval: readOptionalNumber(runtimeRecord.loaderMinBurstInterval ?? runtimeLoaderRecord.minBurstInterval ?? partProperties.minBurstInterval),
     },
+    partProperties: Object.values(partProperties).some((value) => value !== undefined)
+      ? partProperties
+      : undefined,
     properties: {
       category: readOptionalString(propertiesRecord.category ?? data.category),
       subcategory: readOptionalString(propertiesRecord.subcategory ?? data.subcategory),
@@ -701,34 +1049,48 @@ export function parsePartDefinition(input: unknown): PartDefinition | null {
           || data.materialId === "combined"
           ? data.materialId
         : undefined,
-      materialArmor: readOptionalNumber(propertiesRecord.materialArmor ?? propertiesRecord.material_armor),
+      materialArmor: readOptionalNumber(propertiesRecord.materialArmor ?? propertiesRecord.material_armor ?? partProperties.armor),
       materialRecoverPerSecond: readOptionalNumber(
         propertiesRecord.materialRecoverPerSecond
-          ?? propertiesRecord.material_recover_per_second,
+          ?? propertiesRecord.material_recover_per_second
+          ?? partProperties.recover,
       ),
-      materialColor: readOptionalString(propertiesRecord.materialColor ?? propertiesRecord.material_color),
-      hp: readOptionalNumber(propertiesRecord.hp ?? data.hp),
-      isEngine: readOptionalBoolean(propertiesRecord.isEngine ?? propertiesRecord.is_engine ?? data.isEngine ?? data.is_engine),
-      isWeapon: readOptionalBoolean(propertiesRecord.isWeapon ?? propertiesRecord.is_weapon ?? data.isWeapon ?? data.is_weapon),
-      isLoader: readOptionalBoolean(propertiesRecord.isLoader ?? propertiesRecord.is_loader ?? data.isLoader ?? data.is_loader),
-      isArmor: readOptionalBoolean(propertiesRecord.isArmor ?? propertiesRecord.is_armor ?? data.isArmor ?? data.is_armor),
+      materialColor: readOptionalString(propertiesRecord.materialColor ?? propertiesRecord.material_color ?? partProperties.color),
+      hp: readOptionalNumber(propertiesRecord.hp ?? data.hp ?? partProperties.hp),
+      isEngine: readOptionalBoolean(propertiesRecord.isEngine ?? propertiesRecord.is_engine ?? data.isEngine ?? data.is_engine ?? (normalizedPartType === "engine")),
+      isWeapon: readOptionalBoolean(propertiesRecord.isWeapon ?? propertiesRecord.is_weapon ?? data.isWeapon ?? data.is_weapon ?? (normalizedPartType === "weapon")),
+      isLoader: readOptionalBoolean(propertiesRecord.isLoader ?? propertiesRecord.is_loader ?? data.isLoader ?? data.is_loader ?? (normalizedPartType === "loader")),
+      isArmor: readOptionalBoolean(propertiesRecord.isArmor ?? propertiesRecord.is_armor ?? data.isArmor ?? data.is_armor ?? (normalizedPartType === "structure")),
       engineType: (propertiesRecord.engineType === "ground" || propertiesRecord.engineType === "air")
         ? propertiesRecord.engineType
         : (propertiesRecord.engine_type === "ground" || propertiesRecord.engine_type === "air")
           ? propertiesRecord.engine_type
-          : undefined,
-      weaponType: readOptionalWeaponClass(propertiesRecord.weaponType ?? propertiesRecord.weapon_type),
+          : (partProperties.powerAir === true ? "air" : (partProperties.powerGround === true ? "ground" : undefined)),
+      weaponType: readOptionalWeaponClass(propertiesRecord.weaponType ?? propertiesRecord.weapon_type)
+        ?? (normalizedPartCategory === "explosive"
+          ? "explosive"
+          : normalizedPartCategory === "missile"
+            ? "tracking"
+            : normalizedPartCategory === "beam"
+              ? "beam-precision"
+              : normalizedPartCategory === "emp"
+                ? "control-utility"
+                : normalizedPartType === "weapon"
+                  ? "rapid-fire"
+                  : undefined),
       loaderServesTags: normalizeStringList(
         propertiesRecord.loaderServesTags
           ?? propertiesRecord.loader_serves_tags
           ?? propertiesRecord.loaderSupports
-          ?? propertiesRecord.loader_supports,
+          ?? propertiesRecord.loader_supports
+          ?? partProperties.supportedWeaponTags,
       ),
       loaderCooldownMultiplier: readOptionalNumber(
         propertiesRecord.loaderCooldownMultiplier
           ?? propertiesRecord.loader_cooldown_multiplier
           ?? propertiesRecord.loaderLoadMultiplier
-          ?? propertiesRecord.loader_load_multiplier,
+          ?? propertiesRecord.loader_load_multiplier
+          ?? partProperties.loadMultiplier,
       ),
       hasCoreTuning: readOptionalBoolean(propertiesRecord.hasCoreTuning ?? propertiesRecord.has_core_tuning),
     },

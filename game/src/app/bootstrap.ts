@@ -46,9 +46,13 @@ import {
 } from "./part-store.ts";
 import {
   createDefaultPartDraft,
+  getComponentFromPartTypeAndCategory,
+  getPartCategoryFromComponent,
   getPartDirectionDefault,
   getPartMetadataDefaultsForLayer as getConfiguredPartMetadataDefaultsForLayer,
+  getPartPropertiesDefaultsByType,
   getPartPropertyDefaults,
+  getPartTypeFromComponent,
   getStructureMaterialDefaults,
 } from "./part-default-config.ts";
 import { makeCompositeAiController, type CompositeModuleSpec } from "../../../arena/src/ai/composite-controller.ts";
@@ -61,8 +65,10 @@ import type {
   MapNode,
   MaterialId,
   MaterialStats,
+  PartCategory,
   PartDirection,
   PartDefinition,
+  PartType,
   ScreenMode,
   TechState,
   UnitTemplate,
@@ -2407,6 +2413,38 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     return getStructureMaterialDefaults(materialId);
   };
 
+  const getResolvedPartType = (part: PartDefinition): PartType => {
+    if (part.partType) {
+      return part.partType;
+    }
+    if (part.layer === "structure") {
+      return "structure";
+    }
+    return getPartTypeFromComponent(part.baseComponent);
+  };
+
+  const getResolvedPartCategory = (part: PartDefinition): PartCategory | undefined => {
+    return part.partCategory ?? getPartCategoryFromComponent(part.baseComponent);
+  };
+
+  const syncPartTypeAndComponent = (part: PartDefinition): void => {
+    const partType = getResolvedPartType(part);
+    const partCategory = getResolvedPartCategory(part);
+    part.partType = partType;
+    part.partCategory = partCategory;
+    part.layer = partType === "structure" ? "structure" : "functional";
+    part.baseComponent = getComponentFromPartTypeAndCategory(partType, partCategory);
+    if (!part.partProperties) {
+      part.partProperties = getPartPropertiesDefaultsByType(partType, partCategory);
+    }
+    if (part.partProperties.defaultDirection && !part.direction) {
+      part.direction = part.partProperties.defaultDirection;
+    }
+    if (part.partProperties.directional !== undefined) {
+      part.directional = part.partProperties.directional;
+    }
+  };
+
   const syncPartMetaDefaultsIfNotEdited = (): void => {
     const suggested = getConfiguredPartMetadataDefaultsForLayer(partDesignerDraft.layer, partDesignerDraft.baseComponent);
     const current = partDesignerDraft.properties ?? {};
@@ -2418,6 +2456,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
   };
 
   const applyPartMetadataDefaults = (part: PartDefinition): PartDefinition => {
+    syncPartTypeAndComponent(part);
     const defaults = getPartPropertyDefaults(part.baseComponent);
     const metaDefaults = getConfiguredPartMetadataDefaultsForLayer(part.layer, part.baseComponent);
     const materialDefaults = part.layer === "structure" ? getMaterialDefaultsForPart(part) : null;
@@ -2470,8 +2509,8 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         selectedInfo.innerHTML = `
           <div><strong>Part Designer</strong></div>
           <div class="small">Part: ${partDesignerDraft.name} (${partDesignerDraft.id})</div>
-          <div class="small">Layer: ${partDesignerDraft.layer} | Base component: ${partDesignerDraft.baseComponent} | Directional: ${partDesignerDraft.directional ? "yes" : "no"} | Direction: ${partDesignerDraft.direction ?? getPartDirectionDefault(partDesignerDraft.baseComponent)}</div>
-          <div class="small">Boxes: ${partDesignerDraft.boxes.length} | Anchor: (${partDesignerDraft.anchor.x},${partDesignerDraft.anchor.y})</div>
+          <div class="small">Layer: ${partDesignerDraft.layer} | Type: ${partDesignerDraft.partType ?? getPartTypeFromComponent(partDesignerDraft.baseComponent)} | Category: ${partDesignerDraft.partCategory ?? "n/a"} | Directional: ${partDesignerDraft.directional ? "yes" : "no"} | Direction: ${partDesignerDraft.direction ?? getPartDirectionDefault(partDesignerDraft.baseComponent)}</div>
+          <div class="small">Cells: ${partDesignerDraft.boxes.length} | Anchor: (${partDesignerDraft.anchor.x},${partDesignerDraft.anchor.y})</div>
           <div class="row">
             <label class="small">Tool
               <select id="partToolRight">
@@ -2500,7 +2539,9 @@ export function bootstrap(options: BootstrapOptions = {}): void {
           <div class="row">
             <label class="small"><input id="partBoxAttachPoint" type="checkbox" ${resolvedEntry.isAttachPoint ? "checked" : ""} ${selectedSlot === null ? "disabled" : ""} /> Attach point</label>
             <label class="small"><input id="partBoxAnchor" type="checkbox" ${selectedSlot !== null && partDesignerAnchorSlot === selectedSlot ? "checked" : ""} ${selectedSlot === null ? "disabled" : ""} /> Anchor point</label>
-            <label class="small"><input id="partBoxShootingPoint" type="checkbox" ${resolvedEntry.isShootingPoint ? "checked" : ""} ${selectedSlot === null ? "disabled" : ""} /> Fire point (unique)</label>
+            ${(getResolvedPartType(partDesignerDraft) === "weapon")
+              ? `<label class="small"><input id="partBoxShootingPoint" type="checkbox" ${resolvedEntry.isShootingPoint ? "checked" : ""} ${selectedSlot === null ? "disabled" : ""} /> Fire point (unique)</label>`
+              : ""}
           </div>
         `;
         return;
@@ -4547,7 +4588,10 @@ export function bootstrap(options: BootstrapOptions = {}): void {
           </div>`;
         })
         .join("");
-      const isStructureLayerMode = partDesignerDraft.layer === "structure";
+      syncPartTypeAndComponent(partDesignerDraft);
+      const resolvedPartType = getResolvedPartType(partDesignerDraft);
+      const resolvedPartCategory = getResolvedPartCategory(partDesignerDraft);
+      const isStructureLayerMode = resolvedPartType === "structure";
       const selectedBaseOption = isStructureLayerMode ? STRUCTURE_LAYER_BASE_OPTION : partDesignerDraft.baseComponent;
       const baseComponentOptions = [
         `<option value="${STRUCTURE_LAYER_BASE_OPTION}" ${selectedBaseOption === STRUCTURE_LAYER_BASE_OPTION ? "selected" : ""}>structure-layer</option>`,
@@ -4593,18 +4637,24 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         { value: "control-utility", label: "control-utility" },
       ];
       const partProps = partDesignerDraft.properties ?? {};
+      const partRuntimeProps = partDesignerDraft.partProperties ?? getPartPropertiesDefaultsByType(resolvedPartType, resolvedPartCategory);
+      const partTypeOptions: PartType[] = ["structure", "control", "engine", "weapon", "loader", "ammo"];
+      const partCategoryOptions: PartCategory[] = resolvedPartType === "engine"
+        ? ["vehicle", "jet", "propeller"]
+        : resolvedPartType === "weapon"
+          ? ["bullet", "explosive", "missile", "beam", "emp"]
+          : [];
       const categoryOptions = partProps.category && !categoryOptionsBase.includes(partProps.category)
         ? [partProps.category, ...categoryOptionsBase]
         : categoryOptionsBase;
-      const propIsEngine = !isStructureLayerMode && partProps.isEngine === true;
-      const propIsWeapon = !isStructureLayerMode && partProps.isWeapon === true;
-      const propIsLoader = !isStructureLayerMode && partProps.isLoader === true;
-      const propIsArmor = isStructureLayerMode ? true : partProps.isArmor === true;
+      const propIsEngine = resolvedPartType === "engine";
+      const propIsWeapon = resolvedPartType === "weapon";
+      const propIsLoader = resolvedPartType === "loader";
+      const propIsArmor = resolvedPartType === "structure";
       const propHasCoreTuning = !isStructureLayerMode && partProps.hasCoreTuning === true;
-      const resolvedWeaponType = partProps.weaponType ?? baseStats.weaponClass;
-      const weaponSupportsExplosive = resolvedWeaponType === "explosive";
-      const weaponSupportsTracking = resolvedWeaponType === "tracking";
-      const weaponSupportsControl = resolvedWeaponType === "control-utility";
+      const weaponSupportsExplosive = partRuntimeProps.explodeOnHit === true || resolvedPartCategory === "explosive";
+      const weaponSupportsTracking = partRuntimeProps.tracking === true || resolvedPartCategory === "missile";
+      const weaponSupportsControl = resolvedPartCategory === "emp";
       const loaderSupportsPlaceholder = baseStats.loader?.supports?.join(", ") ?? "none";
       editorPanel.innerHTML = `
         <h3>Part Designer</h3>
@@ -4634,6 +4684,18 @@ export function bootstrap(options: BootstrapOptions = {}): void {
           <label class="small">Part Name <input id="partName" value="${partDesignerDraft.name}" /></label>
         </div>
         <div class="row">
+          <label class="small">Part Type
+            <select id="partTypeSelect">
+              ${partTypeOptions.map((option) => `<option value="${option}" ${resolvedPartType === option ? "selected" : ""}>${option}</option>`).join("")}
+            </select>
+          </label>
+          ${partCategoryOptions.length > 0 ? `<label class="small">Category
+            <select id="partCategoryTypeSelect">
+              ${partCategoryOptions.map((option) => `<option value="${option}" ${resolvedPartCategory === option ? "selected" : ""}>${option}</option>`).join("")}
+            </select>
+          </label>` : ""}
+        </div>
+        <div class="row">
           <label class="small">Base Component
             <select id="partBaseComponent">${baseComponentOptions}</select>
           </label>
@@ -4661,17 +4723,17 @@ export function bootstrap(options: BootstrapOptions = {}): void {
           <label class="small" style="flex:1;">Tags (comma separated) <input id="partTags" value="${(partDesignerDraft.tags ?? []).join(", ")}" /></label>
         </div>
         <div class="row">
-          <label class="small">Gas Cost <input id="partGasCost" type="number" min="0" step="1" value="${partDesignerDraft.stats?.gasCost ?? ""}" placeholder="${runtimePlaceholders.gasCost}" /></label>
+          <label class="small">Gas Cost <input id="partGasCost" type="number" min="0" step="1" value="${partRuntimeProps.gasCost ?? ""}" placeholder="${runtimePlaceholders.gasCost}" /></label>
           <span class="small">Delete value to reset to default gas calculation.</span>
         </div>
         ${isStructureLayerMode ? `<div class="row">
-          <label class="small">Armor <input id="partMaterialArmor" type="number" step="0.01" value="${partProps.materialArmor ?? ""}" /></label>
-          <label class="small">Recover/s <input id="partMaterialRecoverPerSecond" type="number" step="0.05" value="${partProps.materialRecoverPerSecond ?? ""}" /></label>
-          <label class="small">Color <input id="partMaterialColor" value="${partProps.materialColor ?? ""}" placeholder="#95a4b8" /></label>
+          <label class="small">Armor <input id="partMaterialArmor" type="number" step="0.01" value="${partRuntimeProps.armor ?? ""}" /></label>
+          <label class="small">Recover/s <input id="partMaterialRecoverPerSecond" type="number" step="0.05" value="${partRuntimeProps.recover ?? ""}" /></label>
+          <label class="small">Color <input id="partMaterialColor" value="${partRuntimeProps.color ?? ""}" placeholder="#95a4b8" /></label>
         </div>
         <div class="row">
-          <label class="small">Mass <input id="partStructureMass" type="number" step="0.1" value="${partDesignerDraft.stats?.mass ?? ""}" /></label>
-          <label class="small">HP <input id="partMetaHp" type="number" step="1" value="${partProps.hp ?? ""}" /></label>
+          <label class="small">Mass <input id="partStructureMass" type="number" step="0.1" value="${partRuntimeProps.mass ?? ""}" /></label>
+          <label class="small">HP <input id="partMetaHp" type="number" step="1" value="${partRuntimeProps.hp ?? ""}" /></label>
         </div>` : ""}
         ${!isStructureLayerMode ? `<div class="row">
           <label class="small"><input id="partPropIsEngine" type="checkbox" ${propIsEngine ? "checked" : ""} /> is_engine</label>
@@ -4687,8 +4749,8 @@ export function bootstrap(options: BootstrapOptions = {}): void {
               <option value="air" ${partProps.engineType === "air" ? "selected" : ""}>air</option>
             </select>
           </label>
-          <label class="small">Power <input id="partPower" type="number" step="1" value="${partDesignerDraft.stats?.power ?? ""}" placeholder="${runtimePlaceholders.power}" /></label>
-          <label class="small">Max Speed <input id="partMaxSpeed" type="number" step="1" value="${partDesignerDraft.stats?.maxSpeed ?? ""}" placeholder="${runtimePlaceholders.maxSpeed}" /></label>
+          <label class="small">Power <input id="partPower" type="number" step="1" value="${partRuntimeProps.power ?? ""}" placeholder="${runtimePlaceholders.power}" /></label>
+          <label class="small">Max Speed <input id="partMaxSpeed" type="number" step="1" value="${partRuntimeProps.maxSpeed ?? ""}" placeholder="${runtimePlaceholders.maxSpeed}" /></label>
         </div>` : ""}
         ${propIsWeapon ? `<div class="row">
           <label class="small">Weapon Type
@@ -4696,23 +4758,23 @@ export function bootstrap(options: BootstrapOptions = {}): void {
               ${weaponTypeOptions.map((option) => `<option value="${option.value}" ${partProps.weaponType === option.value ? "selected" : ""}>${option.label}</option>`).join("")}
             </select>
           </label>
-          <label class="small">Recoil <input id="partRecoil" type="number" step="0.1" value="${partDesignerDraft.stats?.recoil ?? ""}" placeholder="${runtimePlaceholders.recoil}" /></label>
-          <label class="small">Hit Impulse <input id="partHitImpulse" type="number" step="0.1" value="${partDesignerDraft.stats?.hitImpulse ?? ""}" placeholder="${runtimePlaceholders.hitImpulse}" /></label>
+          <label class="small">Recoil <input id="partRecoil" type="number" step="0.1" value="${partRuntimeProps.recoil ?? ""}" placeholder="${runtimePlaceholders.recoil}" /></label>
+          <label class="small">Hit Impulse <input id="partHitImpulse" type="number" step="0.1" value="${partRuntimeProps.hitImpulse ?? ""}" placeholder="${runtimePlaceholders.hitImpulse}" /></label>
         </div>
         <div class="row">
-          <label class="small">Damage <input id="partDamage" type="number" step="1" value="${partDesignerDraft.stats?.damage ?? ""}" placeholder="${runtimePlaceholders.damage}" /></label>
-          <label class="small">Penetration <input id="partPenetration" type="number" step="1" min="0" value="${partDesignerDraft.stats?.penetration ?? ""}" placeholder="${runtimePlaceholders.penetration}" /></label>
-          <label class="small">Range <input id="partRange" type="number" step="1" value="${partDesignerDraft.stats?.range ?? ""}" placeholder="${runtimePlaceholders.range}" /></label>
-          <label class="small">Cooldown <input id="partCooldown" type="number" step="0.05" value="${partDesignerDraft.stats?.cooldown ?? ""}" placeholder="${runtimePlaceholders.cooldown}" /></label>
+          <label class="small">Damage <input id="partDamage" type="number" step="1" value="${partRuntimeProps.damage ?? ""}" placeholder="${runtimePlaceholders.damage}" /></label>
+          <label class="small">Penetration <input id="partPenetration" type="number" step="1" min="0" value="${partRuntimeProps.penetration ?? ""}" placeholder="${runtimePlaceholders.penetration}" /></label>
+          <label class="small">Range <input id="partRange" type="number" step="1" value="${partRuntimeProps.range ?? ""}" placeholder="${runtimePlaceholders.range}" /></label>
+          <label class="small">Cooldown <input id="partCooldown" type="number" step="0.05" value="${partRuntimeProps.cooldown ?? ""}" placeholder="${runtimePlaceholders.cooldown}" /></label>
         </div>
         <div class="row">
-          <label class="small">Shoot Angle <input id="partShootAngle" type="number" step="1" value="${partDesignerDraft.stats?.shootAngleDeg ?? ""}" placeholder="${runtimePlaceholders.shootAngleDeg}" /></label>
-          <label class="small">Projectile Speed <input id="partProjectileSpeed" type="number" step="1" value="${partDesignerDraft.stats?.projectileSpeed ?? ""}" placeholder="${runtimePlaceholders.projectileSpeed}" /></label>
-          <label class="small">Projectile Gravity <input id="partProjectileGravity" type="number" step="1" value="${partDesignerDraft.stats?.projectileGravity ?? ""}" placeholder="${runtimePlaceholders.projectileGravity}" /></label>
+          <label class="small">Shoot Angle <input id="partShootAngle" type="number" step="1" value="${partRuntimeProps.shootAngleDeg ?? ""}" placeholder="${runtimePlaceholders.shootAngleDeg}" /></label>
+          <label class="small">Projectile Speed <input id="partProjectileSpeed" type="number" step="1" value="${partRuntimeProps.projectileSpeed ?? ""}" placeholder="${runtimePlaceholders.projectileSpeed}" /></label>
+          <label class="small">Projectile Gravity <input id="partProjectileGravity" type="number" step="1" value="${partRuntimeProps.projectileGravity ?? ""}" placeholder="${runtimePlaceholders.projectileGravity}" /></label>
         </div>
         <div class="row">
-          <label class="small">Spread <input id="partSpread" type="number" step="0.1" value="${partDesignerDraft.stats?.spreadDeg ?? ""}" placeholder="${runtimePlaceholders.spreadDeg}" /></label>
-          ${weaponSupportsTracking ? `<label class="small">Tracking Turn Rate <input id="partTrackingTurnRate" type="number" step="1" value="${partDesignerDraft.stats?.trackingTurnRateDegPerSec ?? ""}" placeholder="${runtimePlaceholders.trackingTurnRateDegPerSec}" /></label>` : ""}
+          <label class="small">Spread <input id="partSpread" type="number" step="0.1" value="${partRuntimeProps.spreadAngleDeg ?? ""}" placeholder="${runtimePlaceholders.spreadDeg}" /></label>
+          ${weaponSupportsTracking ? `<label class="small">Tracking Turn Rate <input id="partTrackingTurnRate" type="number" step="1" value="${partRuntimeProps.trackingTurnRate ?? ""}" placeholder="${runtimePlaceholders.trackingTurnRateDegPerSec}" /></label>` : ""}
           ${weaponSupportsControl ? `<label class="small">Control Impair Factor <input id="partControlImpairFactor" type="number" step="0.01" value="${partDesignerDraft.stats?.controlImpairFactor ?? ""}" placeholder="${runtimePlaceholders.controlImpairFactor}" /></label>` : ""}
         </div>
         ${weaponSupportsControl ? `<div class="row">
@@ -4734,19 +4796,19 @@ export function bootstrap(options: BootstrapOptions = {}): void {
           <label class="small">Fuse Time <input id="partExplosiveFuseTime" type="number" step="0.05" value="${partDesignerDraft.stats?.explosiveFuseTime ?? ""}" placeholder="${runtimePlaceholders.explosiveFuseTime}" /></label>
         </div>
         <div class="row">
-          <label class="small">Blast Radius <input id="partExplosiveBlastRadius" type="number" step="1" value="${partDesignerDraft.stats?.explosiveBlastRadius ?? ""}" placeholder="${runtimePlaceholders.explosiveBlastRadius}" /></label>
-          <label class="small">Blast Damage <input id="partExplosiveBlastDamage" type="number" step="1" value="${partDesignerDraft.stats?.explosiveBlastDamage ?? ""}" placeholder="${runtimePlaceholders.explosiveBlastDamage}" /></label>
+          <label class="small">Blast Radius <input id="partExplosiveBlastRadius" type="number" step="1" value="${partRuntimeProps.explodeRadius ?? ""}" placeholder="${runtimePlaceholders.explosiveBlastRadius}" /></label>
+          <label class="small">Blast Damage <input id="partExplosiveBlastDamage" type="number" step="1" value="${partRuntimeProps.explosionDamage ?? ""}" placeholder="${runtimePlaceholders.explosiveBlastDamage}" /></label>
           <label class="small">Falloff Power <input id="partExplosiveFalloffPower" type="number" step="0.1" value="${partDesignerDraft.stats?.explosiveFalloffPower ?? ""}" placeholder="${runtimePlaceholders.explosiveFalloffPower}" /></label>
         </div>` : ""}` : ""}
         ${propIsLoader ? `<div class="row">
-          <label class="small" style="flex:1;">Loader supports (comma separated weapon classes) <input id="partLoaderSupports" value="${(partDesignerDraft.stats?.loaderSupports ?? partProps.loaderServesTags ?? []).join(", ")}" placeholder="${loaderSupportsPlaceholder}" /></label>
-          <label class="small">Load Multiplier <input id="partLoaderLoadMultiplier" type="number" step="0.01" value="${partDesignerDraft.stats?.loaderLoadMultiplier ?? partProps.loaderCooldownMultiplier ?? ""}" placeholder="${runtimePlaceholders.loaderLoadMultiplier}" /></label>
+          <label class="small" style="flex:1;">Loader supports (comma separated weapon classes) <input id="partLoaderSupports" value="${(partRuntimeProps.supportedWeaponTags ?? []).join(", ")}" placeholder="${loaderSupportsPlaceholder}" /></label>
+          <label class="small">Load Multiplier <input id="partLoaderLoadMultiplier" type="number" step="0.01" value="${partRuntimeProps.loadMultiplier ?? ""}" placeholder="${runtimePlaceholders.loaderLoadMultiplier}" /></label>
           <label class="small"><input id="partLoaderFastOperation" type="checkbox" ${(partDesignerDraft.stats?.loaderFastOperation ?? baseStats.loader?.fastOperation ?? false) ? "checked" : ""} /> Fast Operation</label>
         </div>
         <div class="row">
-          <label class="small">Min Load Time <input id="partLoaderMinLoadTime" type="number" step="0.05" value="${partDesignerDraft.stats?.loaderMinLoadTime ?? ""}" placeholder="${runtimePlaceholders.loaderMinLoadTime}" /></label>
-          <label class="small">Store Capacity <input id="partLoaderStoreCapacity" type="number" step="1" value="${partDesignerDraft.stats?.loaderStoreCapacity ?? ""}" placeholder="${runtimePlaceholders.loaderStoreCapacity}" /></label>
-          <label class="small">Min Burst Interval <input id="partLoaderMinBurstInterval" type="number" step="0.05" value="${partDesignerDraft.stats?.loaderMinBurstInterval ?? ""}" placeholder="${runtimePlaceholders.loaderMinBurstInterval}" /></label>
+          <label class="small">Min Load Time <input id="partLoaderMinLoadTime" type="number" step="0.05" value="${partRuntimeProps.minLoadTime ?? ""}" placeholder="${runtimePlaceholders.loaderMinLoadTime}" /></label>
+          <label class="small">Store Capacity <input id="partLoaderStoreCapacity" type="number" step="1" value="${partRuntimeProps.maxCapacity ?? ""}" placeholder="${runtimePlaceholders.loaderStoreCapacity}" /></label>
+          <label class="small">Min Burst Interval <input id="partLoaderMinBurstInterval" type="number" step="0.05" value="${partRuntimeProps.minBurstInterval ?? ""}" placeholder="${runtimePlaceholders.loaderMinBurstInterval}" /></label>
         </div>` : ""}
         ${!isStructureLayerMode && propIsArmor ? `<div class="row">
           <label class="small">HP <input id="partMetaHp" type="number" step="1" value="${partProps.hp ?? ""}" /></label>
@@ -5762,6 +5824,45 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       updateSelectedInfo();
     });
 
+    getOptionalElement<HTMLSelectElement>("#partTypeSelect")?.addEventListener("change", (event) => {
+      const value = (event.currentTarget as HTMLSelectElement).value;
+      if (value !== "structure" && value !== "control" && value !== "engine" && value !== "weapon" && value !== "loader" && value !== "ammo") {
+        return;
+      }
+      partDesignerDraft.partType = value as PartType;
+      partDesignerDraft.partCategory = value === "engine"
+        ? "vehicle"
+        : value === "weapon"
+          ? "bullet"
+          : undefined;
+      partDesignerDraft.baseComponent = getComponentFromPartTypeAndCategory(partDesignerDraft.partType, partDesignerDraft.partCategory);
+      partDesignerDraft.layer = partDesignerDraft.partType === "structure" ? "structure" : "functional";
+      partDesignerDraft.partProperties = getPartPropertiesDefaultsByType(partDesignerDraft.partType, partDesignerDraft.partCategory);
+      partDesignerDraft.direction = partDesignerDraft.partProperties.defaultDirection ?? getPartDirectionDefault(partDesignerDraft.baseComponent);
+      partDesignerDraft.directional = partDesignerDraft.partProperties.directional ?? COMPONENTS[partDesignerDraft.baseComponent].directional === true;
+      partDesignerBrushSlot = normalizePartDesignerSlotForLayer(partDesignerBrushSlot, partDesignerDraft.layer);
+      recalcPartDraftFromSlots();
+      renderPanels();
+    });
+
+    getOptionalElement<HTMLSelectElement>("#partCategoryTypeSelect")?.addEventListener("change", (event) => {
+      const value = (event.currentTarget as HTMLSelectElement).value;
+      if (value !== "vehicle" && value !== "jet" && value !== "propeller" && value !== "bullet" && value !== "explosive" && value !== "missile" && value !== "beam" && value !== "emp") {
+        return;
+      }
+      partDesignerDraft.partCategory = value as PartCategory;
+      const partType = getResolvedPartType(partDesignerDraft);
+      partDesignerDraft.baseComponent = getComponentFromPartTypeAndCategory(partType, partDesignerDraft.partCategory);
+      partDesignerDraft.partProperties = {
+        ...getPartPropertiesDefaultsByType(partType, partDesignerDraft.partCategory),
+        ...(partDesignerDraft.partProperties ?? {}),
+      };
+      partDesignerDraft.direction = partDesignerDraft.partProperties.defaultDirection ?? getPartDirectionDefault(partDesignerDraft.baseComponent);
+      partDesignerDraft.directional = partDesignerDraft.partProperties.directional ?? COMPONENTS[partDesignerDraft.baseComponent].directional === true;
+      recalcPartDraftFromSlots();
+      renderPanels();
+    });
+
     getOptionalElement<HTMLSelectElement>("#partBaseComponent")?.addEventListener("change", (event) => {
       const value = (event.currentTarget as HTMLSelectElement).value;
       if (value === STRUCTURE_LAYER_BASE_OPTION) {
@@ -5863,12 +5964,20 @@ export function bootstrap(options: BootstrapOptions = {}): void {
 
     getOptionalElement<HTMLInputElement>("#partDirectional")?.addEventListener("change", (event) => {
       partDesignerDraft.directional = (event.currentTarget as HTMLInputElement).checked;
+      partDesignerDraft.partProperties = {
+        ...(partDesignerDraft.partProperties ?? {}),
+        directional: partDesignerDraft.directional,
+      };
       renderPanels();
     });
     getOptionalElement<HTMLSelectElement>("#partDirection")?.addEventListener("change", (event) => {
       const value = (event.currentTarget as HTMLSelectElement).value;
       if (value === "up" || value === "right" || value === "down" || value === "left") {
         partDesignerDraft.direction = value as PartDirection;
+        partDesignerDraft.partProperties = {
+          ...(partDesignerDraft.partProperties ?? {}),
+          defaultDirection: partDesignerDraft.direction,
+        };
       }
       renderPanels();
     });
@@ -5903,9 +6012,14 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     getOptionalElement<HTMLInputElement>("#partMetaHp")?.addEventListener("input", (event) => {
       const raw = (event.currentTarget as HTMLInputElement).value.trim();
       const numeric = raw.length > 0 ? Number(raw) : Number.NaN;
+      const next = Number.isFinite(numeric) ? numeric : undefined;
       partDesignerDraft.properties = {
         ...(partDesignerDraft.properties ?? {}),
-        hp: Number.isFinite(numeric) ? numeric : undefined,
+        hp: next,
+      };
+      partDesignerDraft.partProperties = {
+        ...(partDesignerDraft.partProperties ?? {}),
+        hp: next,
       };
       updateSelectedInfo();
     });
@@ -5916,6 +6030,10 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         ...(partDesignerDraft.properties ?? {}),
         materialArmor: Number.isFinite(numeric) ? numeric : undefined,
       };
+      partDesignerDraft.partProperties = {
+        ...(partDesignerDraft.partProperties ?? {}),
+        armor: Number.isFinite(numeric) ? numeric : undefined,
+      };
       updateSelectedInfo();
     });
     getOptionalElement<HTMLInputElement>("#partMaterialRecoverPerSecond")?.addEventListener("input", (event) => {
@@ -5925,6 +6043,10 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         ...(partDesignerDraft.properties ?? {}),
         materialRecoverPerSecond: Number.isFinite(numeric) ? numeric : undefined,
       };
+      partDesignerDraft.partProperties = {
+        ...(partDesignerDraft.partProperties ?? {}),
+        recover: Number.isFinite(numeric) ? numeric : undefined,
+      };
       updateSelectedInfo();
     });
     getOptionalElement<HTMLInputElement>("#partMaterialColor")?.addEventListener("input", (event) => {
@@ -5933,6 +6055,10 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         ...(partDesignerDraft.properties ?? {}),
         materialColor: value.length > 0 ? value : undefined,
       };
+      partDesignerDraft.partProperties = {
+        ...(partDesignerDraft.partProperties ?? {}),
+        color: value.length > 0 ? value : undefined,
+      };
       updateSelectedInfo();
     });
     getOptionalElement<HTMLInputElement>("#partStructureMass")?.addEventListener("input", (event) => {
@@ -5940,6 +6066,10 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       const numeric = raw.length > 0 ? Number(raw) : Number.NaN;
       partDesignerDraft.stats = {
         ...(partDesignerDraft.stats ?? {}),
+        mass: Number.isFinite(numeric) ? numeric : undefined,
+      };
+      partDesignerDraft.partProperties = {
+        ...(partDesignerDraft.partProperties ?? {}),
         mass: Number.isFinite(numeric) ? numeric : undefined,
       };
       updateSelectedInfo();
@@ -6072,6 +6202,10 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         ...(partDesignerDraft.properties ?? {}),
         loaderServesTags: supports.length > 0 ? supports : undefined,
       };
+      partDesignerDraft.partProperties = {
+        ...(partDesignerDraft.partProperties ?? {}),
+        supportedWeaponTags: supports.length > 0 ? supports : undefined,
+      };
       updateSelectedInfo();
     });
     getOptionalElement<HTMLInputElement>("#partLoaderLoadMultiplier")?.addEventListener("input", (event) => {
@@ -6085,6 +6219,10 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       partDesignerDraft.properties = {
         ...(partDesignerDraft.properties ?? {}),
         loaderCooldownMultiplier: next,
+      };
+      partDesignerDraft.partProperties = {
+        ...(partDesignerDraft.partProperties ?? {}),
+        loadMultiplier: next,
       };
       updateSelectedInfo();
     });
@@ -6142,6 +6280,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     const bindRuntimeInput = (
       selector: string,
       key: keyof NonNullable<PartDefinition["stats"]>,
+      partPropKey?: keyof NonNullable<PartDefinition["partProperties"]>,
     ): void => {
       getOptionalElement<HTMLInputElement>(selector)?.addEventListener("input", (event) => {
         const raw = (event.currentTarget as HTMLInputElement).value;
@@ -6151,33 +6290,39 @@ export function bootstrap(options: BootstrapOptions = {}): void {
           ...(partDesignerDraft.stats ?? {}),
           [key]: next,
         };
+        if (partPropKey) {
+          partDesignerDraft.partProperties = {
+            ...(partDesignerDraft.partProperties ?? {}),
+            [partPropKey]: next,
+          };
+        }
       });
     };
-    bindRuntimeInput("#partMass", "mass");
+    bindRuntimeInput("#partMass", "mass", "mass");
     bindRuntimeInput("#partHpMul", "hpMul");
-    bindRuntimeInput("#partPower", "power");
-    bindRuntimeInput("#partMaxSpeed", "maxSpeed");
-    bindRuntimeInput("#partRecoil", "recoil");
-    bindRuntimeInput("#partHitImpulse", "hitImpulse");
-    bindRuntimeInput("#partDamage", "damage");
-    bindRuntimeInput("#partPenetration", "penetration");
-    bindRuntimeInput("#partRange", "range");
-    bindRuntimeInput("#partCooldown", "cooldown");
-    bindRuntimeInput("#partShootAngle", "shootAngleDeg");
-    bindRuntimeInput("#partProjectileSpeed", "projectileSpeed");
-    bindRuntimeInput("#partProjectileGravity", "projectileGravity");
-    bindRuntimeInput("#partSpread", "spreadDeg");
+    bindRuntimeInput("#partPower", "power", "power");
+    bindRuntimeInput("#partMaxSpeed", "maxSpeed", "maxSpeed");
+    bindRuntimeInput("#partRecoil", "recoil", "recoil");
+    bindRuntimeInput("#partHitImpulse", "hitImpulse", "hitImpulse");
+    bindRuntimeInput("#partDamage", "damage", "damage");
+    bindRuntimeInput("#partPenetration", "penetration", "penetration");
+    bindRuntimeInput("#partRange", "range", "range");
+    bindRuntimeInput("#partCooldown", "cooldown", "cooldown");
+    bindRuntimeInput("#partShootAngle", "shootAngleDeg", "shootAngleDeg");
+    bindRuntimeInput("#partProjectileSpeed", "projectileSpeed", "projectileSpeed");
+    bindRuntimeInput("#partProjectileGravity", "projectileGravity", "projectileGravity");
+    bindRuntimeInput("#partSpread", "spreadDeg", "spreadAngleDeg");
     bindRuntimeInput("#partExplosiveFuseTime", "explosiveFuseTime");
     bindRuntimeInput("#partExplosiveBlastRadius", "explosiveBlastRadius");
     bindRuntimeInput("#partExplosiveBlastDamage", "explosiveBlastDamage");
     bindRuntimeInput("#partExplosiveFalloffPower", "explosiveFalloffPower");
-    bindRuntimeInput("#partTrackingTurnRate", "trackingTurnRateDegPerSec");
+    bindRuntimeInput("#partTrackingTurnRate", "trackingTurnRateDegPerSec", "trackingTurnRate");
     bindRuntimeInput("#partControlImpairFactor", "controlImpairFactor");
     bindRuntimeInput("#partControlDuration", "controlDuration");
-    bindRuntimeInput("#partLoaderMinLoadTime", "loaderMinLoadTime");
-    bindRuntimeInput("#partLoaderStoreCapacity", "loaderStoreCapacity");
-    bindRuntimeInput("#partLoaderMinBurstInterval", "loaderMinBurstInterval");
-    bindRuntimeInput("#partGasCost", "gasCost");
+    bindRuntimeInput("#partLoaderMinLoadTime", "loaderMinLoadTime", "minLoadTime");
+    bindRuntimeInput("#partLoaderStoreCapacity", "loaderStoreCapacity", "maxCapacity");
+    bindRuntimeInput("#partLoaderMinBurstInterval", "loaderMinBurstInterval", "minBurstInterval");
+    bindRuntimeInput("#partGasCost", "gasCost", "gasCost");
 
     getOptionalElement<HTMLButtonElement>("#btnNewPartDraft")?.addEventListener("click", () => {
       const newName = "Custom Part";

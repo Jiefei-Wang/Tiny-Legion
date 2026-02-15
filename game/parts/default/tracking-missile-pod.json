@@ -2,6 +2,8 @@
   "id": 20,
   "name": "Tracking Missile Pod",
   "layer": "functional",
+  "partType": "weapon",
+  "partCategory": "missile",
   "baseComponent": "trackingMissile",
   "directional": true,
   "direction": "right",
@@ -9,6 +11,30 @@
     "x": 0,
     "y": 0
   },
+  "cells": [
+    {
+      "x": 0,
+      "y": 0,
+      "structureOccupy": false,
+      "functionalOccupy": true,
+      "needStructureBehind": true,
+      "takeDamage": true,
+      "attachPoint": false,
+      "anchorPoint": true,
+      "firePoint": true
+    },
+    {
+      "x": 1,
+      "y": 0,
+      "structureOccupy": false,
+      "functionalOccupy": true,
+      "needStructureBehind": true,
+      "takeDamage": true,
+      "attachPoint": false,
+      "anchorPoint": false,
+      "firePoint": true
+    }
+  ],
   "boxes": [
     {
       "x": 0,
@@ -42,6 +68,29 @@
     "requireStructureOnStructureOccupiedBoxes": true,
     "requireEmptyStructureOffsets": [],
     "requireEmptyFunctionalOffsets": []
+  },
+  "partProperties": {
+    "gasCost": 10,
+    "mass": 8,
+    "tag": "weapon",
+    "bulletType": "missile",
+    "damage": 20,
+    "range": 300,
+    "cooldown": 1,
+    "recoil": 10,
+    "hitImpulse": 10,
+    "penetration": 0,
+    "spreadAngleDeg": 0,
+    "explodeOnHit": false,
+    "explodeRadius": 50,
+    "projectileSpeed": 400,
+    "projectileGravity": 100,
+    "tracking": true,
+    "trackingTurnRate": 50,
+    "directional": true,
+    "shootAngleDeg": 30,
+    "needLoader": true,
+    "defaultDirection": "right"
   },
   "properties": {
     "category": "weapon",

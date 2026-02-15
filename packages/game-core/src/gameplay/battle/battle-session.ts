@@ -38,7 +38,7 @@ import { createBaselineCompositeAiController } from "../../ai/composite/baseline
 import { validateTemplateDetailed } from "../../templates/template-validation.ts";
 import { createDefaultPartDefinitions, mergePartCatalogs } from "../../parts/part-schema.ts";
 import type { BattleAiController, CombatDecision, WeaponFireAiInput } from "../../ai/composite/composite-ai.ts";
-import type { BattleState, CommandResult, FireBlockDetail, FireRequest, KeyState, MapNode, PartDefinition, PartDirection, Side, UnitCommand, UnitInstance, UnitTemplate, WeaponClass } from "../../types.ts";
+import type { BattleState, CommandResult, ComponentStats, FireBlockDetail, FireRequest, KeyState, MapNode, PartDefinition, PartDirection, Side, UnitCommand, UnitInstance, UnitTemplate, WeaponClass } from "../../types.ts";
 
 export interface BattleHooks {
   addLog: (text: string, tone?: "good" | "warn" | "bad" | "") => void;
@@ -1952,12 +1952,11 @@ export class BattleSession {
       if (stats.type !== "engine") {
         continue;
       }
-      const propulsion = stats.propulsion;
       if (unit.type === "air") {
-        if (propulsion?.platform !== "air") {
+        if (!this.engineSupportsAir(attachment, stats)) {
           continue;
         }
-      } else if (propulsion?.platform === "air") {
+      } else if (!this.engineSupportsGround(attachment, stats)) {
         continue;
       }
       const enginePower = Math.max(0, attachment.stats?.power ?? stats.power ?? 0);
@@ -2018,6 +2017,43 @@ export class BattleSession {
     return ((baseQuarter + attachment.rotateQuarter) % 4 + 4) % 4 as 0 | 1 | 2 | 3;
   }
 
+  private getAttachmentPart(attachment: { partId?: number }): PartDefinition | null {
+    if (!attachment.partId) {
+      return null;
+    }
+    return this.partCatalog.find((part) => part.id === attachment.partId) ?? null;
+  }
+
+  private engineSupportsAir(attachment: UnitInstance["attachments"][number], stats: ComponentStats): boolean {
+    const part = this.getAttachmentPart(attachment);
+    if (part?.partType === "engine" && part.partProperties?.powerAir !== undefined) {
+      return part.partProperties.powerAir === true;
+    }
+    if (part?.properties?.engineType) {
+      return part.properties.engineType === "air";
+    }
+    return stats.propulsion?.platform === "air";
+  }
+
+  private engineSupportsGround(attachment: UnitInstance["attachments"][number], stats: ComponentStats): boolean {
+    const part = this.getAttachmentPart(attachment);
+    if (part?.partType === "engine" && part.partProperties?.powerGround !== undefined) {
+      return part.partProperties.powerGround === true;
+    }
+    if (part?.properties?.engineType) {
+      return part.properties.engineType === "ground";
+    }
+    return stats.propulsion?.platform === "ground";
+  }
+
+  private getAttachmentThrustAngleDeg(attachment: UnitInstance["attachments"][number], stats: ComponentStats): number {
+    const part = this.getAttachmentPart(attachment);
+    if (typeof part?.partProperties?.thrustAngleDeg === "number" && Number.isFinite(part.partProperties.thrustAngleDeg)) {
+      return part.partProperties.thrustAngleDeg;
+    }
+    return stats.propulsion?.thrustAngleDeg ?? 25;
+  }
+
   private computeDirectedAirAccel(unit: UnitInstance, dirX: number, dirY: number): number {
     const len = Math.hypot(dirX, dirY);
     if (len <= 1e-6) {
@@ -2031,12 +2067,16 @@ export class BattleSession {
         continue;
       }
       const stats = COMPONENTS[attachment.component];
-      if (stats.type !== "engine" || stats.propulsion?.platform !== "air") {
+      if (stats.type !== "engine" || !this.engineSupportsAir(attachment, stats)) {
+        continue;
+      }
+      const propulsion = stats.propulsion;
+      if (!propulsion) {
         continue;
       }
       const enginePower = Math.max(0, attachment.stats?.power ?? stats.power ?? 0);
       const baseAccel = (enginePower / Math.max(16, unit.mass)) * AIR_THRUST_ACCEL_SCALE;
-      if (stats.propulsion.mode === "omni") {
+      if (propulsion.mode === "omni") {
         accel += baseAccel;
         continue;
       }
@@ -2044,7 +2084,7 @@ export class BattleSession {
       const propDir = this.getPropellerDirection(unit, facingQuarter);
       // Propeller facing represents push/airflow direction; thrust is the opposite direction.
       const dot = ux * (-propDir.x) + uy * (-propDir.y);
-      const angleLimitDeg = stats.propulsion.thrustAngleDeg ?? 25;
+      const angleLimitDeg = this.getAttachmentThrustAngleDeg(attachment, stats);
       const cosLimit = Math.cos((angleLimitDeg * Math.PI) / 180);
       if (dot < cosLimit) {
         continue;
