@@ -79,7 +79,7 @@ export function getPartPropertiesDefaultsByType(partType: PartType, partCategory
     return { gasCost: 10, mass: 5, hp: 25, tag: "structure", armor: 0, recover: 0, color: "#95a4b8" };
   }
   if (partType === "control") {
-    return { gasCost: 10, mass: 2, tag: "control", computing: 100, powerAssumption: 100 };
+    return { gasCost: 10, mass: 2, tag: "control", computing: 1 };
   }
   if (partType === "engine") {
     const directional = partCategory === "propeller";
@@ -120,6 +120,7 @@ export function getPartPropertiesDefaultsByType(partType: PartType, partCategory
       shootAngleDeg: 30,
       needLoader: false,
       defaultDirection: "right",
+      computingConsumption: 1,
     };
   }
   if (partType === "loader") {

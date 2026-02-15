@@ -5,16 +5,16 @@ export function getControlUnit(attachments: Attachment[]): Attachment | null {
   const controlUnits = attachments.filter((attachment) => {
     return attachment.alive && COMPONENTS[attachment.component].type === "control";
   });
-  return controlUnits.length === 1 ? controlUnits[0] : null;
+  return controlUnits[0] ?? null;
 }
 
 export function validateSingleControlUnit(attachments: Attachment[]): boolean {
-  return getControlUnit(attachments) !== null;
+  return attachments.some((attachment) => attachment.alive && COMPONENTS[attachment.component].type === "control");
 }
 
 export function canOperate(unit: UnitInstance): boolean {
   if (!unit.alive) {
     return false;
   }
-  return unit.attachments.some((attachment) => attachment.id === unit.controlAttachmentId && attachment.alive);
+  return unit.attachments.some((attachment) => attachment.alive && COMPONENTS[attachment.component].type === "control");
 }

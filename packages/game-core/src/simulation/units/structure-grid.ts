@@ -32,14 +32,16 @@ export function destroyCell(unit: UnitInstance, cellId: number): void {
 }
 
 function destroyDisconnectedFromControl(unit: UnitInstance): void {
-  const controlAttachment = unit.attachments.find((attachment) => attachment.id === unit.controlAttachmentId && attachment.alive);
-  if (!controlAttachment) {
+  const controlAttachments = unit.attachments.filter((attachment) => attachment.alive && attachment.component === "control");
+  if (controlAttachments.length <= 0) {
     unit.alive = false;
     return;
   }
 
-  const controlCell = unit.structure.find((cell) => cell.id === controlAttachment.cell && !cell.destroyed);
-  if (!controlCell) {
+  const controlCells = controlAttachments
+    .map((attachment) => unit.structure.find((cell) => cell.id === attachment.cell && !cell.destroyed) ?? null)
+    .filter((cell): cell is StructureCell => cell !== null);
+  if (controlCells.length <= 0) {
     unit.alive = false;
     return;
   }
@@ -51,7 +53,7 @@ function destroyDisconnectedFromControl(unit: UnitInstance): void {
   }
 
   const reachableIds = new Set<number>();
-  const queue: StructureCell[] = [controlCell];
+  const queue: StructureCell[] = [...controlCells];
   while (queue.length > 0) {
     const current = queue.shift();
     if (!current || reachableIds.has(current.id)) {

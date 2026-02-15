@@ -55,6 +55,9 @@
     "projectileGravity": 50,
     "spreadDeg": 0
   },
+  "partProperties": {
+    "computingConsumption": 1
+  },
   "properties": {
     "category": "weapon",
     "subcategory": "rapid-fire",

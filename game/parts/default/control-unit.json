@@ -45,6 +45,9 @@
     "requireEmptyStructureOffsets": [],
     "requireEmptyFunctionalOffsets": []
   },
+  "partProperties": {
+    "computing": 1
+  },
   "properties": {
     "category": "functional",
     "subcategory": "control",

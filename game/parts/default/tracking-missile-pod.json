@@ -90,7 +90,8 @@
     "directional": true,
     "shootAngleDeg": 30,
     "needLoader": true,
-    "defaultDirection": "right"
+    "defaultDirection": "right",
+    "computingConsumption": 1
   },
   "properties": {
     "category": "weapon",

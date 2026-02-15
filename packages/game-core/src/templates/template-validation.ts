@@ -344,8 +344,8 @@ export function validateTemplateDetailed(
     }
   }
 
-  if (controlCount !== 1) {
-    errors.push("exactly one control component is required");
+  if (controlCount < 1) {
+    errors.push("at least one control component is required");
   }
   if (weaponCount < 1) {
     warnings.push("at least one weapon component is recommended");

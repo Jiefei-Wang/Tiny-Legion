@@ -10,7 +10,8 @@ Build a 2D strategic-combat game where the player designs modular army units, ex
   - **Display Layer**: purely visual shell/skin for readability and style; does not affect physics, armor, or functional performance.
 - Player grows from weak starter units (small basic cells) to advanced composite structures and high-tier materials.
 - Battles can be fought by direct control or AI automation.
-- Every unit has exactly one Control Unit; if it is destroyed, the whole unit becomes non-operational.
+- Units can have one or more Control Units.
+- A unit is non-operational when no Control Unit remains alive.
 
 ---
 
@@ -160,8 +161,7 @@ Part-level properties:
 - `recover`: structure self-recovery per second.
 - `color`: structure render/debug color.
 - `computing`: control processing capability budget.
-- `power assumption`: control-side assumed system power baseline.
-- `power`: engine thrust power source, provide power to other parts which has power assumption property.
+- `power`: engine thrust power source.
 - `max speed`: engine speed cap contribution.
 - `power ground`: engine can provide ground propulsion.
 - `power air`: engine can provide air propulsion/lift.
@@ -212,7 +212,7 @@ Cell-level properties:
 
 `control` should expose:
 
-- `gas cost`, `mass`, `tag`, `computing`, `power assumption`.
+- `gas cost`, `mass`, `tag`, `computing`.
 
 `engine` should expose:
 
@@ -220,7 +220,7 @@ Cell-level properties:
 
 `weapon` should expose:
 
-- `gas cost`, `mass`, `tag`, `bullet type`, `damage`, `range`, `cooldown`, `recoil`, `hit impulse`, `penetration`, `spread angle`, `explode on hit`, `explode radius` (explosive only), `projectile speed` (non-laser), `projectile gravity` (non-laser), `tracking` (non-laser), `tracking turn rate` (tracking only), `directional`, `shoot angle` (directional only), `need loader`, `default direction`.
+- `gas cost`, `mass`, `tag`, `bullet type`, `damage`, `range`, `cooldown`, `recoil`, `hit impulse`, `penetration`, `spread angle`, `explode on hit`, `explode radius` (explosive only), `projectile speed` (non-laser), `projectile gravity` (non-laser), `tracking` (non-laser), `tracking turn rate` (tracking only), `directional`, `shoot angle` (directional only), `need loader`, `default direction`, `computing consumption`.
 
 `loader` should expose:
 
@@ -247,8 +247,7 @@ Cell-level properties:
 - `gas cost`: `10`
 - `mass`: `2`
 - `tag`: `control`
-- `computing`: `100`
-- `power assumption`: `100`
+- `computing`: `1`
 
 `engine` defaults:
 
@@ -286,6 +285,7 @@ Cell-level properties:
 - `shoot angle` (directional only): `30` (`180` for omni)
 - `need loader`: `false`
 - `default direction`: `right`
+- `computing consumption`: `1`
 
 `loader` defaults:
 
@@ -334,12 +334,12 @@ Part-level property visibility (left pane):
   - Show structure-only fields: `mass`, `HP`, `armor`, `recover`, `color`.
   - Hide engine/weapon/loader/ammo-only fields.
 - `control` selected:
-  - Show: `mass`, `computing`, `power assumption`.
+  - Show: `mass`, `computing`.
 - `engine` selected:
   - Show: `mass`, `power`, `max speed`, `power ground`, `power air`.
   - Show `directional`, `default direction`, `thrust angle` only when air propulsion is enabled (`power air = true`).
 - `weapon` selected:
-  - Show: `mass`, `bullet type`, `damage`, `range`, `cooldown`, `recoil`, `hit impulse`, `penetration`, `spread angle`, `need loader`, `directional`.
+  - Show: `mass`, `bullet type`, `damage`, `range`, `cooldown`, `recoil`, `hit impulse`, `penetration`, `spread angle`, `need loader`, `directional`, `computing consumption`.
   - Show `projectile speed` and `projectile gravity` only for non-laser bullets.
   - Show `explode radius` only when `explode on hit = true`.
   - Show `tracking` only for non-laser bullets; show `tracking turn rate` only when `tracking = true`.
@@ -374,6 +374,10 @@ Validation and message placement:
   - summary counts near the top status/header area of the Part Editor canvas.
   - detailed issue list in the Part Editor canvas issue panel (right-buttom).
 - Save is allowed even when warnings/errors are present; messages are still shown so designers can iterate quickly.
+- Runtime control-computing rule:
+  - Each alive Control Unit contributes `computing`.
+  - Each alive weapon consumes `computing consumption` (default `1`).
+  - If total weapon computing consumption exceeds total control computing, a random weapon is disabled; this repeats until weapon computing consumption is less than or equal to control computing.
 
 ## 4.1 Structure Layer (Outer)
 
@@ -416,7 +420,7 @@ Attachment rules:
 - Every functional component must be attached to at least one structure cell.
 - Functional components contribute to **mass** and performance only; they do **not** add armor.
 - A detached or destroyed structure cell takes all attached functional components with it.
-- A unit can have only one Control Unit.
+- A unit can have one or more Control Units.
 
 ### Functional Module Catalog
 - Mobility
@@ -434,7 +438,7 @@ Attachment rules:
   - Rocket Pod
   - Bomb Bay (air)
 - Control/Support
-  - Control Unit (mandatory, one per unit)
+  - Control Unit (mandatory, at least one per unit)
   - Fire Control Unit (accuracy)
   - Armor Repair Unit
   - Radar/Sensor
@@ -449,7 +453,7 @@ Design constraints:
 - Air unit validity rule: at least one engine with `power air = true` is required. Engines with only `power ground = true` do not provide lift/thrust to aircraft.
 - Weapon recoil/stability depends on structure and module placement.
 - Exposed ammo modules create high-risk weak points.
-- The unit blueprint is invalid without exactly one Control Unit.
+- The unit blueprint is invalid without at least one Control Unit.
 - Propeller placement rule: multi-cell footprint, clearance area must stay empty, and anchor requires structure support from below.
 
 ## 4.3 Display Layer (Visual-Only)
@@ -595,7 +599,7 @@ No simple fixed hitpoint exchange for whole units. Damage emerges from impacts, 
 5. If breach occurs, inner functional modules can be hit.
 6. If structure is detached, all attached modules are removed with it.
 7. Module damage creates performance penalties or critical failure.
-8. Connectivity rule: any structure cluster disconnected from the single control unit is destroyed immediately.
+8. Connectivity rule: any structure cluster disconnected from all alive control units is destroyed immediately.
 9. Armor is applied as flat damage deduction per impacted cell: `damageAfterArmor = incomingDamage - cellArmor`, `effectiveDamage = damageAfterArmor <= 0 ? 1 : damageAfterArmor`.
 10. Hit impulse still applies physical response (knockback/vibration) even on low/fully mitigated hits.
 11. Projectile penetration is tracked separately from damage:
@@ -642,7 +646,7 @@ Module outcomes:
 
 Control Unit outcome:
 
-- Control Unit destroyed -> unit loses command/control and is treated as mission-killed.
+- If all Control Units are destroyed, the unit loses command/control and is treated as mission-killed.
 
 ## 7.3 Why This Works
 

@@ -273,8 +273,9 @@ Template/editor architecture notes:
 Encode your game rules as explicit modules (not scattered checks):
 
 - `control-unit-rules.ts`
-  - exactly one control unit per object.
-  - if destroyed: object mission-killed.
+  - at least one control unit per object.
+  - object can include multiple control units.
+  - if all controls are destroyed: object mission-killed.
 - `damage-model.ts`
   - resolves projectile hits to impacted structure cells (localized front/back damage).
   - applies per-cell strain recovery using material `recoverPerSecond`.
@@ -305,6 +306,10 @@ Encode your game rules as explicit modules (not scattered checks):
   - command builders: `playerInputToCommand`, `aiDecisionToCommand`, `airDropReturnToCommand`, `retreatToCommand`.
   - controller priority: player-controlled → air-drop → armed AI (decision tree) → weaponless air (triggers air-drop) → ground weaponless (retreat).
   - `CommandResult` reports which slots fired and which were blocked (with reason).
+  - weapon-control computing budget is enforced per unit:
+    - control attachments contribute computing capacity (`partProperties.computing`, default `1` each),
+    - weapon attachments consume computing (`partProperties.computingConsumption`, default `1` each),
+    - if consumption exceeds capacity, random alive weapons are disabled until budget is satisfied.
 
 This keeps your physics behavior consistent across all systems.
 
@@ -563,7 +568,7 @@ If you want pure JavaScript (no TypeScript), use `vanilla` template and remove `
 ## 13. First Implementation Milestones
 
 1. Boot app + fixed loop + Pixi scene + Rapier world.
-2. Implement structure grid + attachment rules + single control unit validation.
+2. Implement structure grid + attachment rules + at-least-one control unit validation.
 3. Implement impulse hit/recoil and mass-based velocity changes.
 4. Add damage pipeline (structure breach -> module loss).
 5. Add simple AI and battle win/loss flow.

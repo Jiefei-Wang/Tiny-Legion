@@ -164,7 +164,7 @@ export interface PartPropertySet {
   recover?: number;
   color?: string;
   computing?: number;
-  powerAssumption?: number;
+  computingConsumption?: number;
   power?: number;
   maxSpeed?: number;
   powerGround?: boolean;

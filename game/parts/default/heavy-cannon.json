@@ -76,6 +76,9 @@
     "shootAngleDeg": 100,
     "projectileSpeed": 500
   },
+  "partProperties": {
+    "computingConsumption": 1
+  },
   "properties": {
     "category": "weapon",
     "subcategory": "heavy-shot",

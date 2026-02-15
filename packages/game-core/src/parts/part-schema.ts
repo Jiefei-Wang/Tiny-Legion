@@ -493,6 +493,8 @@ export function createImplicitPartDefinition(component: ComponentId): PartDefini
       minLoadTime: stats.loader?.minLoadTime,
       minBurstInterval: stats.loader?.minBurstInterval,
       maxCapacity: stats.type === "ammo" ? 1 : stats.loader?.storeCapacity,
+      computing: stats.type === "control" ? 1 : undefined,
+      computingConsumption: stats.type === "weapon" ? 1 : undefined,
     },
     properties: {
       category: stats.type,
@@ -658,7 +660,7 @@ export function clonePartDefinition(part: PartDefinition): PartDefinition {
           recover: part.partProperties.recover,
           color: part.partProperties.color,
           computing: part.partProperties.computing,
-          powerAssumption: part.partProperties.powerAssumption,
+          computingConsumption: part.partProperties.computingConsumption,
           power: part.partProperties.power,
           maxSpeed: part.partProperties.maxSpeed,
           powerGround: part.partProperties.powerGround,
@@ -904,7 +906,7 @@ export function parsePartDefinition(input: unknown): PartDefinition | null {
     recover: readOptionalNumber(partPropertiesRecord.recover),
     color: readOptionalString(partPropertiesRecord.color),
     computing: readOptionalNumber(partPropertiesRecord.computing),
-    powerAssumption: readOptionalNumber(partPropertiesRecord.powerAssumption),
+    computingConsumption: readOptionalNumber(partPropertiesRecord.computingConsumption ?? partPropertiesRecord.computingCost),
     power: readOptionalNumber(partPropertiesRecord.power),
     maxSpeed: readOptionalNumber(partPropertiesRecord.maxSpeed),
     powerGround: readOptionalBoolean(partPropertiesRecord.powerGround),
@@ -938,6 +940,12 @@ export function parsePartDefinition(input: unknown): PartDefinition | null {
     explosionDamage: readOptionalNumber(partPropertiesRecord.explosionDamage),
     explosionRadius: readOptionalNumber(partPropertiesRecord.explosionRadius),
   };
+  if (inferredPartType === "control" && partProperties.computing === undefined) {
+    partProperties.computing = 1;
+  }
+  if (inferredPartType === "weapon" && partProperties.computingConsumption === undefined) {
+    partProperties.computingConsumption = 1;
+  }
 
   const parsed: PartDefinition = {
     id,

@@ -4735,6 +4735,10 @@ export function bootstrap(options: BootstrapOptions = {}): void {
           <label class="small">Mass <input id="partStructureMass" type="number" step="0.1" value="${partRuntimeProps.mass ?? ""}" /></label>
           <label class="small">HP <input id="partMetaHp" type="number" step="1" value="${partRuntimeProps.hp ?? ""}" /></label>
         </div>` : ""}
+        ${resolvedPartType === "control" ? `<div class="row">
+          <label class="small">Mass <input id="partControlMass" type="number" step="0.1" value="${partRuntimeProps.mass ?? ""}" /></label>
+          <label class="small">Computing <input id="partControlComputing" type="number" step="1" min="0" value="${partRuntimeProps.computing ?? 1}" /></label>
+        </div>` : ""}
         ${!isStructureLayerMode ? `<div class="row">
           <label class="small"><input id="partPropIsEngine" type="checkbox" ${propIsEngine ? "checked" : ""} /> is_engine</label>
           <label class="small"><input id="partPropIsWeapon" type="checkbox" ${propIsWeapon ? "checked" : ""} /> is_weapon</label>
@@ -4774,6 +4778,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         </div>
         <div class="row">
           <label class="small">Spread <input id="partSpread" type="number" step="0.1" value="${partRuntimeProps.spreadAngleDeg ?? ""}" placeholder="${runtimePlaceholders.spreadDeg}" /></label>
+          <label class="small">Computing Use <input id="partWeaponComputingConsumption" type="number" step="1" min="0" value="${partRuntimeProps.computingConsumption ?? 1}" /></label>
           ${weaponSupportsTracking ? `<label class="small">Tracking Turn Rate <input id="partTrackingTurnRate" type="number" step="1" value="${partRuntimeProps.trackingTurnRate ?? ""}" placeholder="${runtimePlaceholders.trackingTurnRateDegPerSec}" /></label>` : ""}
           ${weaponSupportsControl ? `<label class="small">Control Impair Factor <input id="partControlImpairFactor" type="number" step="0.01" value="${partDesignerDraft.stats?.controlImpairFactor ?? ""}" placeholder="${runtimePlaceholders.controlImpairFactor}" /></label>` : ""}
         </div>
@@ -6071,6 +6076,40 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       partDesignerDraft.partProperties = {
         ...(partDesignerDraft.partProperties ?? {}),
         mass: Number.isFinite(numeric) ? numeric : undefined,
+      };
+      updateSelectedInfo();
+    });
+    getOptionalElement<HTMLInputElement>("#partControlMass")?.addEventListener("input", (event) => {
+      const raw = (event.currentTarget as HTMLInputElement).value.trim();
+      const numeric = raw.length > 0 ? Number(raw) : Number.NaN;
+      const next = Number.isFinite(numeric) ? numeric : undefined;
+      partDesignerDraft.stats = {
+        ...(partDesignerDraft.stats ?? {}),
+        mass: next,
+      };
+      partDesignerDraft.partProperties = {
+        ...(partDesignerDraft.partProperties ?? {}),
+        mass: next,
+      };
+      updateSelectedInfo();
+    });
+    getOptionalElement<HTMLInputElement>("#partControlComputing")?.addEventListener("input", (event) => {
+      const raw = (event.currentTarget as HTMLInputElement).value.trim();
+      const numeric = raw.length > 0 ? Number(raw) : Number.NaN;
+      const next = Number.isFinite(numeric) ? Math.max(0, numeric) : undefined;
+      partDesignerDraft.partProperties = {
+        ...(partDesignerDraft.partProperties ?? {}),
+        computing: next,
+      };
+      updateSelectedInfo();
+    });
+    getOptionalElement<HTMLInputElement>("#partWeaponComputingConsumption")?.addEventListener("input", (event) => {
+      const raw = (event.currentTarget as HTMLInputElement).value.trim();
+      const numeric = raw.length > 0 ? Number(raw) : Number.NaN;
+      const next = Number.isFinite(numeric) ? Math.max(0, numeric) : undefined;
+      partDesignerDraft.partProperties = {
+        ...(partDesignerDraft.partProperties ?? {}),
+        computingConsumption: next,
       };
       updateSelectedInfo();
     });

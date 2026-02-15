@@ -69,6 +69,9 @@
     "requireEmptyStructureOffsets": [],
     "requireEmptyFunctionalOffsets": []
   },
+  "partProperties": {
+    "computingConsumption": 1
+  },
   "properties": {
     "category": "weapon",
     "subcategory": "explosive",

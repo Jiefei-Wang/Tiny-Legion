@@ -662,6 +662,8 @@ export class BattleSession {
         }
       }
 
+      this.enforceWeaponComputingBudget(unit);
+
       const isControlled = unit.side === "player" && unit.id === this.playerControlledId;
       let command: UnitCommand;
 
@@ -2052,6 +2054,44 @@ export class BattleSession {
       return part.partProperties.thrustAngleDeg;
     }
     return stats.propulsion?.thrustAngleDeg ?? 25;
+  }
+
+  private getControlComputing(unit: UnitInstance): number {
+    let total = 0;
+    for (const attachment of unit.attachments) {
+      if (!attachment.alive) {
+        continue;
+      }
+      const stats = COMPONENTS[attachment.component];
+      if (stats.type !== "control") {
+        continue;
+      }
+      const part = this.getAttachmentPart(attachment);
+      total += Math.max(0, part?.partProperties?.computing ?? 1);
+    }
+    return total;
+  }
+
+  private getWeaponComputingCost(weaponAttachment: UnitInstance["attachments"][number]): number {
+    const part = this.getAttachmentPart(weaponAttachment);
+    return Math.max(0, part?.partProperties?.computingConsumption ?? 1);
+  }
+
+  private enforceWeaponComputingBudget(unit: UnitInstance): void {
+    const controlComputing = this.getControlComputing(unit);
+    let aliveWeapons = unit.attachments.filter((attachment) => attachment.alive && COMPONENTS[attachment.component].type === "weapon");
+    let usedComputing = aliveWeapons.reduce((sum, attachment) => sum + this.getWeaponComputingCost(attachment), 0);
+    while (usedComputing > controlComputing && aliveWeapons.length > 0) {
+      const idx = Math.floor(Math.random() * aliveWeapons.length);
+      const lostWeapon = aliveWeapons[idx];
+      if (!lostWeapon) {
+        break;
+      }
+      lostWeapon.alive = false;
+      this.hooks.addLog(`${unit.name} lost weapon control capacity: ${lostWeapon.component}`, "warn");
+      aliveWeapons = unit.attachments.filter((attachment) => attachment.alive && COMPONENTS[attachment.component].type === "weapon");
+      usedComputing = aliveWeapons.reduce((sum, attachment) => sum + this.getWeaponComputingCost(attachment), 0);
+    }
   }
 
   private computeDirectedAirAccel(unit: UnitInstance, dirX: number, dirY: number): number {
