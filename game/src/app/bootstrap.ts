@@ -4592,12 +4592,6 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       const resolvedPartType = getResolvedPartType(partDesignerDraft);
       const resolvedPartCategory = getResolvedPartCategory(partDesignerDraft);
       const isStructureLayerMode = resolvedPartType === "structure";
-      const selectedBaseOption = isStructureLayerMode ? STRUCTURE_LAYER_BASE_OPTION : partDesignerDraft.baseComponent;
-      const baseComponentOptions = [
-        `<option value="${STRUCTURE_LAYER_BASE_OPTION}" ${selectedBaseOption === STRUCTURE_LAYER_BASE_OPTION ? "selected" : ""}>structure-layer</option>`,
-        ...Object.keys(COMPONENTS)
-        .map((component) => `<option value="${component}" ${selectedBaseOption === component ? "selected" : ""}>${component}</option>`)
-      ].join("");
       const baseStats = COMPONENTS[partDesignerDraft.baseComponent];
       const runtimePlaceholders = {
         gasCost: baseStats.gasCost !== undefined ? String(baseStats.gasCost) : "0",
@@ -4627,7 +4621,6 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         loaderStoreCapacity: baseStats.loader?.storeCapacity !== undefined ? String(baseStats.loader.storeCapacity) : "none",
         loaderMinBurstInterval: baseStats.loader?.minBurstInterval !== undefined ? String(baseStats.loader.minBurstInterval) : "none",
       };
-      const categoryOptionsBase: string[] = ["functional", "structure", "weapon", "mobility", "support", "defense", "utility", "other"];
       const weaponTypeOptions: Array<{ value: NonNullable<PartDefinition["properties"]>["weaponType"]; label: string }> = [
         { value: "rapid-fire", label: "rapid-fire" },
         { value: "heavy-shot", label: "heavy-shot" },
@@ -4644,14 +4637,9 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         : resolvedPartType === "weapon"
           ? ["bullet", "explosive", "missile", "beam", "emp"]
           : [];
-      const categoryOptions = partProps.category && !categoryOptionsBase.includes(partProps.category)
-        ? [partProps.category, ...categoryOptionsBase]
-        : categoryOptionsBase;
       const propIsEngine = resolvedPartType === "engine";
       const propIsWeapon = resolvedPartType === "weapon";
       const propIsLoader = resolvedPartType === "loader";
-      const propIsArmor = resolvedPartType === "structure";
-      const propHasCoreTuning = !isStructureLayerMode && partProps.hasCoreTuning === true;
       const weaponSupportsExplosive = partRuntimeProps.explodeOnHit === true || resolvedPartCategory === "explosive";
       const weaponSupportsTracking = partRuntimeProps.tracking === true || resolvedPartCategory === "missile";
       const weaponSupportsControl = resolvedPartCategory === "emp";
@@ -4696,9 +4684,6 @@ export function bootstrap(options: BootstrapOptions = {}): void {
           </label>` : ""}
         </div>
         <div class="row">
-          <label class="small">Base Component
-            <select id="partBaseComponent">${baseComponentOptions}</select>
-          </label>
           <label class="small"><input id="partDirectional" type="checkbox" ${partDesignerDraft.directional ? "checked" : ""} /> Directional</label>
           <label class="small">Direction
             <select id="partDirection">
@@ -4709,15 +4694,6 @@ export function bootstrap(options: BootstrapOptions = {}): void {
             </select>
           </label>
         </div>
-        ${!isStructureLayerMode ? `<div><strong>Editor Meta</strong></div>
-        <div class="row">
-          <label class="small">Category
-            <select id="partCategorySelect">
-              ${categoryOptions.map((option) => `<option value="${option}" ${(partProps.category ?? "") === option ? "selected" : ""}>${option}</option>`).join("")}
-            </select>
-          </label>
-          <label class="small">Subcategory <input id="partSubcategory" value="${partProps.subcategory ?? ""}" /></label>
-        </div>` : ""}
         <div><strong>Part Properties</strong></div>
         <div class="row">
           <label class="small" style="flex:1;">Tags (comma separated) <input id="partTags" value="${(partDesignerDraft.tags ?? []).join(", ")}" /></label>
@@ -4739,13 +4715,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
           <label class="small">Mass <input id="partControlMass" type="number" step="0.1" value="${partRuntimeProps.mass ?? ""}" /></label>
           <label class="small">Computing <input id="partControlComputing" type="number" step="1" min="0" value="${partRuntimeProps.computing ?? 1}" /></label>
         </div>` : ""}
-        ${!isStructureLayerMode ? `<div class="row">
-          <label class="small"><input id="partPropIsEngine" type="checkbox" ${propIsEngine ? "checked" : ""} /> is_engine</label>
-          <label class="small"><input id="partPropIsWeapon" type="checkbox" ${propIsWeapon ? "checked" : ""} /> is_weapon</label>
-          <label class="small"><input id="partPropIsLoader" type="checkbox" ${propIsLoader ? "checked" : ""} /> is_loader</label>
-          <label class="small"><input id="partPropIsArmor" type="checkbox" ${propIsArmor ? "checked" : ""} /> is_armor</label>
-          <label class="small"><input id="partPropCoreTuning" type="checkbox" ${propHasCoreTuning ? "checked" : ""} /> core_tuning</label>
-        </div>` : `<div class="small">Structure layer mode: functional-specific metadata and placement constraints are hidden.</div>`}
+
         ${propIsEngine ? `<div class="row">
           <label class="small">Engine Type
             <select id="partEngineType">
@@ -4815,14 +4785,6 @@ export function bootstrap(options: BootstrapOptions = {}): void {
           <label class="small">Store Capacity <input id="partLoaderStoreCapacity" type="number" step="1" value="${partRuntimeProps.maxCapacity ?? ""}" placeholder="${runtimePlaceholders.loaderStoreCapacity}" /></label>
           <label class="small">Min Burst Interval <input id="partLoaderMinBurstInterval" type="number" step="0.05" value="${partRuntimeProps.minBurstInterval ?? ""}" placeholder="${runtimePlaceholders.loaderMinBurstInterval}" /></label>
         </div>` : ""}
-        ${!isStructureLayerMode && propIsArmor ? `<div class="row">
-          <label class="small">HP <input id="partMetaHp" type="number" step="1" value="${partProps.hp ?? ""}" /></label>
-        </div>` : ""}
-        ${propHasCoreTuning ? `<div class="row">
-          <label class="small">Mass <input id="partMass" type="number" step="0.1" value="${partDesignerDraft.stats?.mass ?? ""}" placeholder="${runtimePlaceholders.mass}" /></label>
-          <label class="small">HP Mul <input id="partHpMul" type="number" step="0.05" value="${partDesignerDraft.stats?.hpMul ?? ""}" placeholder="${runtimePlaceholders.hpMul}" /></label>
-        </div>
-        ` : ""}
         ${!isStructureLayerMode ? `<div class="row">
           <label class="small"><input id="partRequireStructureBelowAnchor" type="checkbox" ${partDesignerRequireStructureBelowAnchor ? "checked" : ""} /> Require structure below anchor</label>
           <label class="small"><input id="partRequireStructureOnFunctional" type="checkbox" ${(partDesignerDraft.placement?.requireStructureOnFunctionalOccupiedBoxes ?? true) ? "checked" : ""} /> Functional boxes require structure</label>
