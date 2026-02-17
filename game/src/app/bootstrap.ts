@@ -605,7 +605,6 @@ export function bootstrap(options: BootstrapOptions = {}): void {
   let partDesignerSupportOffsets = new Set<number>();
   let partDesignerEmptyStructureOffsets = new Set<number>();
   let partDesignerEmptyFunctionalOffsets = new Set<number>();
-  let partDesignerRequireStructureBelowAnchor = false;
   let partDesignerCategoryEdited = false;
   let partDesignerSubcategoryEdited = false;
   let partDesignerLastFunctionalBaseComponent: ComponentId = partDesignerDraft.baseComponent;
@@ -2343,8 +2342,8 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     return copy;
   };
 
-  const parseWeaponClassList = (values: ReadonlyArray<string>): Array<"rapid-fire" | "heavy-shot" | "explosive" | "tracking" | "beam-precision" | "control-utility"> => {
-    const result: Array<"rapid-fire" | "heavy-shot" | "explosive" | "tracking" | "beam-precision" | "control-utility"> = [];
+  const parseWeaponClassList = (values: ReadonlyArray<string>): Array<"rapid-fire" | "heavy-shot" | "explosive" | "tracking" | "beam-precision"> => {
+    const result: Array<"rapid-fire" | "heavy-shot" | "explosive" | "tracking" | "beam-precision"> = [];
     for (const value of values) {
       if (
         value === "rapid-fire"
@@ -2352,7 +2351,6 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         || value === "explosive"
         || value === "tracking"
         || value === "beam-precision"
-        || value === "control-utility"
       ) {
         result.push(value);
       }
@@ -3011,13 +3009,6 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       }
     }
 
-    if (placement?.requireStructureBelowAnchor === true) {
-      const supportSlot = coordToSlot(anchorCoord.x, anchorCoord.y + 1);
-      if (supportSlot === null || !editorStructureSlots[supportSlot]) {
-        return { ok: false, reason: "Component requires structure support directly below anchor" };
-      }
-    }
-
     const requiredSupportOffsets = getPlacementOffsets(part, rotateQuarter, "support");
     for (const offset of requiredSupportOffsets) {
       const requiredSlot = coordToSlot(anchorCoord.x + offset.x, anchorCoord.y + offset.y);
@@ -3371,7 +3362,6 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       boxes,
       placement: {
         requireStructureOffsets: toRelativeOffsets(partDesignerSupportOffsets),
-        requireStructureBelowAnchor: partDesignerRequireStructureBelowAnchor,
         requireStructureOnFunctionalOccupiedBoxes: partDesignerDraft.layer === "structure"
           ? false
           : (partDesignerDraft.placement?.requireStructureOnFunctionalOccupiedBoxes ?? true),
@@ -3399,7 +3389,6 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     partDesignerSupportOffsets = new Set<number>();
     partDesignerEmptyStructureOffsets = new Set<number>();
     partDesignerEmptyFunctionalOffsets = new Set<number>();
-    partDesignerRequireStructureBelowAnchor = part.placement?.requireStructureBelowAnchor ?? false;
 
     for (const box of part.boxes) {
       const slot = coordToSlot(box.x, box.y);
@@ -3529,7 +3518,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
   const getEditorCombatPreview = (): {
     achievableSpeed: number;
     liftAccel: number | null;
-    weaponCounts: Record<"rapid-fire" | "heavy-shot" | "explosive" | "tracking" | "beam-precision" | "control-utility", number>;
+    weaponCounts: Record<"rapid-fire" | "heavy-shot" | "explosive" | "tracking" | "beam-precision", number>;
   } => {
     let totalMass = 0;
     for (const cell of editorDraft.structure) {
@@ -3538,13 +3527,12 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     let totalPower = 0;
     let weightedSpeedCap = 0;
     let capWeight = 0;
-    const weaponCounts: Record<"rapid-fire" | "heavy-shot" | "explosive" | "tracking" | "beam-precision" | "control-utility", number> = {
+    const weaponCounts: Record<"rapid-fire" | "heavy-shot" | "explosive" | "tracking" | "beam-precision", number> = {
       "rapid-fire": 0,
       "heavy-shot": 0,
       explosive: 0,
       tracking: 0,
       "beam-precision": 0,
-      "control-utility": 0,
     };
 
     for (const attachment of editorDraft.attachments) {
@@ -3953,7 +3941,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     }
 
     const combatPreview = getEditorCombatPreview();
-    const legend = `Wpn by class R:${combatPreview.weaponCounts["rapid-fire"]} H:${combatPreview.weaponCounts["heavy-shot"]} E:${combatPreview.weaponCounts.explosive} T:${combatPreview.weaponCounts.tracking} B:${combatPreview.weaponCounts["beam-precision"]} C:${combatPreview.weaponCounts["control-utility"]}`;
+    const legend = `Wpn by class R:${combatPreview.weaponCounts["rapid-fire"]} H:${combatPreview.weaponCounts["heavy-shot"]} E:${combatPreview.weaponCounts.explosive} T:${combatPreview.weaponCounts.tracking} B:${combatPreview.weaponCounts["beam-precision"]}`;
     const speedText = `Achievable speed: ${combatPreview.achievableSpeed.toFixed(1)}`;
     const liftText = combatPreview.liftAccel === null
       ? "Lift: n/a (ground unit)"
@@ -4614,35 +4602,25 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         explosiveFalloffPower: baseStats.explosive?.falloffPower !== undefined ? String(baseStats.explosive.falloffPower) : "none",
         explosiveFuseTime: baseStats.explosive?.fuseTime !== undefined ? String(baseStats.explosive.fuseTime) : "none",
         trackingTurnRateDegPerSec: baseStats.tracking?.turnRateDegPerSec !== undefined ? String(baseStats.tracking.turnRateDegPerSec) : "none",
-        controlImpairFactor: baseStats.control?.impairFactor !== undefined ? String(baseStats.control.impairFactor) : "none",
-        controlDuration: baseStats.control?.duration !== undefined ? String(baseStats.control.duration) : "none",
         loaderLoadMultiplier: baseStats.loader?.loadMultiplier !== undefined ? String(baseStats.loader.loadMultiplier) : "none",
         loaderMinLoadTime: baseStats.loader?.minLoadTime !== undefined ? String(baseStats.loader.minLoadTime) : "none",
         loaderStoreCapacity: baseStats.loader?.storeCapacity !== undefined ? String(baseStats.loader.storeCapacity) : "none",
         loaderMinBurstInterval: baseStats.loader?.minBurstInterval !== undefined ? String(baseStats.loader.minBurstInterval) : "none",
       };
-      const weaponTypeOptions: Array<{ value: NonNullable<PartDefinition["properties"]>["weaponType"]; label: string }> = [
-        { value: "rapid-fire", label: "rapid-fire" },
-        { value: "heavy-shot", label: "heavy-shot" },
-        { value: "explosive", label: "explosive" },
-        { value: "tracking", label: "tracking" },
-        { value: "beam-precision", label: "beam-precision" },
-        { value: "control-utility", label: "control-utility" },
-      ];
+
       const partProps = partDesignerDraft.properties ?? {};
       const partRuntimeProps = partDesignerDraft.partProperties ?? getPartPropertiesDefaultsByType(resolvedPartType, resolvedPartCategory);
       const partTypeOptions: PartType[] = ["structure", "control", "engine", "weapon", "loader", "ammo"];
       const partCategoryOptions: PartCategory[] = resolvedPartType === "engine"
         ? ["vehicle", "jet", "propeller"]
         : resolvedPartType === "weapon"
-          ? ["bullet", "explosive", "missile", "beam", "emp"]
+          ? ["bullet", "explosive", "missile", "beam"]
           : [];
       const propIsEngine = resolvedPartType === "engine";
       const propIsWeapon = resolvedPartType === "weapon";
       const propIsLoader = resolvedPartType === "loader";
       const weaponSupportsExplosive = partRuntimeProps.explodeOnHit === true || resolvedPartCategory === "explosive";
       const weaponSupportsTracking = partRuntimeProps.tracking === true || resolvedPartCategory === "missile";
-      const weaponSupportsControl = resolvedPartCategory === "emp";
       const loaderSupportsPlaceholder = baseStats.loader?.supports?.join(", ") ?? "none";
       editorPanel.innerHTML = `
         <h3>Part Designer</h3>
@@ -4727,16 +4705,11 @@ export function bootstrap(options: BootstrapOptions = {}): void {
           <label class="small">Max Speed <input id="partMaxSpeed" type="number" step="1" value="${partRuntimeProps.maxSpeed ?? ""}" placeholder="${runtimePlaceholders.maxSpeed}" /></label>
         </div>` : ""}
         ${propIsWeapon ? `<div class="row">
-          <label class="small">Weapon Type
-            <select id="partWeaponType">
-              ${weaponTypeOptions.map((option) => `<option value="${option.value}" ${partProps.weaponType === option.value ? "selected" : ""}>${option.label}</option>`).join("")}
-            </select>
-          </label>
           <label class="small">Recoil <input id="partRecoil" type="number" step="0.1" value="${partRuntimeProps.recoil ?? ""}" placeholder="${runtimePlaceholders.recoil}" /></label>
           <label class="small">Hit Impulse <input id="partHitImpulse" type="number" step="0.1" value="${partRuntimeProps.hitImpulse ?? ""}" placeholder="${runtimePlaceholders.hitImpulse}" /></label>
+          <label class="small">Damage <input id="partDamage" type="number" step="1" value="${partRuntimeProps.damage ?? ""}" placeholder="${runtimePlaceholders.damage}" /></label>
         </div>
         <div class="row">
-          <label class="small">Damage <input id="partDamage" type="number" step="1" value="${partRuntimeProps.damage ?? ""}" placeholder="${runtimePlaceholders.damage}" /></label>
           <label class="small">Penetration <input id="partPenetration" type="number" step="1" min="0" value="${partRuntimeProps.penetration ?? ""}" placeholder="${runtimePlaceholders.penetration}" /></label>
           <label class="small">Range <input id="partRange" type="number" step="1" value="${partRuntimeProps.range ?? ""}" placeholder="${runtimePlaceholders.range}" /></label>
           <label class="small">Cooldown <input id="partCooldown" type="number" step="0.05" value="${partRuntimeProps.cooldown ?? ""}" placeholder="${runtimePlaceholders.cooldown}" /></label>
@@ -4750,11 +4723,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
           <label class="small">Spread <input id="partSpread" type="number" step="0.1" value="${partRuntimeProps.spreadAngleDeg ?? ""}" placeholder="${runtimePlaceholders.spreadDeg}" /></label>
           <label class="small">Computing Use <input id="partWeaponComputingConsumption" type="number" step="1" min="0" value="${partRuntimeProps.computingConsumption ?? 1}" /></label>
           ${weaponSupportsTracking ? `<label class="small">Tracking Turn Rate <input id="partTrackingTurnRate" type="number" step="1" value="${partRuntimeProps.trackingTurnRate ?? ""}" placeholder="${runtimePlaceholders.trackingTurnRateDegPerSec}" /></label>` : ""}
-          ${weaponSupportsControl ? `<label class="small">Control Impair Factor <input id="partControlImpairFactor" type="number" step="0.01" value="${partDesignerDraft.stats?.controlImpairFactor ?? ""}" placeholder="${runtimePlaceholders.controlImpairFactor}" /></label>` : ""}
         </div>
-        ${weaponSupportsControl ? `<div class="row">
-          <label class="small">Control Duration <input id="partControlDuration" type="number" step="0.05" value="${partDesignerDraft.stats?.controlDuration ?? ""}" placeholder="${runtimePlaceholders.controlDuration}" /></label>
-        </div>` : ""}
         ${weaponSupportsExplosive ? `<div class="row">
           <label class="small">Explosive Delivery
             <select id="partExplosiveDeliveryMode">
@@ -4786,7 +4755,6 @@ export function bootstrap(options: BootstrapOptions = {}): void {
           <label class="small">Min Burst Interval <input id="partLoaderMinBurstInterval" type="number" step="0.05" value="${partRuntimeProps.minBurstInterval ?? ""}" placeholder="${runtimePlaceholders.loaderMinBurstInterval}" /></label>
         </div>` : ""}
         ${!isStructureLayerMode ? `<div class="row">
-          <label class="small"><input id="partRequireStructureBelowAnchor" type="checkbox" ${partDesignerRequireStructureBelowAnchor ? "checked" : ""} /> Require structure below anchor</label>
           <label class="small"><input id="partRequireStructureOnFunctional" type="checkbox" ${(partDesignerDraft.placement?.requireStructureOnFunctionalOccupiedBoxes ?? true) ? "checked" : ""} /> Functional boxes require structure</label>
           <label class="small"><input id="partRequireStructureOnStructure" type="checkbox" ${(partDesignerDraft.placement?.requireStructureOnStructureOccupiedBoxes ?? true) ? "checked" : ""} /> Structure boxes require structure support</label>
         </div>` : ""}
@@ -5814,7 +5782,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
 
     getOptionalElement<HTMLSelectElement>("#partCategoryTypeSelect")?.addEventListener("change", (event) => {
       const value = (event.currentTarget as HTMLSelectElement).value;
-      if (value !== "vehicle" && value !== "jet" && value !== "propeller" && value !== "bullet" && value !== "explosive" && value !== "missile" && value !== "beam" && value !== "emp") {
+      if (value !== "vehicle" && value !== "jet" && value !== "propeller" && value !== "bullet" && value !== "explosive" && value !== "missile" && value !== "beam") {
         return;
       }
       partDesignerDraft.partCategory = value as PartCategory;
@@ -5853,7 +5821,6 @@ export function bootstrap(options: BootstrapOptions = {}): void {
             isShootingPoint: false,
           };
         });
-        partDesignerRequireStructureBelowAnchor = false;
         partDesignerSupportOffsets = new Set<number>();
         partDesignerEmptyStructureOffsets = new Set<number>();
         partDesignerEmptyFunctionalOffsets = new Set<number>();
@@ -6250,12 +6217,6 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         explosiveFuse: value === "timed" ? "timed" : "impact",
       };
       updateSelectedInfo();
-    });
-
-    getOptionalElement<HTMLInputElement>("#partRequireStructureBelowAnchor")?.addEventListener("change", (event) => {
-      partDesignerRequireStructureBelowAnchor = (event.currentTarget as HTMLInputElement).checked;
-      recalcPartDraftFromSlots();
-      renderPanels();
     });
 
     getOptionalElement<HTMLInputElement>("#partRequireStructureOnFunctional")?.addEventListener("change", (event) => {

@@ -294,7 +294,6 @@ export function instantiateUnit(
         || value === "explosive"
         || value === "tracking"
         || value === "beam-precision"
-        || value === "control-utility"
       ) {
         supports.push(value);
       }

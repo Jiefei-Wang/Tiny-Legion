@@ -109,7 +109,6 @@
   ],
   "placement": {
     "requireStructureOffsets": [],
-    "requireStructureBelowAnchor": true,
     "requireStructureOnFunctionalOccupiedBoxes": false,
     "requireStructureOnStructureOccupiedBoxes": true,
     "requireEmptyStructureOffsets": [],

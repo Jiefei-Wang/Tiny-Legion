@@ -24,7 +24,6 @@ export function getPartCategoryFromComponent(baseComponent: ComponentId): PartCa
   if (baseComponent === "explosiveShell") return "explosive";
   if (baseComponent === "trackingMissile") return "missile";
   if (baseComponent === "precisionBeam") return "beam";
-  if (baseComponent === "empEmitter") return "emp";
   return undefined;
 }
 
@@ -39,7 +38,6 @@ export function getComponentFromPartTypeAndCategory(partType: PartType, partCate
     if (partCategory === "explosive") return "explosiveShell";
     if (partCategory === "missile") return "trackingMissile";
     if (partCategory === "beam") return "precisionBeam";
-    if (partCategory === "emp") return "empEmitter";
     return "rapidGun";
   }
   if (partType === "loader") return "cannonLoader";
@@ -67,7 +65,6 @@ export function getPartPropertyDefaults(baseComponent: ComponentId): NonNullable
     isLoader: stats.type === "loader",
     isArmor: false,
     engineType: stats.type === "engine" ? stats.propulsion?.platform : undefined,
-    weaponType: stats.type === "weapon" ? stats.weaponClass : undefined,
     loaderServesTags: stats.type === "loader" ? stats.loader?.supports.map((entry) => String(entry)) : undefined,
     loaderCooldownMultiplier: stats.type === "loader" ? stats.loader?.loadMultiplier : undefined,
     hasCoreTuning: false,

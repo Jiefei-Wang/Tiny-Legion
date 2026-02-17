@@ -161,13 +161,6 @@ export function sanitizeTemplatePlacement(
     const placement = part.placement;
     let blocked = false;
     if (anchor) {
-      if (placement?.requireStructureBelowAnchor) {
-        const supportKey = `${anchor.x},${anchor.y + 1}`;
-        if (!structureCoords.has(supportKey)) {
-          blocked = true;
-        }
-      }
-
       if (!blocked) {
         for (const offset of placement?.requireStructureOffsets ?? []) {
           const rotated = rotateOffsetByQuarter(offset.x, offset.y, normalizedRotate);

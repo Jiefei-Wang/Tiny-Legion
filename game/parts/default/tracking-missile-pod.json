@@ -63,7 +63,6 @@
   ],
   "placement": {
     "requireStructureOffsets": [],
-    "requireStructureBelowAnchor": false,
     "requireStructureOnFunctionalOccupiedBoxes": true,
     "requireStructureOnStructureOccupiedBoxes": true,
     "requireEmptyStructureOffsets": [],
@@ -100,7 +99,6 @@
     "isWeapon": true,
     "isLoader": false,
     "isArmor": false,
-    "weaponType": "tracking",
     "hasCoreTuning": false
   },
   "tags": [

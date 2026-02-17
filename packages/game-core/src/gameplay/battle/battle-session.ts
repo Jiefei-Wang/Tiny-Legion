@@ -1715,7 +1715,6 @@ export class BattleSession {
         || value === "explosive"
         || value === "tracking"
         || value === "beam-precision"
-        || value === "control-utility"
       ) {
         supports.push(value);
       }

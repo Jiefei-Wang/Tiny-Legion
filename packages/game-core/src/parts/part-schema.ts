@@ -37,9 +37,6 @@ function resolvePartCategoryFromComponent(component: ComponentId): PartCategory 
   if (component === "precisionBeam") {
     return "beam";
   }
-  if (component === "empEmitter") {
-    return "emp";
-  }
   return undefined;
 }
 
@@ -56,7 +53,6 @@ function mapPartTypeAndCategoryToComponent(partType: PartType, partCategory?: Pa
     if (partCategory === "explosive") return "explosiveShell";
     if (partCategory === "missile") return "trackingMissile";
     if (partCategory === "beam") return "precisionBeam";
-    if (partCategory === "emp") return "empEmitter";
     return "rapidGun";
   }
   if (partType === "loader") {
@@ -143,8 +139,8 @@ function readOptionalString(value: unknown): string | undefined {
   return next.length > 0 ? next : undefined;
 }
 
-function readOptionalWeaponClass(value: unknown): "rapid-fire" | "heavy-shot" | "explosive" | "tracking" | "beam-precision" | "control-utility" | undefined {
-  if (value === "rapid-fire" || value === "heavy-shot" || value === "explosive" || value === "tracking" || value === "beam-precision" || value === "control-utility") {
+function readOptionalWeaponClass(value: unknown): "rapid-fire" | "heavy-shot" | "explosive" | "tracking" | "beam-precision" | undefined {
+  if (value === "rapid-fire" || value === "heavy-shot" || value === "explosive" || value === "tracking" || value === "beam-precision") {
     return value;
   }
   return undefined;
@@ -186,7 +182,6 @@ const DEFAULT_PART_ID_BY_COMPONENT: Record<ComponentId, number> = {
   ammo: 1,
   cannonLoader: 2,
   control: 3,
-  empEmitter: 4,
   engineM: 5,
   engineS: 6,
   explosiveShell: 7,
@@ -243,7 +238,6 @@ function readOptionalPartCategory(value: unknown): PartCategory | undefined {
     || value === "explosive"
     || value === "missile"
     || value === "beam"
-    || value === "emp"
   ) {
     return value;
   }
@@ -305,7 +299,6 @@ function createImplicitStructurePartDefinition(component: ComponentId): PartDefi
     }],
     placement: {
       requireStructureOffsets: [],
-      requireStructureBelowAnchor: false,
       requireStructureOnFunctionalOccupiedBoxes: false,
       requireStructureOnStructureOccupiedBoxes: false,
       requireEmptyStructureOffsets: [],
@@ -365,7 +358,6 @@ function createImplicitStructureMaterialPartDefinition(materialId: MaterialId): 
     }],
     placement: {
       requireStructureOffsets: [],
-      requireStructureBelowAnchor: false,
       requireStructureOnFunctionalOccupiedBoxes: false,
       requireStructureOnStructureOccupiedBoxes: false,
       requireEmptyStructureOffsets: [],
@@ -447,8 +439,7 @@ export function createImplicitPartDefinition(component: ComponentId): PartDefini
     })),
     boxes,
     placement: {
-      requireStructureOffsets: stats.placement?.requireStructureBelowAnchor ? [{ x: 0, y: 1 }] : [],
-      requireStructureBelowAnchor: stats.placement?.requireStructureBelowAnchor ?? false,
+      requireStructureOffsets: [],
       requireStructureOnFunctionalOccupiedBoxes: requireStructureOnFunctional,
       requireStructureOnStructureOccupiedBoxes: true,
       requireEmptyStructureOffsets: (stats.placement?.requireEmptyOffsets ?? []).map((offset) => ({ x: offset.x, y: offset.y })),
@@ -643,7 +634,6 @@ export function clonePartDefinition(part: PartDefinition): PartDefinition {
     placement: part.placement
       ? {
           requireStructureOffsets: (part.placement.requireStructureOffsets ?? []).map((offset) => ({ x: offset.x, y: offset.y })),
-          requireStructureBelowAnchor: part.placement.requireStructureBelowAnchor,
           requireStructureOnFunctionalOccupiedBoxes: part.placement.requireStructureOnFunctionalOccupiedBoxes,
           requireStructureOnStructureOccupiedBoxes: part.placement.requireStructureOnStructureOccupiedBoxes,
           requireEmptyStructureOffsets: (part.placement.requireEmptyStructureOffsets ?? []).map((offset) => ({ x: offset.x, y: offset.y })),
@@ -882,9 +872,6 @@ export function parsePartDefinition(input: unknown): PartDefinition | null {
   const runtimeTrackingRecord = runtimeRecord.tracking && typeof runtimeRecord.tracking === "object"
     ? (runtimeRecord.tracking as Record<string, unknown>)
     : {};
-  const runtimeControlRecord = runtimeRecord.control && typeof runtimeRecord.control === "object"
-    ? (runtimeRecord.control as Record<string, unknown>)
-    : {};
   const runtimeLoaderRecord = runtimeRecord.loader && typeof runtimeRecord.loader === "object"
     ? (runtimeRecord.loader as Record<string, unknown>)
     : {};
@@ -973,7 +960,6 @@ export function parsePartDefinition(input: unknown): PartDefinition | null {
     boxes: resolvedBoxes,
     placement: {
       requireStructureOffsets: normalizeOffsets(placementRecord.requireStructureOffsets),
-      requireStructureBelowAnchor: placementRecord.requireStructureBelowAnchor === true,
       requireStructureOnFunctionalOccupiedBoxes: placementRecord.requireStructureOnFunctionalOccupiedBoxes === false ? false : true,
       requireStructureOnStructureOccupiedBoxes: placementRecord.requireStructureOnStructureOccupiedBoxes === false ? false : true,
       requireEmptyStructureOffsets: normalizeOffsets(placementRecord.requireEmptyStructureOffsets),
@@ -1010,27 +996,24 @@ export function parsePartDefinition(input: unknown): PartDefinition | null {
         : undefined,
       explosiveFuseTime: readOptionalNumber(runtimeRecord.explosiveFuseTime ?? runtimeExplosiveRecord.fuseTime),
       trackingTurnRateDegPerSec: readOptionalNumber(runtimeRecord.trackingTurnRateDegPerSec ?? runtimeTrackingRecord.turnRateDegPerSec ?? partProperties.trackingTurnRate),
-      controlImpairFactor: readOptionalNumber(runtimeRecord.controlImpairFactor ?? runtimeControlRecord.impairFactor),
-      controlDuration: readOptionalNumber(runtimeRecord.controlDuration ?? runtimeControlRecord.duration),
       loaderSupports: Array.isArray(runtimeRecord.loaderSupports)
         ? runtimeRecord.loaderSupports
             .map((entry) => readOptionalWeaponClass(entry))
-            .filter((entry): entry is "rapid-fire" | "heavy-shot" | "explosive" | "tracking" | "beam-precision" | "control-utility" => entry !== undefined)
+            .filter((entry): entry is "rapid-fire" | "heavy-shot" | "explosive" | "tracking" | "beam-precision" => entry !== undefined)
         : Array.isArray(partProperties.supportedWeaponTags)
           ? partProperties.supportedWeaponTags
               .map((entry) => {
                 if (entry === "missile") return "tracking";
                 if (entry === "beam" || entry === "laser") return "beam-precision";
-                if (entry === "emp") return "control-utility";
                 if (entry === "explosive") return "explosive";
                 if (entry === "cannon") return "heavy-shot";
                 return "rapid-fire";
               })
-              .filter((entry): entry is "rapid-fire" | "heavy-shot" | "explosive" | "tracking" | "beam-precision" | "control-utility" => entry !== undefined)
+              .filter((entry): entry is "rapid-fire" | "heavy-shot" | "explosive" | "tracking" | "beam-precision" => entry !== undefined)
         : Array.isArray(runtimeLoaderRecord.supports)
           ? runtimeLoaderRecord.supports
               .map((entry) => readOptionalWeaponClass(entry))
-              .filter((entry): entry is "rapid-fire" | "heavy-shot" | "explosive" | "tracking" | "beam-precision" | "control-utility" => entry !== undefined)
+              .filter((entry): entry is "rapid-fire" | "heavy-shot" | "explosive" | "tracking" | "beam-precision" => entry !== undefined)
         : undefined,
       loaderLoadMultiplier: readOptionalNumber(runtimeRecord.loaderLoadMultiplier ?? runtimeLoaderRecord.loadMultiplier ?? partProperties.loadMultiplier),
       loaderFastOperation: readOptionalBoolean(runtimeRecord.loaderFastOperation ?? runtimeLoaderRecord.fastOperation),
@@ -1074,18 +1057,6 @@ export function parsePartDefinition(input: unknown): PartDefinition | null {
         : (propertiesRecord.engine_type === "ground" || propertiesRecord.engine_type === "air")
           ? propertiesRecord.engine_type
           : (partProperties.powerAir === true ? "air" : (partProperties.powerGround === true ? "ground" : undefined)),
-      weaponType: readOptionalWeaponClass(propertiesRecord.weaponType ?? propertiesRecord.weapon_type)
-        ?? (normalizedPartCategory === "explosive"
-          ? "explosive"
-          : normalizedPartCategory === "missile"
-            ? "tracking"
-            : normalizedPartCategory === "beam"
-              ? "beam-precision"
-              : normalizedPartCategory === "emp"
-                ? "control-utility"
-                : normalizedPartType === "weapon"
-                  ? "rapid-fire"
-                  : undefined),
       loaderServesTags: normalizeStringList(
         propertiesRecord.loaderServesTags
           ?? propertiesRecord.loader_serves_tags
@@ -1106,12 +1077,11 @@ export function parsePartDefinition(input: unknown): PartDefinition | null {
   };
 
   const placement = parsed.placement;
-  if (placement && placement.requireStructureOffsets?.length === 0 && !placement.requireStructureBelowAnchor && placement.requireStructureOnFunctionalOccupiedBoxes === true && placement.requireStructureOnStructureOccupiedBoxes === true && placement.requireEmptyStructureOffsets?.length === 0 && placement.requireEmptyFunctionalOffsets?.length === 0) {
+  if (placement && placement.requireStructureOffsets?.length === 0 && placement.requireStructureOnFunctionalOccupiedBoxes === true && placement.requireStructureOnStructureOccupiedBoxes === true && placement.requireEmptyStructureOffsets?.length === 0 && placement.requireEmptyFunctionalOffsets?.length === 0) {
     const legacy = fallback.placement;
     parsed.placement = legacy
       ? {
           requireStructureOffsets: (legacy.requireStructureOffsets ?? []).map((offset) => ({ x: offset.x, y: offset.y })),
-          requireStructureBelowAnchor: legacy.requireStructureBelowAnchor,
           requireStructureOnFunctionalOccupiedBoxes: legacy.requireStructureOnFunctionalOccupiedBoxes,
           requireStructureOnStructureOccupiedBoxes: legacy.requireStructureOnStructureOccupiedBoxes,
           requireEmptyStructureOffsets: (legacy.requireEmptyStructureOffsets ?? []).map((offset) => ({ x: offset.x, y: offset.y })),

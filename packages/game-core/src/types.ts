@@ -15,7 +15,6 @@ export type ComponentId =
   | "explosiveShell"
   | "trackingMissile"
   | "precisionBeam"
-  | "empEmitter"
   | "ammo";
 
 export type WeaponClass =
@@ -23,11 +22,10 @@ export type WeaponClass =
   | "heavy-shot"
   | "explosive"
   | "tracking"
-  | "beam-precision"
-  | "control-utility";
+  | "beam-precision";
 
 export type PartType = "structure" | "control" | "engine" | "weapon" | "loader" | "ammo";
-export type PartCategory = "vehicle" | "jet" | "propeller" | "bullet" | "explosive" | "missile" | "beam" | "emp";
+export type PartCategory = "vehicle" | "jet" | "propeller" | "bullet" | "explosive" | "missile" | "beam";
 
 export type ExplosiveDeliveryMode = "shell" | "bomb";
 
@@ -59,7 +57,6 @@ export interface ComponentStats {
     readonly footprintOffsets?: ReadonlyArray<{ x: number; y: number }>;
     readonly requireStructureOnFootprint?: boolean;
     readonly requireEmptyOffsets?: ReadonlyArray<{ x: number; y: number }>;
-    readonly requireStructureBelowAnchor?: boolean;
   };
   readonly power?: number;
   readonly maxSpeed?: number;
@@ -115,7 +112,6 @@ export interface PartBoxTemplate {
 
 export interface PartPlacementTemplate {
   requireStructureOffsets?: ReadonlyArray<{ x: number; y: number }>;
-  requireStructureBelowAnchor?: boolean;
   requireStructureOnFunctionalOccupiedBoxes?: boolean;
   requireStructureOnStructureOccupiedBoxes?: boolean;
   requireEmptyStructureOffsets?: ReadonlyArray<{ x: number; y: number }>;

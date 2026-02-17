@@ -63,7 +63,6 @@
   ],
   "placement": {
     "requireStructureOffsets": [],
-    "requireStructureBelowAnchor": false,
     "requireStructureOnFunctionalOccupiedBoxes": true,
     "requireStructureOnStructureOccupiedBoxes": true,
     "requireEmptyStructureOffsets": [],
@@ -79,7 +78,6 @@
     "isWeapon": true,
     "isLoader": false,
     "isArmor": false,
-    "weaponType": "explosive",
     "hasCoreTuning": false
   },
   "tags": [

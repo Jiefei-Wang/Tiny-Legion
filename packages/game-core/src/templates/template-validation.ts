@@ -252,13 +252,6 @@ export function validateTemplateDetailed(
       const placement = part.placement;
       const footprint = getPartFootprintOffsets(part, rotateQuarter);
 
-      if (placement?.requireStructureBelowAnchor) {
-        const supportKey = `${anchor.x},${anchor.y + 1}`;
-        if (!structureCoords.has(supportKey)) {
-          errors.push("component requires structure support below anchor");
-        }
-      }
-
       for (const offset of placement?.requireStructureOffsets ?? []) {
         const rotated = rotateOffsetByQuarter(offset.x, offset.y, rotateQuarter);
         const key = `${anchor.x + rotated.x},${anchor.y + rotated.y}`;
