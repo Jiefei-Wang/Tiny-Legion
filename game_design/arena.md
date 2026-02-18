@@ -119,7 +119,7 @@ At minimum, expose:
       - `damage`, `hitImpulse`
       - ballistic: `projectileSpeed`, `projectileGravity`
       - tracking: `turnRateDegPerSec`
-      - explosive: `deliveryMode`, `blastRadius`, `blastDamage`, `falloffPower`, `fuse`, `fuseTime?`
+      - explosive: `blastRadius`, `blastDamage`, `falloffPower`
       - control-utility: `impairFactor`, `duration`
     - loader state summary (if present): current loader timers/capacity constraints
 

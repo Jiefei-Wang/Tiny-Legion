@@ -802,14 +802,8 @@ export class BattleSession {
         projectile.initialVy < 0 &&
         projectile.y >= projectile.fireOriginY + GROUND_PROJECTILE_MAX_DROP_BELOW_FIRE_Y;
       if (exceededGroundDropLimit) {
-        if (projectile.explosiveBlastRadius > 0) {
-          this.applyExplosiveBlast(projectile, null);
-        }
         projectile.ttl = -1;
         continue;
-      }
-      if (projectile.ttl <= 0 && projectile.explosiveFuse === "timed" && projectile.explosiveBlastRadius > 0) {
-        this.applyExplosiveBlast(projectile, null);
       }
       if (projectile.ttl <= 0) {
         continue;
@@ -852,7 +846,7 @@ export class BattleSession {
             if (projectile.controlImpairDuration > 0) {
               this.applyControlImpair(target, projectile.controlImpairFactor, projectile.controlImpairDuration);
             }
-            if (projectile.explosiveFuse === "impact" && projectile.explosiveBlastRadius > 0) {
+            if (projectile.explosiveBlastRadius > 0) {
               this.applyExplosiveBlast(projectile, target.id);
               projectile.ttl = -1;
               break;
@@ -897,7 +891,7 @@ export class BattleSession {
           if (projectile.controlImpairDuration > 0) {
             this.applyControlImpair(target, projectile.controlImpairFactor, projectile.controlImpairDuration);
           }
-          if (projectile.explosiveFuse === "impact" && projectile.explosiveBlastRadius > 0) {
+          if (projectile.explosiveBlastRadius > 0) {
             this.applyExplosiveBlast(projectile, target.id);
             projectile.ttl = -1;
             break;
@@ -1622,13 +1616,9 @@ export class BattleSession {
     const uy = Math.sin(finalFireAngle);
     const weaponCellSize = Math.max(8, Math.min(14, unit.radius * 1.7 * 0.24));
     const muzzleDistance = weaponCellSize * 0.55 + 2;
-    const explosiveFuse = shot.explosive?.fuse ?? "impact";
-    const explosiveIsBomb = shot.explosive?.deliveryMode === "bomb";
-    const projectileSpeed = explosiveIsBomb ? Math.max(120, shot.projectileSpeed * 0.52) : shot.projectileSpeed;
-    const gravity = explosiveIsBomb ? Math.max(240, shot.projectileGravity * 1.35) : shot.projectileGravity;
-    const ttl = explosiveFuse === "timed"
-      ? Math.max(0.2, shot.explosive?.fuseTime ?? 1.1)
-      : Math.max(2.0, effectiveRange / Math.max(120, projectileSpeed));
+    const projectileSpeed = shot.projectileSpeed;
+    const gravity = shot.projectileGravity;
+    const ttl = Math.max(2.0, effectiveRange / Math.max(120, projectileSpeed));
     this.state.projectiles.push({
       x: weaponOriginX + ux * muzzleDistance,
       y: weaponOriginY + uy * muzzleDistance,
@@ -1648,7 +1638,6 @@ export class BattleSession {
       explosiveBlastRadius: shot.explosive?.blastRadius ?? 0,
       explosiveBlastDamage: shot.explosive?.blastDamage ?? 0,
       explosiveFalloffPower: shot.explosive?.falloffPower ?? 1,
-      explosiveFuse,
       controlImpairFactor: shot.controlImpairFactor,
       controlImpairDuration: shot.controlDuration,
       homingTargetId: resolvedHomingTargetId,

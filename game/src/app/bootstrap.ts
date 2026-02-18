@@ -2428,12 +2428,18 @@ export function bootstrap(options: BootstrapOptions = {}): void {
   const syncPartTypeAndComponent = (part: PartDefinition): void => {
     const partType = getResolvedPartType(part);
     const partCategory = getResolvedPartCategory(part);
+    const weaponExplosive = partType === "weapon"
+      ? (part.partProperties?.explodeOnHit ?? part.baseComponent === "explosiveShell")
+      : false;
     part.partType = partType;
     part.partCategory = partCategory;
     part.layer = partType === "structure" ? "structure" : "functional";
-    part.baseComponent = getComponentFromPartTypeAndCategory(partType, partCategory);
+    part.baseComponent = getComponentFromPartTypeAndCategory(partType, partCategory, weaponExplosive);
     if (!part.partProperties) {
       part.partProperties = getPartPropertiesDefaultsByType(partType, partCategory);
+    }
+    if (partType === "weapon") {
+      part.partProperties.explodeOnHit = weaponExplosive;
     }
     if (part.partProperties.defaultDirection && !part.direction) {
       part.direction = part.partProperties.defaultDirection;
@@ -4600,7 +4606,6 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         explosiveBlastRadius: baseStats.explosive?.blastRadius !== undefined ? String(baseStats.explosive.blastRadius) : "none",
         explosiveBlastDamage: baseStats.explosive?.blastDamage !== undefined ? String(baseStats.explosive.blastDamage) : "none",
         explosiveFalloffPower: baseStats.explosive?.falloffPower !== undefined ? String(baseStats.explosive.falloffPower) : "none",
-        explosiveFuseTime: baseStats.explosive?.fuseTime !== undefined ? String(baseStats.explosive.fuseTime) : "none",
         trackingTurnRateDegPerSec: baseStats.tracking?.turnRateDegPerSec !== undefined ? String(baseStats.tracking.turnRateDegPerSec) : "none",
         loaderLoadMultiplier: baseStats.loader?.loadMultiplier !== undefined ? String(baseStats.loader.loadMultiplier) : "none",
         loaderMinLoadTime: baseStats.loader?.minLoadTime !== undefined ? String(baseStats.loader.minLoadTime) : "none",
@@ -4614,12 +4619,12 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       const partCategoryOptions: PartCategory[] = resolvedPartType === "engine"
         ? ["vehicle", "jet", "propeller"]
         : resolvedPartType === "weapon"
-          ? ["bullet", "explosive", "missile", "beam"]
+          ? ["bullet", "missile", "beam"]
           : [];
       const propIsEngine = resolvedPartType === "engine";
       const propIsWeapon = resolvedPartType === "weapon";
       const propIsLoader = resolvedPartType === "loader";
-      const weaponSupportsExplosive = partRuntimeProps.explodeOnHit === true || resolvedPartCategory === "explosive";
+      const weaponSupportsExplosive = partRuntimeProps.explodeOnHit === true || baseStats.explosive !== undefined;
       const weaponSupportsTracking = partRuntimeProps.tracking === true || resolvedPartCategory === "missile";
       const loaderSupportsPlaceholder = baseStats.loader?.supports?.join(", ") ?? "none";
       editorPanel.innerHTML = `
@@ -4724,22 +4729,10 @@ export function bootstrap(options: BootstrapOptions = {}): void {
           <label class="small">Computing Use <input id="partWeaponComputingConsumption" type="number" step="1" min="0" value="${partRuntimeProps.computingConsumption ?? 1}" /></label>
           ${weaponSupportsTracking ? `<label class="small">Tracking Turn Rate <input id="partTrackingTurnRate" type="number" step="1" value="${partRuntimeProps.trackingTurnRate ?? ""}" placeholder="${runtimePlaceholders.trackingTurnRateDegPerSec}" /></label>` : ""}
         </div>
-        ${weaponSupportsExplosive ? `<div class="row">
-          <label class="small">Explosive Delivery
-            <select id="partExplosiveDeliveryMode">
-              <option value="shell" ${(partDesignerDraft.stats?.explosiveDeliveryMode ?? baseStats.explosive?.deliveryMode ?? "shell") === "shell" ? "selected" : ""}>shell</option>
-              <option value="bomb" ${(partDesignerDraft.stats?.explosiveDeliveryMode ?? baseStats.explosive?.deliveryMode ?? "shell") === "bomb" ? "selected" : ""}>bomb</option>
-            </select>
-          </label>
-          <label class="small">Explosive Fuse
-            <select id="partExplosiveFuse">
-              <option value="impact" ${(partDesignerDraft.stats?.explosiveFuse ?? baseStats.explosive?.fuse ?? "impact") === "impact" ? "selected" : ""}>impact</option>
-              <option value="timed" ${(partDesignerDraft.stats?.explosiveFuse ?? baseStats.explosive?.fuse ?? "impact") === "timed" ? "selected" : ""}>timed</option>
-            </select>
-          </label>
-          <label class="small">Fuse Time <input id="partExplosiveFuseTime" type="number" step="0.05" value="${partDesignerDraft.stats?.explosiveFuseTime ?? ""}" placeholder="${runtimePlaceholders.explosiveFuseTime}" /></label>
-        </div>
         <div class="row">
+          <label class="small"><input id="partExplodeOnHit" type="checkbox" ${weaponSupportsExplosive ? "checked" : ""} /> Explosive (explode on hit)</label>
+        </div>
+        ${weaponSupportsExplosive ? `<div class="row">
           <label class="small">Blast Radius <input id="partExplosiveBlastRadius" type="number" step="1" value="${partRuntimeProps.explodeRadius ?? ""}" placeholder="${runtimePlaceholders.explosiveBlastRadius}" /></label>
           <label class="small">Blast Damage <input id="partExplosiveBlastDamage" type="number" step="1" value="${partRuntimeProps.explosionDamage ?? ""}" placeholder="${runtimePlaceholders.explosiveBlastDamage}" /></label>
           <label class="small">Falloff Power <input id="partExplosiveFalloffPower" type="number" step="0.1" value="${partDesignerDraft.stats?.explosiveFalloffPower ?? ""}" placeholder="${runtimePlaceholders.explosiveFalloffPower}" /></label>
@@ -5770,7 +5763,14 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         : value === "weapon"
           ? "bullet"
           : undefined;
-      partDesignerDraft.baseComponent = getComponentFromPartTypeAndCategory(partDesignerDraft.partType, partDesignerDraft.partCategory);
+      const nextWeaponExplosive = value === "weapon"
+        ? (partDesignerDraft.partProperties?.explodeOnHit === true)
+        : false;
+      partDesignerDraft.baseComponent = getComponentFromPartTypeAndCategory(
+        partDesignerDraft.partType,
+        partDesignerDraft.partCategory,
+        nextWeaponExplosive,
+      );
       partDesignerDraft.layer = partDesignerDraft.partType === "structure" ? "structure" : "functional";
       partDesignerDraft.partProperties = getPartPropertiesDefaultsByType(partDesignerDraft.partType, partDesignerDraft.partCategory);
       partDesignerDraft.direction = partDesignerDraft.partProperties.defaultDirection ?? getPartDirectionDefault(partDesignerDraft.baseComponent);
@@ -5782,12 +5782,15 @@ export function bootstrap(options: BootstrapOptions = {}): void {
 
     getOptionalElement<HTMLSelectElement>("#partCategoryTypeSelect")?.addEventListener("change", (event) => {
       const value = (event.currentTarget as HTMLSelectElement).value;
-      if (value !== "vehicle" && value !== "jet" && value !== "propeller" && value !== "bullet" && value !== "explosive" && value !== "missile" && value !== "beam") {
+      if (value !== "vehicle" && value !== "jet" && value !== "propeller" && value !== "bullet" && value !== "missile" && value !== "beam") {
         return;
       }
       partDesignerDraft.partCategory = value as PartCategory;
       const partType = getResolvedPartType(partDesignerDraft);
-      partDesignerDraft.baseComponent = getComponentFromPartTypeAndCategory(partType, partDesignerDraft.partCategory);
+      const weaponExplosive = partType === "weapon"
+        ? (partDesignerDraft.partProperties?.explodeOnHit ?? partDesignerDraft.baseComponent === "explosiveShell")
+        : false;
+      partDesignerDraft.baseComponent = getComponentFromPartTypeAndCategory(partType, partDesignerDraft.partCategory, weaponExplosive);
       partDesignerDraft.partProperties = {
         ...getPartPropertiesDefaultsByType(partType, partDesignerDraft.partCategory),
         ...(partDesignerDraft.partProperties ?? {}),
@@ -5838,12 +5841,9 @@ export function bootstrap(options: BootstrapOptions = {}): void {
           projectileGravity: undefined,
           penetration: undefined,
           spreadDeg: undefined,
-          explosiveDeliveryMode: undefined,
           explosiveBlastRadius: undefined,
           explosiveBlastDamage: undefined,
           explosiveFalloffPower: undefined,
-          explosiveFuse: undefined,
-          explosiveFuseTime: undefined,
           trackingTurnRateDegPerSec: undefined,
           controlImpairFactor: undefined,
           controlDuration: undefined,
@@ -5913,6 +5913,19 @@ export function bootstrap(options: BootstrapOptions = {}): void {
           defaultDirection: partDesignerDraft.direction,
         };
       }
+      renderPanels();
+    });
+    getOptionalElement<HTMLInputElement>("#partExplodeOnHit")?.addEventListener("change", (event) => {
+      const checked = (event.currentTarget as HTMLInputElement).checked;
+      partDesignerDraft.partProperties = {
+        ...(partDesignerDraft.partProperties ?? {}),
+        explodeOnHit: checked,
+      };
+      const partType = getResolvedPartType(partDesignerDraft);
+      const partCategory = getResolvedPartCategory(partDesignerDraft);
+      partDesignerDraft.baseComponent = getComponentFromPartTypeAndCategory(partType, partCategory, checked);
+      syncPartMetaDefaultsIfNotEdited();
+      recalcPartDraftFromSlots();
       renderPanels();
     });
 
@@ -6076,12 +6089,9 @@ export function bootstrap(options: BootstrapOptions = {}): void {
           projectileGravity: undefined,
           penetration: undefined,
           spreadDeg: undefined,
-          explosiveDeliveryMode: undefined,
           explosiveBlastRadius: undefined,
           explosiveBlastDamage: undefined,
           explosiveFalloffPower: undefined,
-          explosiveFuse: undefined,
-          explosiveFuseTime: undefined,
           trackingTurnRateDegPerSec: undefined,
           controlImpairFactor: undefined,
           controlDuration: undefined,
@@ -6202,23 +6212,6 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       };
       updateSelectedInfo();
     });
-    getOptionalElement<HTMLSelectElement>("#partExplosiveDeliveryMode")?.addEventListener("change", (event) => {
-      const value = (event.currentTarget as HTMLSelectElement).value;
-      partDesignerDraft.stats = {
-        ...(partDesignerDraft.stats ?? {}),
-        explosiveDeliveryMode: value === "bomb" ? "bomb" : "shell",
-      };
-      updateSelectedInfo();
-    });
-    getOptionalElement<HTMLSelectElement>("#partExplosiveFuse")?.addEventListener("change", (event) => {
-      const value = (event.currentTarget as HTMLSelectElement).value;
-      partDesignerDraft.stats = {
-        ...(partDesignerDraft.stats ?? {}),
-        explosiveFuse: value === "timed" ? "timed" : "impact",
-      };
-      updateSelectedInfo();
-    });
-
     getOptionalElement<HTMLInputElement>("#partRequireStructureOnFunctional")?.addEventListener("change", (event) => {
       const checked = (event.currentTarget as HTMLInputElement).checked;
       partDesignerDraft.placement = {
@@ -6274,9 +6267,8 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     bindRuntimeInput("#partProjectileSpeed", "projectileSpeed", "projectileSpeed");
     bindRuntimeInput("#partProjectileGravity", "projectileGravity", "projectileGravity");
     bindRuntimeInput("#partSpread", "spreadDeg", "spreadAngleDeg");
-    bindRuntimeInput("#partExplosiveFuseTime", "explosiveFuseTime");
-    bindRuntimeInput("#partExplosiveBlastRadius", "explosiveBlastRadius");
-    bindRuntimeInput("#partExplosiveBlastDamage", "explosiveBlastDamage");
+    bindRuntimeInput("#partExplosiveBlastRadius", "explosiveBlastRadius", "explodeRadius");
+    bindRuntimeInput("#partExplosiveBlastDamage", "explosiveBlastDamage", "explosionDamage");
     bindRuntimeInput("#partExplosiveFalloffPower", "explosiveFalloffPower");
     bindRuntimeInput("#partTrackingTurnRate", "trackingTurnRateDegPerSec", "trackingTurnRate");
     bindRuntimeInput("#partControlImpairFactor", "controlImpairFactor");

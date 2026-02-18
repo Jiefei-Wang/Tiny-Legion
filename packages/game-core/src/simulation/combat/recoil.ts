@@ -71,12 +71,9 @@ export function applyRecoilForAttachment(
 
   const explosive = weapon.explosive
     ? {
-        deliveryMode: weaponAttachment.stats?.explosiveDeliveryMode ?? weapon.explosive.deliveryMode,
         blastRadius: weaponAttachment.stats?.explosiveBlastRadius ?? weapon.explosive.blastRadius,
         blastDamage: weaponAttachment.stats?.explosiveBlastDamage ?? weapon.explosive.blastDamage,
         falloffPower: weaponAttachment.stats?.explosiveFalloffPower ?? weapon.explosive.falloffPower,
-        fuse: weaponAttachment.stats?.explosiveFuse ?? weapon.explosive.fuse,
-        fuseTime: weaponAttachment.stats?.explosiveFuseTime ?? weapon.explosive.fuseTime,
       }
     : null;
 

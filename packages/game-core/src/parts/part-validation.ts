@@ -204,12 +204,6 @@ export function validatePartDefinitionDetailed(part: PartDefinition): PartValida
       }
     }
   }
-  if (part.stats?.explosiveDeliveryMode !== undefined && part.stats.explosiveDeliveryMode !== "shell" && part.stats.explosiveDeliveryMode !== "bomb") {
-    errors.push("part stats.explosiveDeliveryMode must be shell or bomb.");
-  }
-  if (part.stats?.explosiveFuse !== undefined && part.stats.explosiveFuse !== "impact" && part.stats.explosiveFuse !== "timed") {
-    errors.push("part stats.explosiveFuse must be impact or timed.");
-  }
   if (part.stats?.explosiveBlastRadius !== undefined && (!Number.isFinite(part.stats.explosiveBlastRadius) || part.stats.explosiveBlastRadius < 0)) {
     errors.push("part stats.explosiveBlastRadius must be >= 0.");
   }
@@ -218,9 +212,6 @@ export function validatePartDefinitionDetailed(part: PartDefinition): PartValida
   }
   if (part.stats?.explosiveFalloffPower !== undefined && (!Number.isFinite(part.stats.explosiveFalloffPower) || part.stats.explosiveFalloffPower <= 0)) {
     errors.push("part stats.explosiveFalloffPower must be > 0.");
-  }
-  if (part.stats?.explosiveFuseTime !== undefined && (!Number.isFinite(part.stats.explosiveFuseTime) || part.stats.explosiveFuseTime <= 0)) {
-    errors.push("part stats.explosiveFuseTime must be > 0.");
   }
   if (part.stats?.controlImpairFactor !== undefined && (!Number.isFinite(part.stats.controlImpairFactor) || part.stats.controlImpairFactor <= 0 || part.stats.controlImpairFactor > 1)) {
     errors.push("part stats.controlImpairFactor must be in (0, 1].");

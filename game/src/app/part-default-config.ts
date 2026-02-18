@@ -20,14 +20,13 @@ export function getPartCategoryFromComponent(baseComponent: ComponentId): PartCa
   if (baseComponent === "engineS" || baseComponent === "engineM") return "vehicle";
   if (baseComponent === "jetEngine") return "jet";
   if (baseComponent === "propeller") return "propeller";
-  if (baseComponent === "rapidGun" || baseComponent === "heavyCannon") return "bullet";
-  if (baseComponent === "explosiveShell") return "explosive";
+  if (baseComponent === "rapidGun" || baseComponent === "heavyCannon" || baseComponent === "explosiveShell") return "bullet";
   if (baseComponent === "trackingMissile") return "missile";
   if (baseComponent === "precisionBeam") return "beam";
   return undefined;
 }
 
-export function getComponentFromPartTypeAndCategory(partType: PartType, partCategory?: PartCategory): ComponentId {
+export function getComponentFromPartTypeAndCategory(partType: PartType, partCategory?: PartCategory, weaponExplosive = false): ComponentId {
   if (partType === "structure" || partType === "control") return "control";
   if (partType === "engine") {
     if (partCategory === "jet") return "jetEngine";
@@ -35,9 +34,9 @@ export function getComponentFromPartTypeAndCategory(partType: PartType, partCate
     return "engineS";
   }
   if (partType === "weapon") {
-    if (partCategory === "explosive") return "explosiveShell";
     if (partCategory === "missile") return "trackingMissile";
     if (partCategory === "beam") return "precisionBeam";
+    if (weaponExplosive) return "explosiveShell";
     return "rapidGun";
   }
   if (partType === "loader") return "cannonLoader";
@@ -107,7 +106,7 @@ export function getPartPropertiesDefaultsByType(partType: PartType, partCategory
       hitImpulse: 10,
       penetration: 0,
       spreadAngleDeg: 0,
-      explodeOnHit: partCategory === "explosive",
+      explodeOnHit: false,
       explodeRadius: 50,
       projectileSpeed: bulletType === "laser" ? undefined : 400,
       projectileGravity: bulletType === "laser" ? undefined : 100,

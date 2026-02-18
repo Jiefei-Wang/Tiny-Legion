@@ -487,7 +487,7 @@ Editor UX implementation details:
   - Weapon slots now track ready charges and load timers.
   - Loader settings (`supports`, `loadMultiplier`, `fastOperation`, `minLoadTime`, `storeCapacity`, `minBurstInterval`) drive reload and burst cadence.
 - Part-level runtime override coverage now includes full functional tuning:
-  - weapon overrides: recoil/hit impulse, projectile speed/gravity, explosive blast/fuse settings, tracking turn rate, control-impair factor/duration;
+  - weapon overrides: recoil/hit impulse, projectile speed/gravity, explosive blast settings, tracking turn rate, control-impair factor/duration;
   - loader overrides: supports/load-multiplier/fast-operation/min-load-time/store-capacity/min-burst-interval;
   - armor `hp` metadata is converted to effective attachment durability scaling (`hpMul`) during unit instancing.
 - Selection highlight rendering traces outer alive-structure edges.
@@ -501,6 +501,8 @@ Developer Part Designer UX:
 - Top-bar `Debug Options` -> `Part Designer` is a shortcut into the same `Part Editor` screen.
 - Dedicated editor workspace for authoring a single reusable part definition.
 - Part Designer uses `partType` and optional `partCategory` as the primary authoring selectors; runtime `baseComponent` is derived/mapped internally for compatibility.
+- Weapon categories in Part Designer are `bullet|missile|beam`; explosive behavior is controlled by weapon property checkbox `explodeOnHit` (not by a separate `explosive` category).
+- Part Designer no longer exposes explosive delivery/fuse fields; explosive projectiles detonate on hit and rely on configured projectile speed/gravity plus blast tuning.
 - `Open Part` rows include explicit layer labels and structure defaults are provided as explicit file-backed material parts (`material-basic`, `material-reinforced`, `material-ceramic`, `material-reactive`, `material-combined`).
 - `Open Part` modal includes tab-style filtering by part kind (`all`, `structure`, and functional component types).
 - In `partType=structure`, functional-only part-property and placement controls are hidden.
@@ -510,7 +512,7 @@ Developer Part Designer UX:
 - Part definitions use integer IDs internally (`id` and all template/attachment `partId` references).
 - Part Editor does not expose editable ID input; new/copy flows auto-assign next available integer ID.
 - UI split:
-  - left panel edits part-level fields (`name`, `id`, `partType`, optional `partCategory`) and type-aware `partProperties` controls.
+  - left panel edits part-level fields (`name`, `partType`, optional `partCategory`) and type-aware `partProperties` controls.
   - right panel edits per-cell properties for the currently selected grid cell.
 - Per-cell properties include:
   - `structureOccupy`,

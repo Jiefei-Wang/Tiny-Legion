@@ -25,11 +25,8 @@ function resolvePartCategoryFromComponent(component: ComponentId): PartCategory 
   if (component === "propeller") {
     return "propeller";
   }
-  if (component === "rapidGun" || component === "heavyCannon") {
+  if (component === "rapidGun" || component === "heavyCannon" || component === "explosiveShell") {
     return "bullet";
-  }
-  if (component === "explosiveShell") {
-    return "explosive";
   }
   if (component === "trackingMissile") {
     return "missile";
@@ -40,7 +37,7 @@ function resolvePartCategoryFromComponent(component: ComponentId): PartCategory 
   return undefined;
 }
 
-function mapPartTypeAndCategoryToComponent(partType: PartType, partCategory?: PartCategory): ComponentId {
+function mapPartTypeAndCategoryToComponent(partType: PartType, partCategory?: PartCategory, weaponExplosive = false): ComponentId {
   if (partType === "structure" || partType === "control") {
     return "control";
   }
@@ -50,9 +47,9 @@ function mapPartTypeAndCategoryToComponent(partType: PartType, partCategory?: Pa
     return "engineS";
   }
   if (partType === "weapon") {
-    if (partCategory === "explosive") return "explosiveShell";
     if (partCategory === "missile") return "trackingMissile";
     if (partCategory === "beam") return "precisionBeam";
+    if (weaponExplosive) return "explosiveShell";
     return "rapidGun";
   }
   if (partType === "loader") {
@@ -235,7 +232,6 @@ function readOptionalPartCategory(value: unknown): PartCategory | undefined {
     || value === "jet"
     || value === "propeller"
     || value === "bullet"
-    || value === "explosive"
     || value === "missile"
     || value === "beam"
   ) {
@@ -700,12 +696,9 @@ export function clonePartDefinition(part: PartDefinition): PartDefinition {
           projectileGravity: part.stats.projectileGravity,
           penetration: part.stats.penetration,
           spreadDeg: part.stats.spreadDeg,
-          explosiveDeliveryMode: part.stats.explosiveDeliveryMode,
           explosiveBlastRadius: part.stats.explosiveBlastRadius,
           explosiveBlastDamage: part.stats.explosiveBlastDamage,
           explosiveFalloffPower: part.stats.explosiveFalloffPower,
-          explosiveFuse: part.stats.explosiveFuse,
-          explosiveFuseTime: part.stats.explosiveFuseTime,
           trackingTurnRateDegPerSec: part.stats.trackingTurnRateDegPerSec,
           controlImpairFactor: part.stats.controlImpairFactor,
           controlDuration: part.stats.controlDuration,
@@ -747,13 +740,23 @@ export function parsePartDefinition(input: unknown): PartDefinition | null {
   }
   const data = input as Record<string, unknown>;
   const declaredPartType = readOptionalPartType(data.partType ?? data.type);
-  const declaredPartCategory = readOptionalPartCategory(data.partCategory ?? data.categoryType);
+  const rawDeclaredPartCategory = data.partCategory ?? data.categoryType;
+  const legacyExplosiveCategory = rawDeclaredPartCategory === "explosive";
+  const declaredPartCategory = readOptionalPartCategory(rawDeclaredPartCategory) ?? (legacyExplosiveCategory ? "bullet" : undefined);
+  const partPropertiesRecord = data.partProperties && typeof data.partProperties === "object"
+    ? (data.partProperties as Record<string, unknown>)
+    : {};
+  const declaredExplodeOnHit = readOptionalBoolean(partPropertiesRecord.explodeOnHit);
   const baseComponent = isComponentId(data.baseComponent)
     ? data.baseComponent
     : isComponentId(data.component)
       ? data.component
       : declaredPartType
-        ? mapPartTypeAndCategoryToComponent(declaredPartType, declaredPartCategory)
+        ? mapPartTypeAndCategoryToComponent(
+            declaredPartType,
+            declaredPartCategory,
+            declaredPartType === "weapon" ? (declaredExplodeOnHit ?? legacyExplosiveCategory) : false,
+          )
         : null;
   if (!baseComponent) {
     return null;
@@ -878,10 +881,6 @@ export function parsePartDefinition(input: unknown): PartDefinition | null {
   const propertiesRecord = data.properties && typeof data.properties === "object"
     ? (data.properties as Record<string, unknown>)
     : {};
-  const partPropertiesRecord = data.partProperties && typeof data.partProperties === "object"
-    ? (data.partProperties as Record<string, unknown>)
-    : {};
-
   const normalizedPartType: PartType = inferredPartType;
   const normalizedPartCategory = declaredPartCategory ?? resolvePartCategoryFromComponent(baseComponent);
   const partProperties: PartPropertySet = {
@@ -927,6 +926,13 @@ export function parsePartDefinition(input: unknown): PartDefinition | null {
     explosionDamage: readOptionalNumber(partPropertiesRecord.explosionDamage),
     explosionRadius: readOptionalNumber(partPropertiesRecord.explosionRadius),
   };
+  if (
+    inferredPartType === "weapon"
+    && partProperties.explodeOnHit === undefined
+    && (legacyExplosiveCategory || baseComponent === "explosiveShell")
+  ) {
+    partProperties.explodeOnHit = true;
+  }
   if (inferredPartType === "control" && partProperties.computing === undefined) {
     partProperties.computing = 1;
   }
@@ -981,20 +987,9 @@ export function parsePartDefinition(input: unknown): PartDefinition | null {
       projectileGravity: readOptionalNumber(runtimeRecord.projectileGravity ?? partProperties.projectileGravity),
       penetration: readOptionalNumber(runtimeRecord.penetration ?? partProperties.penetration),
       spreadDeg: readOptionalNumber(runtimeRecord.spreadDeg ?? partProperties.spreadAngleDeg),
-      explosiveDeliveryMode: runtimeRecord.explosiveDeliveryMode === "shell" || runtimeRecord.explosiveDeliveryMode === "bomb"
-        ? runtimeRecord.explosiveDeliveryMode
-        : runtimeExplosiveRecord.deliveryMode === "shell" || runtimeExplosiveRecord.deliveryMode === "bomb"
-          ? runtimeExplosiveRecord.deliveryMode
-        : undefined,
       explosiveBlastRadius: readOptionalNumber(runtimeRecord.explosiveBlastRadius ?? runtimeExplosiveRecord.blastRadius ?? partProperties.explodeRadius ?? partProperties.explosionRadius),
       explosiveBlastDamage: readOptionalNumber(runtimeRecord.explosiveBlastDamage ?? runtimeExplosiveRecord.blastDamage ?? partProperties.explosionDamage),
       explosiveFalloffPower: readOptionalNumber(runtimeRecord.explosiveFalloffPower ?? runtimeExplosiveRecord.falloffPower),
-      explosiveFuse: runtimeRecord.explosiveFuse === "impact" || runtimeRecord.explosiveFuse === "timed"
-        ? runtimeRecord.explosiveFuse
-        : runtimeExplosiveRecord.fuse === "impact" || runtimeExplosiveRecord.fuse === "timed"
-          ? runtimeExplosiveRecord.fuse
-        : undefined,
-      explosiveFuseTime: readOptionalNumber(runtimeRecord.explosiveFuseTime ?? runtimeExplosiveRecord.fuseTime),
       trackingTurnRateDegPerSec: readOptionalNumber(runtimeRecord.trackingTurnRateDegPerSec ?? runtimeTrackingRecord.turnRateDegPerSec ?? partProperties.trackingTurnRate),
       loaderSupports: Array.isArray(runtimeRecord.loaderSupports)
         ? runtimeRecord.loaderSupports

@@ -131,11 +131,9 @@ export const COMPONENTS: Record<ComponentId, ComponentStats> = {
     projectileGravity: PROJECTILE_GRAVITY,
     penetration: 0,
     explosive: {
-      deliveryMode: "shell",
       blastRadius: 74,
       blastDamage: 36,
       falloffPower: 1.2,
-      fuse: "impact",
     },
   },
   trackingMissile: {

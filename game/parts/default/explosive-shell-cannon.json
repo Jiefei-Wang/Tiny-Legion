@@ -3,7 +3,7 @@
   "name": "Explosive Shell Cannon",
   "layer": "functional",
   "partType": "weapon",
-  "partCategory": "explosive",
+  "partCategory": "bullet",
   "baseComponent": "explosiveShell",
   "directional": true,
   "direction": "right",
@@ -69,7 +69,8 @@
     "requireEmptyFunctionalOffsets": []
   },
   "partProperties": {
-    "computingConsumption": 1
+    "computingConsumption": 1,
+    "explodeOnHit": true
   },
   "properties": {
     "category": "weapon",

@@ -25,9 +25,7 @@ export type WeaponClass =
   | "beam-precision";
 
 export type PartType = "structure" | "control" | "engine" | "weapon" | "loader" | "ammo";
-export type PartCategory = "vehicle" | "jet" | "propeller" | "bullet" | "explosive" | "missile" | "beam";
-
-export type ExplosiveDeliveryMode = "shell" | "bomb";
+export type PartCategory = "vehicle" | "jet" | "propeller" | "bullet" | "missile" | "beam";
 
 export type UnitType = "ground" | "air";
 export type Side = "player" | "enemy";
@@ -72,12 +70,9 @@ export interface ComponentStats {
   readonly penetration?: number;
   readonly spreadDeg?: number;
   readonly explosive?: {
-    readonly deliveryMode: ExplosiveDeliveryMode;
     readonly blastRadius: number;
     readonly blastDamage: number;
     readonly falloffPower: number;
-    readonly fuse: "impact" | "timed";
-    readonly fuseTime?: number;
   };
   readonly tracking?: {
     readonly turnRateDegPerSec: number;
@@ -134,12 +129,9 @@ export interface PartStats {
   projectileGravity?: number;
   penetration?: number;
   spreadDeg?: number;
-  explosiveDeliveryMode?: ExplosiveDeliveryMode;
   explosiveBlastRadius?: number;
   explosiveBlastDamage?: number;
   explosiveFalloffPower?: number;
-  explosiveFuse?: "impact" | "timed";
-  explosiveFuseTime?: number;
   trackingTurnRateDegPerSec?: number;
   controlImpairFactor?: number;
   controlDuration?: number;
@@ -396,7 +388,6 @@ export interface Projectile {
   explosiveBlastRadius: number;
   explosiveBlastDamage: number;
   explosiveFalloffPower: number;
-  explosiveFuse: "impact" | "timed";
   controlImpairFactor: number;
   controlImpairDuration: number;
   homingTargetId: string | null;

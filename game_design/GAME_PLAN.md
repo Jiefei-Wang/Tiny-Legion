@@ -204,7 +204,7 @@ Cell-level properties:
 - `anchor point`: unique part center reference (mouse placement center).
 - `fire point`: unique muzzle/spawn point for weapon projectiles.
 
-#### 4.0.3 Part Type Property Set (By Category)
+#### 4.0.3 Part Type Property Set (By Type)
 
 `structure` should expose:
 
@@ -220,7 +220,7 @@ Cell-level properties:
 
 `weapon` should expose:
 
-- `gas cost`, `mass`, `tag`, `bullet type`, `damage`, `range`, `cooldown`, `recoil`, `hit impulse`, `penetration`, `spread angle`, `explode on hit`, `explode radius` (explosive only), `projectile speed` (non-laser), `projectile gravity` (non-laser), `tracking` (non-laser), `tracking turn rate` (tracking only), `directional`, `shoot angle` (directional only), `need loader`, `default direction`, `computing consumption`.
+- `gas cost`, `mass`, `tag`, `bullet type`, `damage`, `range`, `cooldown`, `recoil`, `hit impulse`, `penetration`, `spread angle`, `explode on hit`, `explode radius` (when `explode on hit = true`), `projectile speed` (non-laser), `projectile gravity` (non-laser), `tracking` (non-laser), `tracking turn rate` (tracking only), `directional`, `shoot angle` (directional only), `need loader`, `default direction`, `computing consumption`.
 
 `loader` should expose:
 
@@ -230,7 +230,7 @@ Cell-level properties:
 
 - `gas cost`, `supported weapon tags`, `max capacity`, `explosion damage`, `explosion radius`.
 
-#### 4.0.4 Default Values (By Category)
+#### 4.0.4 Default Values (By Type)
 
 `structure` defaults:
 
@@ -276,7 +276,7 @@ Cell-level properties:
 - `penetration`: `0`
 - `spread angle`: `0`
 - `explode on hit`: `false`
-- `explode radius` (explosive only): `50`
+- `explode radius` (when `explode on hit = true`): `50`
 - `projectile speed` (non-laser): `400`
 - `projectile gravity` (non-laser): `100`
 - `tracking` (non-laser): `false`
@@ -339,9 +339,10 @@ Part-level property visibility (left pane):
   - Show: `mass`, `power`, `max speed`, `power ground`, `power air`.
   - Show `directional`, `default direction`, `thrust angle` only when air propulsion is enabled (`power air = true`).
 - `weapon` selected:
-  - Show: `mass`, `bullet type`, `damage`, `range`, `cooldown`, `recoil`, `hit impulse`, `penetration`, `spread angle`, `need loader`, `directional`, `computing consumption`.
+  - Weapon category options are `bullet`, `missile`, and `beam` (no separate `explosive` category).
+  - Show: `mass`, `bullet type`, `damage`, `range`, `cooldown`, `recoil`, `hit impulse`, `penetration`, `spread angle`, `explode on hit`, `need loader`, `directional`, `computing consumption`.
   - Show `projectile speed` and `projectile gravity` only for non-laser bullets.
-  - Show `explode radius` only when `explode on hit = true`.
+  - Show explosive tuning (`blast radius`, `blast damage`, `falloff`) only when `explode on hit = true`.
   - Show `tracking` only for non-laser bullets; show `tracking turn rate` only when `tracking = true`.
   - Show `shoot angle` and `default direction` only when `directional = true`.
 - `loader` selected:
@@ -821,7 +822,6 @@ The current playable implementation already includes:
 - Multi-weapon units and independent weapon cooldown timers.
 - Weapon slot manual-control toggles (default `ON`) and per-slot auto-fire toggles.
 - Player-controlled manual slots fire together and runtime-suppress auto fire while keeping the auto toggle state intact.
-- Weapon classes are standardized to: rapid-fire, heavy-shot, explosive, tracking, beam-precision, and control-utility.
 - Out-of-angle firing is clamped to the nearest allowed weapon-angle boundary, so shots still fire at edge angle.
 - Engine modules now provide explicit power; object mobility scales proportionally with total engine power and inversely with current mass.
 - Each engine type also defines a max-speed cap. With multiple engines, cap is aggregated by power-weighted average, and real speed is power-to-mass based but never exceeds aggregated max speed.
@@ -833,11 +833,11 @@ The current playable implementation already includes:
   - Loader `storeCapacity` allows charge overfill (burst behavior), with minimum burst interval floor of `0.5s`.
   - Fire commands sent to a cooling/reloading weapon slot are ignored (no projectile and no recoil/knockback side effects).
 - Part-level functional overrides now drive runtime behavior for all current functional families:
-  - weapon parts can override recoil/hit impulse, projectile speed/gravity, explosive blast/fuse parameters, tracking turn rate, and control-impair tuning;
+  - weapon parts can override recoil/hit impulse, projectile speed/gravity, explosive blast parameters, tracking turn rate, and control-impair tuning;
   - loader parts can override supported weapon classes and loader timing/capacity parameters;
   - armor `hp` metadata is translated into effective attachment durability scaling.
 - Projectile gravity, range-limited lifetime, and debris persistence.
-- Ground-vehicle-fired non-tracking projectiles now auto-terminate after falling `200` Y-units below their firing Y origin only when the shot was fired above horizontal (`initialVy < 0`); downward-fired shots are excluded. Termination triggers blast when explosive data exists.
+- Ground-vehicle-fired non-tracking projectiles now auto-terminate after falling `200` Y-units below their firing Y origin only when the shot was fired above horizontal (`initialVy < 0`); downward-fired shots are excluded.
 - Runtime now applies soft same-layer unit separation (ground-ground, air-air) with overlap allowance, inverse-mass push-out, and broad-phase spatial grid lookup to prevent full unit stacking while preserving movement flow.
 - AI split into targeting, movement, and shooting modules with a shared composite interface in `packages/game-core/src/ai/composite/`.
 - Baseline combat AI now runs through `createCompositeAiController(...)` (target -> movement -> shoot), and the legacy decision-tree entrypoint is kept as a compatibility wrapper.
