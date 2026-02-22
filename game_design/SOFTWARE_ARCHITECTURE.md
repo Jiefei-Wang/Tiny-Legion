@@ -9,7 +9,7 @@ Current active stack/runtime:
 - Runtime: Browser (`HTML5 Canvas`)
 - Language: `TypeScript`
 - Build tool: `Vite`
-- Active app path: `game/`
+- Active app path: `vip/`
 - Shared logic package: `packages/game-core/`
 - Legacy prototype path: `webgame/` (reference only)
 
@@ -33,7 +33,7 @@ Implemented gameplay architecture highlights:
 - Top-level mode tabs include dedicated `Template Editor` and `Part Editor` entries (alongside `Base`/`Map`/`Battle`)
 - `Test Arena` is a dedicated top-level tab for debug battles (not part of the map node list)
 - Display layer visibility is debug-controlled (top-bar `Debug Options`) and defaults to OFF in battle runtime
-- In-app debug options plus local runtime log pipeline (`/__debug/*` -> `game/.debug/runtime.log`)
+- In-app debug options plus local runtime log pipeline (`/__debug/*` -> `vip/.debug/runtime.log`)
 - Battle simulation defaults are centralized in shared balance config (`battlefield.ts`) including dimensions, ground height, air layer ratios, air physics constants, battle rules (salvage refund factor), and unit soft-separation tuning constants - all reused by browser + headless/arena paths
 - Test Arena supports runtime battlefield simulation-size overrides (`W`/`H`) and ground-height tuning in the browser app; display zoom remains a separate view-only transform
 - Strategic layer is turn-based: **Next Round** advances gas economy, construction, and resolves campaign battles (Test Arena skips round resolution)
@@ -151,7 +151,7 @@ packages/game-core/src/
   templates/template-validation.ts
   types.ts
 
-game/src/
+vip/src/
   app/
     bootstrap.ts
     game-loop.ts
@@ -160,11 +160,11 @@ game/src/
   ai|config|core|gameplay|simulation|types.ts
     (thin re-exports to packages/game-core)
 
-game/templates/
+vip/templates/
   default/*.json
   user/*.json
 
-game/parts/
+vip/parts/
   default/*.json
   user/*.json
 ```
@@ -203,7 +203,7 @@ Notes:
 
 Arena-specific architecture notes:
 
-- Arena runtime imports battle/simulation/template domain code directly from `packages/game-core/src/*` (no dynamic loading from `game/.headless-dist`).
+- Arena runtime imports battle/simulation/template domain code directly from `packages/game-core/src/*` (no dynamic loading from `vip/.headless-dist`).
 - Training and evaluation run headless through `WorkerPool` + `match-worker.ts` for parallel CPU usage.
 - Model ranking now prioritizes `winRateLowerBound` then `winRate`, then `score`.
 - Arena composite AI path can supply per-side `{ target, movement, shoot }` module specs that instantiate game-core `createCompositeAiController(...)`.
@@ -219,7 +219,7 @@ Arena-specific architecture notes:
   - optional seed composite loading (`--seedComposite`).
 - `cli.ts` supports `match`, `train-composite`, and `replay` commands (legacy `train`/`train-spawn`/`eval` flows were removed).
 - `match` runtime is composite-only (`familyId: "composite"`); baseline-vs-baseline test matches are represented by baseline module bundles on both sides.
-- Replay UI (`arena-ui/src/main.ts`) still uses game interface bootstrap (`game/src/app/bootstrap.ts`) while consuming AI/simulation primitives from `packages/game-core`.
+- Replay UI (`arena-ui/src/main.ts`) still uses game interface bootstrap (`vip/src/app/bootstrap.ts`) while consuming AI/simulation primitives from `packages/game-core`.
 - Game dev server exposes `/__arena/composite/latest` for Test Arena to load latest trained composite spec from `arena/.arena-data/runs/*/best-composite.json`.
 - Game dev server exposes `/__arena/composite/leaderboard` for in-game ranking entries backed by persistent match-based rating storage (`arena/.arena-data/leaderboard/composite-elo.json`).
 - Game dev server exposes `/__arena/composite/models` (saved composed-model inventory with score/rounds/spec, including built-in `baseline-game-ai` and `baseline-history-shoot-ai` composite module bundles) and `/__arena/composite/leaderboard/compete` (run head-to-head leaderboard matches from UI controls).
@@ -246,7 +246,7 @@ Map node metadata supports test-only battle tuning via optional fields on `MapNo
 - Selecting a dropdown value maps directly to one composite module spec (`{ familyId, params }`) and reapplies controller wiring immediately.
 - Left-side mode menu includes a dedicated `Leaderboard` screen that fetches ranked entries from `GET /__arena/composite/leaderboard`.
 - Leaderboard screen includes controls to trigger server-side compare batches (`random pair`, `unranked vs random`, `manual pair`) via `POST /__arena/composite/leaderboard/compete`.
-- Selection format and examples are documented in `game/AI_COMPONENT_CONFIG.md`.
+- Selection format and examples are documented in `vip/AI_COMPONENT_CONFIG.md`.
 
 Template/editor architecture notes:
 
@@ -257,7 +257,7 @@ Template/editor architecture notes:
 - Functional placement and validation now resolve through part catalog definitions (`partId` + normalized runtime component mapping), with `partType`/`partCategory`/`partProperties` as primary authoring fields.
 - `parts/part-schema.ts` + `parts/part-validation.ts` define part parsing and validation severity output.
 - Runtime/editor part catalog merge order is file-backed defaults -> user overrides (no implicit built-in part entries in `/__parts/*` payloads).
-- Part Designer uses dedicated default-config helpers (`game/src/app/part-default-config.ts`) to seed values when creating a new part or switching part type/category.
+- Part Designer uses dedicated default-config helpers (`vip/src/app/part-default-config.ts`) to seed values when creating a new part or switching part type/category.
 - Loader injection remains configurable in parse options; current dev/headless normalization persists the injected-loader result to template JSON.
 - Editor save does not block on warnings/errors; categories are surfaced in UI/logs for developer feedback.
 - Battle deploy/spawn paths validate templates and block creation when `errors` are present.
@@ -408,18 +408,18 @@ Frame budget target at 60 FPS:
 
 Template persistence middleware (dev server via `vite.config.ts`):
 
-- `GET /__templates/default` -> read default object templates from `game/templates/default`
+- `GET /__templates/default` -> read default object templates from `vip/templates/default`
 - `PUT /__templates/default/:id` -> save/overwrite one default object template JSON
-- `GET /__templates/user` -> read user object templates from `game/templates/user`
+- `GET /__templates/user` -> read user object templates from `vip/templates/user`
 - `PUT /__templates/user/:id` -> save/overwrite one user object template JSON
 - `DELETE /__templates/user/:id` -> remove one user object template JSON
 - Template save filenames are canonicalized from `template.name` (illegal filename symbols removed); delete/update resolves by internal integer `template.id`, not by filename.
 
 Part persistence middleware (dev server via `vite.config.ts`):
 
-- `GET /__parts/default` -> read file-backed default part catalog from `game/parts/default`
+- `GET /__parts/default` -> read file-backed default part catalog from `vip/parts/default`
 - `PUT /__parts/default/:id` -> save/overwrite one default part definition JSON
-- `GET /__parts/user` -> read user part definitions from `game/parts/user`
+- `GET /__parts/user` -> read user part definitions from `vip/parts/user`
 - `PUT /__parts/user/:id` -> save/overwrite one user part definition JSON
 - `DELETE /__parts/user/:id` -> remove one user part definition JSON
 - Part save filenames are canonicalized from `part.name` (illegal filename symbols removed); delete/update resolves by internal integer `part.id`, not by filename.
@@ -522,7 +522,7 @@ Developer Part Designer UX:
   - `attachPoint`,
   - `anchorPoint` (single),
   - `firePoint` (single; weapon-only).
-- Canonical default part set is stored under `game/parts/default/*.json`, and default template `partId` values align with those explicit IDs.
+- Canonical default part set is stored under `vip/parts/default/*.json`, and default template `partId` values align with those explicit IDs.
 
 In-app debug UI:
 
@@ -547,12 +547,12 @@ Dev-server debug probe RPC (dev-only, no eval; used by agents/scripts to fetch a
 
 Runtime log file path:
 
-- `game/.debug/runtime.log`
+- `vip/.debug/runtime.log`
 
 Recommended startup command:
 
 ```bash
-DEBUG_LOG=1 npm --prefix game run dev
+DEBUG_LOG=1 npm --prefix vip run dev
 ```
 
 ## 12. Minimal Setup Commands

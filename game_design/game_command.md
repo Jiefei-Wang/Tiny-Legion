@@ -5,7 +5,7 @@ Useful commands for running the game, developer interface, and arena tooling.
 ## 1) Install Dependencies
 
 ```bash
-npm --prefix game install
+npm --prefix vip install
 npm --prefix arena install
 npm --prefix arena-ui install
 ```
@@ -13,7 +13,7 @@ npm --prefix arena-ui install
 ## 2) Start Game UI (Player Interface)
 
 ```bash
-npm --prefix game run dev
+npm --prefix vip run dev
 ```
 
 Open: `http://localhost:5173`
@@ -21,18 +21,18 @@ Open: `http://localhost:5173`
 Check whether a dev server is already running:
 
 ```bash
-curl -sf http://localhost:5173 >/dev/null && echo "game dev server is running" || echo "no game dev server"
+curl -sf http://localhost:5173 >/dev/null && echo "vip dev server is running" || echo "no vip dev server"
 ```
 
 ## 3) Start Game With Developer Logging
 
 ```bash
-DEBUG_LOG=1 npm --prefix game run dev
+DEBUG_LOG=1 npm --prefix vip run dev
 ```
 
 This enables server-side runtime log output to:
 
-- `game/.debug/runtime.log`
+- `vip/.debug/runtime.log`
 
 ## 4) Developer Interface Endpoints (`/__debug/*`)
 
@@ -71,13 +71,13 @@ curl http://localhost:5173/__debug/probe/<probeId>
 Build:
 
 ```bash
-npm --prefix game run build
+npm --prefix vip run build
 ```
 
 Mandatory gameplay smoke test:
 
 ```bash
-npm --prefix game run test:headless
+npm --prefix vip run test:headless
 ```
 
 This smoke test also validates all system default templates with severity checks (`errors` + `warnings`), and verifies required defaults can deploy, move, and fire.
@@ -134,4 +134,4 @@ Shared gameplay/AI/simulation code lives in:
 
 - `packages/game-core/src/`
 
-`game/` and `arena/` both consume this package to keep battle logic consistent.
+`vip/` and `arena/` both consume this package to keep battle logic consistent.

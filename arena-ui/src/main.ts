@@ -1,7 +1,7 @@
-import "../../game/src/style.css";
+import "../../vip/src/style.css";
 
-import { bootstrap } from "../../game/src/app/bootstrap.ts";
-import type { ArenaReplayDecider, ArenaReplaySpec } from "../../game/src/app/bootstrap.ts";
+import { bootstrap } from "../../vip/src/app/bootstrap.ts";
+import type { ArenaReplayDecider, ArenaReplaySpec } from "../../vip/src/app/bootstrap.ts";
 import type { BattleAiController, BattleAiInput, BattleSessionOptions } from "../../packages/game-core/src/gameplay/battle/battle-session.ts";
 import { evaluateCombatDecisionTree } from "../../packages/game-core/src/ai/decision-tree/combat-decision-tree.ts";
 import { structureIntegrity } from "../../packages/game-core/src/simulation/units/structure-grid.ts";

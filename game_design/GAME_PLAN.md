@@ -472,8 +472,8 @@ Display layer provides optional visual mesh/sprite styling and silhouette polish
 
 ### 4.4 Template Storage
 
-- Default object designs are file-based under `game/templates/default/`.
-- Player-created object designs are stored separately under `game/templates/user/`.
+- Default object designs are file-based under `vip/templates/default/`.
+- Player-created object designs are stored separately under `vip/templates/user/`.
 - On startup, game loads templates from both folders (user templates override same-id defaults).
 - Template filenames are derived from sanitized `template.name` (invalid filename characters removed); runtime identity remains integer `id`.
 - Template parse/validation/merge rules are shared in `packages/game-core/src/templates/template-schema.ts` so game UI and arena tooling use identical template behavior.
@@ -484,13 +484,13 @@ Display layer provides optional visual mesh/sprite styling and silhouette polish
 
 ### 4.5 Part Storage
 
-- Developer default part definitions are file-based under `game/parts/default/`.
-- Developer/user part overrides are stored under `game/parts/user/`.
-- Canonical default part definitions are explicitly authored in `game/parts/default/*.json` and are being migrated to the new type-centric schema.
+- Developer default part definitions are file-based under `vip/parts/default/`.
+- Developer/user part overrides are stored under `vip/parts/user/`.
+- Canonical default part definitions are explicitly authored in `vip/parts/default/*.json` and are being migrated to the new type-centric schema.
 - Default templates reference these explicit part IDs in `partId` so runtime/editor behavior matches configured part semantics.
 - Runtime part catalog merge order:
-  1. file-backed defaults (`game/parts/default`),
-  2. user part overrides (`game/parts/user`).
+  1. file-backed defaults (`vip/parts/default`),
+  2. user part overrides (`vip/parts/user`).
 - Part save filenames are derived from part name (illegal filename characters removed); runtime identity remains integer `id`.
 - Part Designer save/load/copy/rename behavior is defined in `4.0.5 Unified Part Editor Behavior (Authoritative)`.
 
@@ -875,7 +875,7 @@ The current playable implementation already includes:
 - Leaderboard panel includes quick competition controls: `random pair`, `unranked vs random`, and `manual pair` modes plus configurable run count.
 - Leaderboard model pool includes built-in composed models for `baseline-game-ai` (`baseline-target` + `baseline-movement` + `baseline-shoot`) and `baseline-history-shoot-ai` (`baseline-target` + `baseline-movement` + `history-shoot`) so both baseline shooters are ranked directly against trained runs.
 - Leaderboard `Run Competition` submits a batched request and executes rounds in parallel across CPU worker threads (all detected cores when worker runtime is available), then refreshes leaderboard/model lists after completion.
-- Test Arena module-selection contract is documented in `game/AI_COMPONENT_CONFIG.md`.
+- Test Arena module-selection contract is documented in `vip/AI_COMPONENT_CONFIG.md`.
 - Training automation script `train_ai.sh` provides module-specific optimization (`shoot`/`movement`/`target`) and full compose optimization (`compose`) with per-module source selection (`baseline|new|trained:<path>`).
 
 Current gaps still being iterated:
@@ -910,12 +910,12 @@ Local file logging in dev mode:
 
 - Toggle endpoint: `POST /__debug/toggle`
 - Write endpoint: `POST /__debug/log`
-- Log output: `game/.debug/runtime.log`
+- Log output: `vip/.debug/runtime.log`
 
 Recommended startup for debug sessions:
 
 ```bash
-DEBUG_LOG=1 npm --prefix game run dev
+DEBUG_LOG=1 npm --prefix vip run dev
 ```
 
 ---

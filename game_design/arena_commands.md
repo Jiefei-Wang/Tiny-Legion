@@ -12,7 +12,7 @@ npm --prefix arena run build
 Optional sanity check:
 
 ```bash
-npm --prefix game run test:headless
+npm --prefix vip run test:headless
 ```
 
 ## Composite AI Component Models

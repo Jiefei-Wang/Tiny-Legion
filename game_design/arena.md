@@ -19,7 +19,7 @@ This document describes a headless AI arena system that runs battles in parallel
 
 ## Repository Layout (Proposed)
 
-Add new projects/packages alongside `game/`:
+Add new projects/packages alongside `vip/`:
 
 ```text
 arena/                # Node service + CLI + trainer (implemented)
@@ -34,7 +34,7 @@ arena.md              # this plan
 From repo root:
 
 ```bash
-npm --prefix game run test:headless
+npm --prefix vip run test:headless
 npm --prefix arena install
 
 # run one match (writes a replay artifact)

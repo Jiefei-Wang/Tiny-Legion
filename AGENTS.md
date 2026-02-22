@@ -10,7 +10,7 @@ If you are a new coding agent/session, read this file first, then read:
 ## Project Snapshot
 
 - Project root: `physics god`
-- Active game app: `game/` (TypeScript + Vite + Canvas)
+- Active game app: `vip/` (TypeScript + Vite + Canvas)
 - Shared game logic: `packages/game-core/`
 - Legacy prototype: `webgame/` (reference only)
 - Command reference: `game_design/game_command.md`
@@ -40,7 +40,7 @@ If you are a new coding agent/session, read this file first, then read:
 
 ### Dev server reuse (Agent)
 
-- Before starting a new `npm --prefix game run dev`, check whether a dev server is already running (typically on `http://localhost:5173`).
+- Before starting a new `npm --prefix vip run dev`, check whether a dev server is already running (typically on `http://localhost:5173`).
 - If it responds, reuse the existing server (do not start a second one). Use the running server for all verification/debug steps, including `POST /__debug/*` endpoints.
 - Only start a new server if nothing is listening/responding on the expected port, or if the running server is clearly for a different workspace/build.
 
@@ -58,13 +58,13 @@ If you are a new coding agent/session, read this file first, then read:
 - Vite middleware endpoints are available in dev mode:
   - `POST /__debug/toggle` with `{ "enabled": true|false }`
   - `POST /__debug/log` with `{ "level": "info|warn|bad", "message": "..." }`
-- Log file path: `game/.debug/runtime.log`
+- Log file path: `vip/.debug/runtime.log`
 - Enable server-side logging at startup:
 ### Debug probe RPC (dev-only)
 
 This repo includes a dev-only "debug probe" RPC so agents (and scripts) can request arbitrary state from the running browser game without adding fixed snapshot endpoints.
 
-- Server broker (Vite middleware in `game/vite.config.ts`):
+- Server broker (Vite middleware in `vip/vite.config.ts`):
   - `POST /__debug/probe` with `{ "clientId": "...", "queries": [...] }` -> `{ ok: true, probeId }`
   - `GET /__debug/probe/<probeId>` -> `{ ok: true, status: "pending"|"done", result? }`
   - Client polling: `GET /__debug/probe/next?clientId=...` -> `{ ok: true, probe: { id, queries } | null }`
@@ -75,7 +75,7 @@ This repo includes a dev-only "debug probe" RPC so agents (and scripts) can requ
 - Enable server-side logging at startup:
 
 ```bash
-DEBUG_LOG=1 npm --prefix game run dev
+DEBUG_LOG=1 npm --prefix vip run dev
 ```
 
 If shell does not support inline env assignment, set env var in shell first, then run dev.
@@ -107,7 +107,7 @@ If shell does not support inline env assignment, set env var in shell first, the
 - For any gameplay, unit, weapon, AI, template, or battle-loop change, run headless smoke verification before reporting done:
 
 ```bash
-npm --prefix game run test:headless
+npm --prefix vip run test:headless
 ```
 
 - This smoke test reuses battle logic and verifies all default templates can move and fire.

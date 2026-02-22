@@ -2,7 +2,7 @@ arena/.arena-data/
 arena/.dist/
 node_modules/
 */node_modules/
-game/.headless-dist/
+vip/.headless-dist/
 .tmp/
 arena-ui/dist/
 
@@ -11,12 +11,12 @@ dist/
 build/
 coverage/
 *.tsbuildinfo
-game/dist/
+vip/dist/
 arena-ui/dist/
 arena/dist/
 packages/*/dist/
 packages/*/build/
-game/.headless-dist/
+vip/.headless-dist/
 arena/.dist/
 arena/modules
 .DS_Store
