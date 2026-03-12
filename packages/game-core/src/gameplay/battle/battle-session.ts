@@ -36,7 +36,7 @@ import { instantiateUnit } from "../../simulation/units/unit-builder.ts";
 import { selectBestTarget } from "../../ai/targeting/target-selector.ts";
 import { createBaselineCompositeAiController } from "../../ai/composite/baseline-modules.ts";
 import { validateTemplateDetailed } from "../../templates/template-validation.ts";
-import { createDefaultPartDefinitions, mergePartCatalogs } from "../../parts/part-schema.ts";
+import { createDefaultPartDefinitions, mergePartCatalogs, normalizePartAttachmentRotate } from "../../parts/part-schema.ts";
 import type { BattleAiController, CombatDecision, WeaponFireAiInput } from "../../ai/composite/composite-ai.ts";
 import type { BattleState, CommandResult, ComponentStats, FireBlockDetail, FireRequest, KeyState, MapNode, PartDefinition, PartDirection, Side, UnitCommand, UnitInstance, UnitTemplate, WeaponClass } from "../../types.ts";
 
@@ -1609,7 +1609,7 @@ export class BattleSession {
     const weaponOriginX = firepoint.x;
     const weaponOriginY = firepoint.y;
     // Clamp angle directly (no dx/dy round-trip)
-    const fireAngle = this.clampAndAdjustAngle(unit, attachment.component, safeAngle, attachment.stats?.shootAngleDeg);
+    const fireAngle = this.clampAndAdjustAngle(unit, attachment.component, safeAngle, attachment.stats?.shootAngleDeg, attachment);
     const spreadRad = (((Math.random() * 2) - 1) * shot.spreadDeg * Math.PI) / 180;
     const finalFireAngle = fireAngle + spreadRad;
     const ux = Math.cos(finalFireAngle);
@@ -1673,19 +1673,51 @@ export class BattleSession {
     componentId: keyof typeof COMPONENTS,
     angleRad: number,
     shootAngleDegOverride?: number,
+    attachment?: UnitInstance["attachments"][number],
   ): number {
     const stats = COMPONENTS[componentId];
-    const shootAngleDeg = shootAngleDegOverride ?? stats.shootAngleDeg ?? 120;
-    const halfAngleRad = (shootAngleDeg * Math.PI / 180) * 0.5;
-    const facingAngle = unit.facing === 1 ? 0 : Math.PI;
+    const facingAngle = attachment
+      ? this.getAttachmentWeaponFacingAngleRad(unit, attachment)
+      : (unit.facing === 1 ? 0 : Math.PI);
+    const angleLimit = this.resolveWeaponAngleLimit(
+      stats,
+      shootAngleDegOverride,
+      attachment ? this.getAttachmentPart(attachment) : null,
+    );
+    if (!angleLimit.enabled) {
+      return angleRad;
+    }
 
     // Normalize angle relative to facing
     const relativeAngle = Math.atan2(Math.sin(angleRad - facingAngle), Math.cos(angleRad - facingAngle));
 
-    // Clamp to weapon arc
-    const clampedRelative = clamp(relativeAngle, -halfAngleRad, halfAngleRad);
+    // Clamp to weapon arc (cw is +delta, ccw is -delta in this coordinate system)
+    const clampedRelative = clamp(relativeAngle, -angleLimit.ccwRad, angleLimit.cwRad);
 
     return facingAngle + clampedRelative;
+  }
+
+  private getAttachmentWeaponFacingAngleRad(
+    unit: UnitInstance,
+    attachment: UnitInstance["attachments"][number],
+  ): number {
+    const q = this.resolveAttachmentFacingQuarter(attachment);
+    let x = 1;
+    let y = 0;
+    if (q === 1) {
+      x = 0;
+      y = 1;
+    } else if (q === 2) {
+      x = -1;
+      y = 0;
+    } else if (q === 3) {
+      x = 0;
+      y = -1;
+    }
+    if (unit.facing !== 1) {
+      x = -x;
+    }
+    return Math.atan2(y, x);
   }
 
   private requiresDedicatedLoader(weaponClass: BattleState["projectiles"][number]["weaponClass"]): boolean {
@@ -1999,12 +2031,16 @@ export class BattleSession {
   }
 
   private resolveAttachmentFacingQuarter(attachment: { partId?: number; rotateQuarter: number }): 0 | 1 | 2 | 3 {
+    const part = attachment.partId
+      ? this.partCatalog.find((catalogPart) => catalogPart.id === attachment.partId)
+      : undefined;
     const baseQuarter = this.getDirectionQuarter(
-      attachment.partId
-        ? this.partCatalog.find((part) => part.id === attachment.partId)?.direction
-        : undefined,
+      part?.direction,
     );
-    return ((baseQuarter + attachment.rotateQuarter) % 4 + 4) % 4 as 0 | 1 | 2 | 3;
+    const rotateQuarter = part
+      ? normalizePartAttachmentRotate(part, attachment.rotateQuarter)
+      : ((attachment.rotateQuarter % 4 + 4) % 4) as 0 | 1 | 2 | 3;
+    return ((baseQuarter + rotateQuarter) % 4 + 4) % 4 as 0 | 1 | 2 | 3;
   }
 
   private getAttachmentPart(attachment: { partId?: number }): PartDefinition | null {
@@ -2042,6 +2078,60 @@ export class BattleSession {
       return part.partProperties.thrustAngleDeg;
     }
     return stats.propulsion?.thrustAngleDeg ?? 25;
+  }
+
+  private resolveWeaponAngleLimit(
+    stats: ComponentStats,
+    shootAngleDegOverride?: number,
+    part: PartDefinition | null = null,
+  ): { enabled: boolean; cwRad: number; ccwRad: number } {
+    const hasAngleLimit = part?.partProperties?.hasAngleLimit;
+    if (hasAngleLimit === false) {
+      return { enabled: false, cwRad: 0, ccwRad: 0 };
+    }
+    const explicitCw = part?.partProperties?.cwAngle;
+    const explicitCcw = part?.partProperties?.ccwAngle;
+    if (hasAngleLimit === true && Number.isFinite(explicitCw) && Number.isFinite(explicitCcw)) {
+      return {
+        enabled: true,
+        cwRad: Math.max(0, explicitCw ?? 0) * Math.PI / 180,
+        ccwRad: Math.max(0, explicitCcw ?? 0) * Math.PI / 180,
+      };
+    }
+
+    const shootAngleDeg = shootAngleDegOverride ?? part?.partProperties?.shootAngleDeg ?? stats.shootAngleDeg;
+    if (!Number.isFinite(shootAngleDeg)) {
+      return { enabled: false, cwRad: 0, ccwRad: 0 };
+    }
+    const halfRad = Math.max(0, (shootAngleDeg ?? 0) * 0.5) * Math.PI / 180;
+    return { enabled: true, cwRad: halfRad, ccwRad: halfRad };
+  }
+
+  private resolveEngineAngleLimit(
+    attachment: UnitInstance["attachments"][number],
+    stats: ComponentStats,
+  ): { enabled: boolean; cwRad: number; ccwRad: number } {
+    const part = this.getAttachmentPart(attachment);
+    const hasAngleLimit = part?.partProperties?.hasAngleLimit;
+    if (hasAngleLimit === false) {
+      return { enabled: false, cwRad: 0, ccwRad: 0 };
+    }
+    const explicitCw = part?.partProperties?.cwAngle;
+    const explicitCcw = part?.partProperties?.ccwAngle;
+    if (hasAngleLimit === true && Number.isFinite(explicitCw) && Number.isFinite(explicitCcw)) {
+      return {
+        enabled: true,
+        cwRad: Math.max(0, explicitCw ?? 0) * Math.PI / 180,
+        ccwRad: Math.max(0, explicitCcw ?? 0) * Math.PI / 180,
+      };
+    }
+
+    const legacyHalf = this.getAttachmentThrustAngleDeg(attachment, stats);
+    if (!Number.isFinite(legacyHalf)) {
+      return { enabled: false, cwRad: 0, ccwRad: 0 };
+    }
+    const halfRad = Math.max(0, legacyHalf) * Math.PI / 180;
+    return { enabled: true, cwRad: halfRad, ccwRad: halfRad };
   }
 
   private getControlComputing(unit: UnitInstance): number {
@@ -2111,15 +2201,24 @@ export class BattleSession {
       const facingQuarter = this.resolveAttachmentFacingQuarter(attachment);
       const propDir = this.getPropellerDirection(unit, facingQuarter);
       // Propeller facing represents push/airflow direction; thrust is the opposite direction.
-      const dot = ux * (-propDir.x) + uy * (-propDir.y);
-      const angleLimitDeg = this.getAttachmentThrustAngleDeg(attachment, stats);
-      const cosLimit = Math.cos((angleLimitDeg * Math.PI) / 180);
-      if (dot < cosLimit) {
+      const thrustX = -propDir.x;
+      const thrustY = -propDir.y;
+      const thrustAngle = Math.atan2(thrustY, thrustX);
+      const desiredAngle = Math.atan2(uy, ux);
+      const relativeAngle = Math.atan2(Math.sin(desiredAngle - thrustAngle), Math.cos(desiredAngle - thrustAngle));
+      const angleLimit = this.resolveEngineAngleLimit(attachment, stats);
+      if (angleLimit.enabled) {
+        if (relativeAngle > angleLimit.cwRad || relativeAngle < -angleLimit.ccwRad) {
+          continue;
+        }
+        const sideLimit = relativeAngle >= 0 ? angleLimit.cwRad : angleLimit.ccwRad;
+        const inConeScale = sideLimit > 1e-6
+          ? clamp(1 - Math.abs(relativeAngle) / sideLimit, 0, 1)
+          : 1;
+        accel += baseAccel * inConeScale;
         continue;
       }
-      const inConeScale = clamp((dot - cosLimit) / Math.max(1e-6, 1 - cosLimit), 0, 1);
-      const sideBleed = clamp((1 - Math.abs(dot)) * 0.18, 0, 0.18);
-      accel += baseAccel * Math.max(inConeScale, sideBleed);
+      accel += baseAccel;
     }
     return accel;
   }
@@ -2310,8 +2409,13 @@ export class BattleSession {
       dt,
       desiredRange,
       baseTarget,
-      canShootAtAngle: (componentId: keyof typeof COMPONENTS, dx: number, dy: number, shootAngleDegOverride?: number) =>
-        this.canShootAtAngle(unit, componentId, dx, dy, shootAngleDegOverride),
+      canShootAtAngle: (
+        componentId: keyof typeof COMPONENTS,
+        dx: number,
+        dy: number,
+        shootAngleDegOverride?: number,
+        angleLimitOverride?: WeaponFireAiInput["angleLimit"],
+      ) => this.canShootAtAngle(unit, componentId, dx, dy, shootAngleDegOverride, angleLimitOverride),
       getEffectiveWeaponRange: (baseRange: number) => this.getEffectiveWeaponRange(unit, baseRange),
       getWeaponFireInput: (slot: number) => this.getWeaponFireInput(unit, slot),
     };
@@ -2452,14 +2556,46 @@ export class BattleSession {
     this.hooks.addLog(`${unit.name} crashed after losing lift`, "bad");
   }
 
-  private canShootAtAngle(unit: UnitInstance, componentId: keyof typeof COMPONENTS, dx: number, dy: number, shootAngleDegOverride?: number): boolean {
+  private canShootAtAngle(
+    unit: UnitInstance,
+    componentId: keyof typeof COMPONENTS,
+    dx: number,
+    dy: number,
+    shootAngleDegOverride?: number,
+    angleLimitOverride?: WeaponFireAiInput["angleLimit"],
+  ): boolean {
     const stats = COMPONENTS[componentId];
-    const shootAngleDeg = shootAngleDegOverride ?? stats.shootAngleDeg ?? 120;
-    const halfAngleRad = (shootAngleDeg * Math.PI / 180) * 0.5;
-    const facingAngle = unit.facing === 1 ? 0 : Math.PI;
+    const facingAngle = angleLimitOverride?.facingAngleRad ?? (unit.facing === 1 ? 0 : Math.PI);
     const aimAngle = Math.atan2(dy, dx);
     const delta = Math.atan2(Math.sin(aimAngle - facingAngle), Math.cos(aimAngle - facingAngle));
-    return Math.abs(delta) <= halfAngleRad;
+    const limit = angleLimitOverride
+      ? (() => {
+          if (angleLimitOverride.hasAngleLimit === false) {
+            return { enabled: false, cwRad: 0, ccwRad: 0 };
+          }
+          if (
+            angleLimitOverride.hasAngleLimit === true
+            && Number.isFinite(angleLimitOverride.cwAngle)
+            && Number.isFinite(angleLimitOverride.ccwAngle)
+          ) {
+            return {
+              enabled: true,
+              cwRad: Math.max(0, angleLimitOverride.cwAngle ?? 0) * Math.PI / 180,
+              ccwRad: Math.max(0, angleLimitOverride.ccwAngle ?? 0) * Math.PI / 180,
+            };
+          }
+          const fallbackShootAngle = shootAngleDegOverride ?? stats.shootAngleDeg;
+          if (!Number.isFinite(fallbackShootAngle)) {
+            return { enabled: false, cwRad: 0, ccwRad: 0 };
+          }
+          const halfRad = Math.max(0, (fallbackShootAngle ?? 0) * 0.5) * Math.PI / 180;
+          return { enabled: true, cwRad: halfRad, ccwRad: halfRad };
+        })()
+      : this.resolveWeaponAngleLimit(stats, shootAngleDegOverride, null);
+    if (!limit.enabled) {
+      return true;
+    }
+    return delta <= limit.cwRad && delta >= -limit.ccwRad;
   }
 
   private pickTarget(unit: UnitInstance): UnitInstance | null {
@@ -2639,12 +2775,19 @@ export class BattleSession {
     if (stats.type !== "weapon" || stats.range === undefined || stats.damage === undefined) {
       return null;
     }
+    const part = this.getAttachmentPart(attachment);
     const baseRange = attachment.stats?.range ?? stats.range;
     const firepoint = this.getAttachmentFirepointWorld(unit, attachment);
     return {
       componentId: attachment.component,
       damage: attachment.stats?.damage ?? stats.damage,
       shootAngleDeg: attachment.stats?.shootAngleDeg ?? stats.shootAngleDeg,
+      angleLimit: {
+        hasAngleLimit: part?.partProperties?.hasAngleLimit,
+        cwAngle: part?.partProperties?.cwAngle,
+        ccwAngle: part?.partProperties?.ccwAngle,
+        facingAngleRad: this.getAttachmentWeaponFacingAngleRad(unit, attachment),
+      },
       effectiveRange: this.getEffectiveWeaponRange(unit, baseRange),
       projectileSpeed: attachment.stats?.projectileSpeed ?? stats.projectileSpeed ?? PROJECTILE_SPEED,
       projectileGravity: attachment.stats?.projectileGravity ?? stats.projectileGravity ?? PROJECTILE_GRAVITY,

@@ -89,6 +89,9 @@ export function getPartPropertiesDefaultsByType(partType: PartType, partCategory
       powerAir: partCategory === "jet" || partCategory === "propeller",
       directional,
       defaultDirection: "down",
+      hasAngleLimit: directional,
+      cwAngle: directional ? 30 : undefined,
+      ccwAngle: directional ? 30 : undefined,
       thrustAngleDeg: directional ? 30 : undefined,
     };
   }
@@ -113,6 +116,9 @@ export function getPartPropertiesDefaultsByType(partType: PartType, partCategory
       tracking: bulletType !== "laser" ? partCategory === "missile" : false,
       trackingTurnRate: partCategory === "missile" ? 50 : undefined,
       directional: true,
+      hasAngleLimit: true,
+      cwAngle: 15,
+      ccwAngle: 15,
       shootAngleDeg: 30,
       needLoader: false,
       defaultDirection: "right",

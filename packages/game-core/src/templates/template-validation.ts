@@ -90,6 +90,29 @@ function engineSupportsGround(part: PartDefinition | null, component: keyof type
   return COMPONENTS[component].propulsion?.platform === "ground";
 }
 
+function resolveEngineDirectionalLimit(part: PartDefinition | null, component: keyof typeof COMPONENTS): { enabled: boolean; cwRad: number; ccwRad: number } {
+  const stats = COMPONENTS[component];
+  const hasAngleLimit = part?.partProperties?.hasAngleLimit;
+  if (hasAngleLimit === false) {
+    return { enabled: false, cwRad: 0, ccwRad: 0 };
+  }
+  const cw = part?.partProperties?.cwAngle;
+  const ccw = part?.partProperties?.ccwAngle;
+  if (hasAngleLimit === true && Number.isFinite(cw) && Number.isFinite(ccw)) {
+    return {
+      enabled: true,
+      cwRad: Math.max(0, cw ?? 0) * Math.PI / 180,
+      ccwRad: Math.max(0, ccw ?? 0) * Math.PI / 180,
+    };
+  }
+  const legacyHalf = part?.partProperties?.thrustAngleDeg ?? stats.propulsion?.thrustAngleDeg;
+  if (!Number.isFinite(legacyHalf)) {
+    return { enabled: false, cwRad: 0, ccwRad: 0 };
+  }
+  const halfRad = Math.max(0, legacyHalf ?? 0) * Math.PI / 180;
+  return { enabled: true, cwRad: halfRad, ccwRad: halfRad };
+}
+
 function computeAirLiftAccel(template: UnitTemplate, partCatalog: ReadonlyArray<PartDefinition>): number {
   let mass = 0;
   for (const cell of template.structure) {
@@ -144,15 +167,24 @@ function computeAirLiftAccel(template: UnitTemplate, partCatalog: ReadonlyArray<
     const facingQuarter = ((getDirectionQuarter(part?.direction ?? "right") + rotateQuarter) % 4 + 4) % 4;
     const propDir = getPropellerDirection(facingQuarter);
     // Propeller facing represents push/airflow direction; lift/thrust is opposite.
-    const dot = (-propDir.x) * 0 + (-propDir.y) * -1;
-    const angleLimitDeg = part?.partProperties?.thrustAngleDeg ?? propulsion.thrustAngleDeg ?? 25;
-    const cosLimit = Math.cos((angleLimitDeg * Math.PI) / 180);
-    if (dot < cosLimit) {
+    const thrustX = -propDir.x;
+    const thrustY = -propDir.y;
+    const thrustAngle = Math.atan2(thrustY, thrustX);
+    const upAngle = -Math.PI / 2;
+    const relative = Math.atan2(Math.sin(upAngle - thrustAngle), Math.cos(upAngle - thrustAngle));
+    const angleLimit = resolveEngineDirectionalLimit(part, component);
+    if (angleLimit.enabled) {
+      if (relative > angleLimit.cwRad || relative < -angleLimit.ccwRad) {
+        continue;
+      }
+      const sideLimit = relative >= 0 ? angleLimit.cwRad : angleLimit.ccwRad;
+      const inConeScale = sideLimit > 1e-6
+        ? Math.max(0, Math.min(1, 1 - Math.abs(relative) / sideLimit))
+        : 1;
+      liftAccel += baseAccel * inConeScale;
       continue;
     }
-    const inConeScale = Math.max(0, Math.min(1, (dot - cosLimit) / Math.max(1e-6, 1 - cosLimit)));
-    const sideBleed = Math.max(0, Math.min(0.18, (1 - Math.abs(dot)) * 0.18));
-    liftAccel += baseAccel * Math.max(inConeScale, sideBleed);
+    liftAccel += baseAccel;
   }
   return liftAccel;
 }

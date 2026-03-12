@@ -5,6 +5,12 @@ export interface WeaponFireAiInput {
   componentId: ComponentId;
   damage: number;
   shootAngleDeg?: number;
+  angleLimit?: {
+    hasAngleLimit?: boolean;
+    cwAngle?: number;
+    ccwAngle?: number;
+    facingAngleRad?: number;
+  };
   effectiveRange: number;
   projectileSpeed: number;
   projectileGravity: number;
@@ -18,7 +24,13 @@ export interface BattleAiInput {
   dt: number;
   desiredRange: number;
   baseTarget: { x: number; y: number };
-  canShootAtAngle: (componentId: ComponentId, dx: number, dy: number, shootAngleDegOverride?: number) => boolean;
+  canShootAtAngle: (
+    componentId: ComponentId,
+    dx: number,
+    dy: number,
+    shootAngleDegOverride?: number,
+    angleLimitOverride?: WeaponFireAiInput["angleLimit"],
+  ) => boolean;
   getEffectiveWeaponRange: (baseRange: number) => number;
   getWeaponFireInput: (slot: number) => WeaponFireAiInput | null;
 }

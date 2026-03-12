@@ -91,6 +91,7 @@ Current implementation includes dedicated in-app editor tabs where the player ca
 - Weapon functional parts store additive orientation (`rotateQuarter`, 0..3 in 90-degree steps).
 - Functional placement now uses part footprints from part catalog definitions (instead of hardcoded component-only footprints), and footprint rotation follows `rotateQuarter`.
 - Functional parts may declare `directional: true`; only directional parts show direction UI and use rotation controls. Parts without it are undirectional by default.
+- For weapon parts with `directional: false`, template placement rotation is disabled and runtime firing facing stays fixed to the part `default direction`.
 - Effective facing for directional functional parts is computed as `part.direction` (default facing) + template `rotateQuarter` (user rotation). Template-editor direction arrows and propeller thrust/lift both use this combined facing.
 - For propellers, combined facing represents airflow/push direction; actual thrust (including lift contribution) is applied in the opposite direction.
 - Functional placement supports `center place on click` mode in template editor (developer/user toggle).
@@ -169,7 +170,10 @@ Part-level properties:
   - engine: directional air thrust mode.
   - weapon: directional firing mode.
 - `default direction`: default facing (`up|down|left|right`) before template rotation.
-- `thrust angle`: one-sided directional air-thrust cone half-angle.
+- `has angle limit`: enables directional angle limits on engine/weapon.
+- `cw angle`: clockwise limit angle relative to part direction.
+- `ccw angle`: anti-clockwise limit angle relative to part direction.
+- `thrust angle`: legacy one-sided directional air-thrust cone half-angle (auto-migrated to `cw/ccw` when `has angle limit` is not explicitly set).
 - `bullet type`: weapon projectile family (`bullet|missile|laser`).
 - `damage`: base hit damage.
 - `range`: maximum effective range.
@@ -184,7 +188,7 @@ Part-level properties:
 - `projectile gravity`: gravity/drop for non-laser projectiles.
 - `tracking`: projectile can seek targets (non-laser).
 - `tracking turn rate`: homing turn acceleration/rate.
-- `shoot angle`: one-sided directional shoot cone half-angle (`180` means omni).
+- `shoot angle`: legacy one-sided directional shoot cone half-angle (`180` means omni); replaced by `has angle limit + cw/ccw`.
 - `need loader`: weapon requires loader participation to reload/fire cycle.
 - `supported weapon tags`: weapon tags that a loader/ammo can service.
 - `load multiplier`: loader time multiplier on weapon cooldown.
@@ -216,11 +220,11 @@ Cell-level properties:
 
 `engine` should expose:
 
-- `gas cost`, `mass`, `tag`, `power`, `max speed`, `power ground`, `power air`, `directional` (air only), `default direction`, `thrust angle` (air directional only).
+- `gas cost`, `mass`, `tag`, `power`, `max speed`, `power ground`, `power air`, `directional` (air only), `default direction`, `has angle limit`, `cw angle`, `ccw angle` (engine + weapon only).
 
 `weapon` should expose:
 
-- `gas cost`, `mass`, `tag`, `bullet type`, `damage`, `range`, `cooldown`, `recoil`, `hit impulse`, `penetration`, `spread angle`, `explode on hit`, `explode radius` (when `explode on hit = true`), `projectile speed` (non-laser), `projectile gravity` (non-laser), `tracking` (non-laser), `tracking turn rate` (tracking only), `directional`, `shoot angle` (directional only), `need loader`, `default direction`, `computing consumption`.
+- `gas cost`, `mass`, `tag`, `bullet type`, `damage`, `range`, `cooldown`, `recoil`, `hit impulse`, `penetration`, `spread angle`, `explode on hit`, `explode radius` (when `explode on hit = true`), `projectile speed` (non-laser), `projectile gravity` (non-laser), `tracking` (non-laser), `tracking turn rate` (tracking only), `directional`, `has angle limit`, `cw angle`, `ccw angle`, `need loader`, `default direction`, `computing consumption`.
 
 `loader` should expose:
 
@@ -260,7 +264,9 @@ Cell-level properties:
 - `power air`: `false`
 - `directional` (air only): `true`
 - `default direction`: `down`
-- `thrust angle` (air directional): `30`
+- `has angle limit`: `true` (directional engines)
+- `cw angle`: `30`
+- `ccw angle`: `30`
 
 `weapon` defaults:
 
@@ -282,7 +288,9 @@ Cell-level properties:
 - `tracking` (non-laser): `false`
 - `tracking turn rate` (tracking only): `50`
 - `directional`: `true`
-- `shoot angle` (directional only): `30` (`180` for omni)
+- `has angle limit`: `true`
+- `cw angle`: `15`
+- `ccw angle`: `15` (`180/180` for omni)
 - `need loader`: `false`
 - `default direction`: `right`
 - `computing consumption`: `1`
@@ -337,14 +345,16 @@ Part-level property visibility (left pane):
   - Show: `mass`, `computing`.
 - `engine` selected:
   - Show: `mass`, `power`, `max speed`, `power ground`, `power air`.
-  - Show `directional`, `default direction`, `thrust angle` only when air propulsion is enabled (`power air = true`).
+  - Show `directional`, `default direction`, and `has angle limit` for engine parts.
+  - If `has angle limit = true`, show `cw angle` and `ccw angle`.
 - `weapon` selected:
   - Weapon category options are `bullet`, `missile`, and `beam` (no separate `explosive` category).
   - Show: `mass`, `bullet type`, `damage`, `range`, `cooldown`, `recoil`, `hit impulse`, `penetration`, `spread angle`, `explode on hit`, `need loader`, `directional`, `computing consumption`.
   - Show `projectile speed` and `projectile gravity` only for non-laser bullets.
   - Show explosive tuning (`blast radius`, `blast damage`, `falloff`) only when `explode on hit = true`.
   - Show `tracking` only for non-laser bullets; show `tracking turn rate` only when `tracking = true`.
-  - Show `shoot angle` and `default direction` only when `directional = true`.
+  - Show `has angle limit` and `default direction` for weapon parts.
+  - If `has angle limit = true`, show `cw angle` and `ccw angle`.
 - `loader` selected:
   - Show: `mass`, `supported weapon tags`, `load multiplier`, `min load time`, `min burst interval`.
 - `ammo` selected:

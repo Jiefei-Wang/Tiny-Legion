@@ -341,6 +341,7 @@ export function createBaselineShootAi(): ShootAiModule {
           aim.x - weaponInput.firepointX,
           aim.y - weaponInput.firepointY,
           weaponInput.shootAngleDeg,
+          weaponInput.angleLimit,
         );
         if (!angleAllowed) {
           blockedReason = "angle-locked";
@@ -467,6 +468,7 @@ export function createHistoryWeightedShootAi(recencyPowerRaw = 1): ShootAiModule
           aim.x - weaponInput.firepointX,
           aim.y - weaponInput.firepointY,
           weaponInput.shootAngleDeg,
+          weaponInput.angleLimit,
         );
         if (!angleAllowed) {
           blockedReason = "angle-locked";
@@ -589,6 +591,7 @@ export function createAutoregShootAi(alphaRaw: number): ShootAiModule {
           aim.x - weaponInput.firepointX,
           aim.y - weaponInput.firepointY,
           weaponInput.shootAngleDeg,
+          weaponInput.angleLimit,
         );
         if (!angleAllowed) {
           blockedReason = "angle-locked";
@@ -707,6 +710,7 @@ export function createWeightedLagShootAi(alphaRaw: ReadonlyArray<number>): Shoot
           aim.x - weaponInput.firepointX,
           aim.y - weaponInput.firepointY,
           weaponInput.shootAngleDeg,
+          weaponInput.angleLimit,
         );
         if (!angleAllowed) {
           blockedReason = "angle-locked";

@@ -260,6 +260,19 @@ export function validatePartDefinitionDetailed(part: PartDefinition): PartValida
     warnings.push("loaderCooldownMultiplier is set while is_loader is disabled.");
   }
 
+  const componentType = COMPONENTS[part.baseComponent]?.type;
+  const shouldCheckAngleLimit = componentType === "engine" || componentType === "weapon";
+  if (shouldCheckAngleLimit && part.partProperties?.hasAngleLimit === true) {
+    const cw = part.partProperties.cwAngle;
+    const ccw = part.partProperties.ccwAngle;
+    if (!Number.isFinite(cw) || (cw ?? 0) < 0) {
+      errors.push("hasAngleLimit=true requires non-negative partProperties.cwAngle.");
+    }
+    if (!Number.isFinite(ccw) || (ccw ?? 0) < 0) {
+      errors.push("hasAngleLimit=true requires non-negative partProperties.ccwAngle.");
+    }
+  }
+
   return {
     errors: unique(errors),
     warnings: unique(warnings),

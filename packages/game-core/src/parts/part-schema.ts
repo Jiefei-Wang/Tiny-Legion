@@ -240,6 +240,14 @@ function readOptionalPartCategory(value: unknown): PartCategory | undefined {
   return undefined;
 }
 
+function readLegacyHalfShootAngle(value: unknown): number | undefined {
+  const total = readOptionalNumber(value);
+  if (total === undefined) {
+    return undefined;
+  }
+  return Math.max(0, total * 0.5);
+}
+
 function getDefaultPartDirection(baseComponent: ComponentId): PartDirection {
   if (baseComponent === "propeller") {
     return "down";
@@ -454,6 +462,15 @@ export function createImplicitPartDefinition(component: ComponentId): PartDefini
       powerAir: stats.type === "engine" ? stats.propulsion?.platform === "air" : undefined,
       directional: stats.directional,
       defaultDirection: getDefaultPartDirection(component),
+      hasAngleLimit: stats.type === "engine"
+        ? stats.propulsion?.mode === "directional"
+        : (stats.type === "weapon" ? stats.directional === true : undefined),
+      cwAngle: stats.type === "engine"
+        ? (stats.propulsion?.mode === "directional" ? (stats.propulsion?.thrustAngleDeg ?? 30) : undefined)
+        : (stats.type === "weapon" && stats.shootAngleDeg !== undefined ? stats.shootAngleDeg * 0.5 : undefined),
+      ccwAngle: stats.type === "engine"
+        ? (stats.propulsion?.mode === "directional" ? (stats.propulsion?.thrustAngleDeg ?? 30) : undefined)
+        : (stats.type === "weapon" && stats.shootAngleDeg !== undefined ? stats.shootAngleDeg * 0.5 : undefined),
       thrustAngleDeg: stats.type === "engine" ? (stats.propulsion?.thrustAngleDeg ?? 30) : undefined,
       bulletType: stats.type === "weapon"
         ? ((stats.weaponClass === "tracking")
@@ -653,6 +670,9 @@ export function clonePartDefinition(part: PartDefinition): PartDefinition {
           powerAir: part.partProperties.powerAir,
           directional: part.partProperties.directional,
           defaultDirection: part.partProperties.defaultDirection,
+          hasAngleLimit: part.partProperties.hasAngleLimit,
+          cwAngle: part.partProperties.cwAngle,
+          ccwAngle: part.partProperties.ccwAngle,
           thrustAngleDeg: part.partProperties.thrustAngleDeg,
           bulletType: part.partProperties.bulletType,
           damage: part.partProperties.damage,
@@ -883,6 +903,16 @@ export function parsePartDefinition(input: unknown): PartDefinition | null {
     : {};
   const normalizedPartType: PartType = inferredPartType;
   const normalizedPartCategory = declaredPartCategory ?? resolvePartCategoryFromComponent(baseComponent);
+  const hasAngleLimitRaw = readOptionalBoolean(partPropertiesRecord.hasAngleLimit);
+  const cwAngleRaw = readOptionalNumber(partPropertiesRecord.cwAngle);
+  const ccwAngleRaw = readOptionalNumber(partPropertiesRecord.ccwAngle);
+  const legacyThrustAngle = readOptionalNumber(partPropertiesRecord.thrustAngleDeg);
+  const legacyShootHalfAngle = readLegacyHalfShootAngle(partPropertiesRecord.shootAngleDeg);
+  const hasLegacyLimit = legacyThrustAngle !== undefined || legacyShootHalfAngle !== undefined;
+  const hasAngleLimit = hasAngleLimitRaw ?? (hasLegacyLimit ? true : undefined);
+  const fallbackLegacyHalfAngle = legacyShootHalfAngle ?? legacyThrustAngle;
+  const cwAngle = cwAngleRaw ?? (hasAngleLimit === true ? fallbackLegacyHalfAngle : undefined);
+  const ccwAngle = ccwAngleRaw ?? (hasAngleLimit === true ? fallbackLegacyHalfAngle : undefined);
   const partProperties: PartPropertySet = {
     gasCost: readOptionalNumber(partPropertiesRecord.gasCost),
     mass: readOptionalNumber(partPropertiesRecord.mass),
@@ -899,6 +929,9 @@ export function parsePartDefinition(input: unknown): PartDefinition | null {
     powerAir: readOptionalBoolean(partPropertiesRecord.powerAir),
     directional: readOptionalBoolean(partPropertiesRecord.directional),
     defaultDirection: readOptionalPartDirection(partPropertiesRecord.defaultDirection),
+    hasAngleLimit,
+    cwAngle,
+    ccwAngle,
     thrustAngleDeg: readOptionalNumber(partPropertiesRecord.thrustAngleDeg),
     bulletType: (partPropertiesRecord.bulletType === "bullet" || partPropertiesRecord.bulletType === "missile" || partPropertiesRecord.bulletType === "laser")
       ? partPropertiesRecord.bulletType

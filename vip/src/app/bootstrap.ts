@@ -2560,9 +2560,12 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       const errorSummary = validation.errors.length > 0 ? validation.errors.join(" | ") : "none";
       const warningSummary = validation.warnings.length > 0 ? validation.warnings.join(" | ") : "none";
       const selectedDirectionalPart = resolvePartForSelection(editorSelection);
-      const selectedFacingQuarter = getDirectionalFacingQuarter(selectedDirectionalPart, editorWeaponRotateQuarter);
-      const selectedDirectionText = isCurrentEditorSelectionDirectional()
-        ? `Weapon direction: ${getRotationSymbol(selectedFacingQuarter)} (${selectedFacingQuarter * 90}deg)`
+      const selectedFacingQuarter = getDirectionalFacingQuarter(
+        selectedDirectionalPart,
+        isDirectionalPart(selectedDirectionalPart) ? editorWeaponRotateQuarter : 0,
+      );
+      const selectedDirectionText = shouldShowTemplateDirectionForPart(selectedDirectionalPart)
+        ? `Weapon direction: ${getRotationSymbol(selectedFacingQuarter)} (${selectedFacingQuarter * 90}deg)${isDirectionalPart(selectedDirectionalPart) ? "" : " | fixed"}`
         : "Weapon direction: n/a";
       const paletteCards = Array.from({ length: 30 }, (_, index) => {
         const item = catalog[index];
@@ -3146,6 +3149,13 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     return part.directional ?? COMPONENTS[part.baseComponent].directional === true;
   };
 
+  const shouldShowTemplateDirectionForPart = (part: PartDefinition | null): boolean => {
+    if (!part) {
+      return false;
+    }
+    return isDirectionalPart(part) || COMPONENTS[part.baseComponent].type === "weapon";
+  };
+
   const isCurrentEditorSelectionDirectional = (): boolean => {
     if (editorLayer !== "functional") {
       return false;
@@ -3588,15 +3598,39 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         const pushDir = rotateOffsetByQuarter(1, 0, facingQuarter);
         const thrustX = -pushDir.x;
         const thrustY = -pushDir.y;
-        const dot = thrustX * 0 + thrustY * -1;
-        const angleLimitDeg = stats.propulsion.thrustAngleDeg ?? 25;
-        const cosLimit = Math.cos((angleLimitDeg * Math.PI) / 180);
-        if (dot < cosLimit) {
+        const hasAngleLimit = part?.partProperties?.hasAngleLimit;
+        const cwAngle = part?.partProperties?.cwAngle;
+        const ccwAngle = part?.partProperties?.ccwAngle;
+        let limitEnabled = false;
+        let cwRad = 0;
+        let ccwRad = 0;
+        if (hasAngleLimit === true && Number.isFinite(cwAngle) && Number.isFinite(ccwAngle)) {
+          limitEnabled = true;
+          cwRad = Math.max(0, cwAngle ?? 0) * Math.PI / 180;
+          ccwRad = Math.max(0, ccwAngle ?? 0) * Math.PI / 180;
+        } else if (hasAngleLimit !== false) {
+          const legacyHalf = part?.partProperties?.thrustAngleDeg ?? stats.propulsion.thrustAngleDeg;
+          if (Number.isFinite(legacyHalf)) {
+            limitEnabled = true;
+            cwRad = Math.max(0, legacyHalf ?? 0) * Math.PI / 180;
+            ccwRad = Math.max(0, legacyHalf ?? 0) * Math.PI / 180;
+          }
+        }
+        if (!limitEnabled) {
+          liftAccel += baseAccel;
           continue;
         }
-        const inConeScale = Math.max(0, Math.min(1, (dot - cosLimit) / Math.max(1e-6, 1 - cosLimit)));
-        const sideBleed = Math.max(0, Math.min(0.18, (1 - Math.abs(dot)) * 0.18));
-        liftAccel += baseAccel * Math.max(inConeScale, sideBleed);
+        const thrustAngle = Math.atan2(thrustY, thrustX);
+        const upAngle = -Math.PI / 2;
+        const relative = Math.atan2(Math.sin(upAngle - thrustAngle), Math.cos(upAngle - thrustAngle));
+        if (relative > cwRad || relative < -ccwRad) {
+          continue;
+        }
+        const sideLimit = relative >= 0 ? cwRad : ccwRad;
+        const inConeScale = sideLimit > 1e-6
+          ? Math.max(0, Math.min(1, 1 - Math.abs(relative) / sideLimit))
+          : 1;
+        liftAccel += baseAccel * inConeScale;
       }
     }
 
@@ -3768,9 +3802,13 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     context.fillText(`Grid ${editorGridCols}x${editorGridRows} | Layer ${editorLayer.toUpperCase()} ${editorDeleteMode ? "| DELETE" : "| PLACE"}`, 18, 46);
     context.fillText("Left-click: place/delete | Right-click: delete (functional first) | Right-drag: pan | Mouse wheel: zoom | Origin: (0,0).", 18, 66);
 
-    if (isCurrentEditorSelectionDirectional()) {
-      const selectedPart = resolvePartForSelection(editorSelection);
-      const facingQuarter = getDirectionalFacingQuarter(selectedPart, editorWeaponRotateQuarter);
+    const selectedPartForFacingUi = resolvePartForSelection(editorSelection);
+    if (shouldShowTemplateDirectionForPart(selectedPartForFacingUi)) {
+      const selectedPart = selectedPartForFacingUi;
+      const facingQuarter = getDirectionalFacingQuarter(
+        selectedPart,
+        isDirectionalPart(selectedPart) ? editorWeaponRotateQuarter : 0,
+      );
       context.fillStyle = "rgba(28, 43, 61, 0.92)";
       context.fillRect(drawCanvas.width - 170, 14, 154, 40);
       context.strokeStyle = "rgba(139, 172, 206, 0.8)";
@@ -3778,7 +3816,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       context.fillStyle = "#dbe8f6";
       context.font = "12px Trebuchet MS";
       context.fillText(`Dir: ${getRotationSymbol(facingQuarter)}`, drawCanvas.width - 160, 31);
-      context.fillText(`Q ccw | E cw`, drawCanvas.width - 160, 47);
+      context.fillText(isDirectionalPart(selectedPart) ? "Q ccw | E cw" : "Fixed by part", drawCanvas.width - 160, 47);
     }
 
     const validation = validateTemplateDetailed(editorDraft, { partCatalog: parts });
@@ -3843,41 +3881,43 @@ export function bootstrap(options: BootstrapOptions = {}): void {
             context.font = "9px Trebuchet MS";
             context.fillText(getFunctionalShortLabel(part), x + 4, y + grid.cell - 6, Math.max(12, grid.cell - 8));
           }
-          if (functional.isAnchor && COMPONENTS[functional.component].directional) {
+          if (functional.isAnchor) {
             const part = resolvePartDefinitionForAttachment(
               { partId: functional.partId, component: functional.component },
               parts,
             );
-            const facingQuarter = getDirectionalFacingQuarter(part, functional.rotateQuarter);
-            context.strokeStyle = "#ffe1d4";
-            context.lineWidth = 1.5;
-            context.beginPath();
-            if (facingQuarter === 0) {
-              context.moveTo(x + 18, y + 24);
-              context.lineTo(x + 34, y + 24);
-              context.lineTo(x + 30, y + 20);
-              context.moveTo(x + 34, y + 24);
-              context.lineTo(x + 30, y + 28);
-            } else if (facingQuarter === 1) {
-              context.moveTo(x + 24, y + 18);
-              context.lineTo(x + 24, y + 34);
-              context.lineTo(x + 20, y + 30);
-              context.moveTo(x + 24, y + 34);
-              context.lineTo(x + 28, y + 30);
-            } else if (facingQuarter === 2) {
-              context.moveTo(x + 34, y + 24);
-              context.lineTo(x + 18, y + 24);
-              context.lineTo(x + 22, y + 20);
-              context.moveTo(x + 18, y + 24);
-              context.lineTo(x + 22, y + 28);
-            } else {
-              context.moveTo(x + 24, y + 34);
-              context.lineTo(x + 24, y + 18);
-              context.lineTo(x + 20, y + 22);
-              context.moveTo(x + 24, y + 18);
-              context.lineTo(x + 28, y + 22);
+            if (shouldShowTemplateDirectionForPart(part)) {
+              const facingQuarter = getDirectionalFacingQuarter(part, functional.rotateQuarter);
+              context.strokeStyle = "#ffe1d4";
+              context.lineWidth = 1.5;
+              context.beginPath();
+              if (facingQuarter === 0) {
+                context.moveTo(x + 18, y + 24);
+                context.lineTo(x + 34, y + 24);
+                context.lineTo(x + 30, y + 20);
+                context.moveTo(x + 34, y + 24);
+                context.lineTo(x + 30, y + 28);
+              } else if (facingQuarter === 1) {
+                context.moveTo(x + 24, y + 18);
+                context.lineTo(x + 24, y + 34);
+                context.lineTo(x + 20, y + 30);
+                context.moveTo(x + 24, y + 34);
+                context.lineTo(x + 28, y + 30);
+              } else if (facingQuarter === 2) {
+                context.moveTo(x + 34, y + 24);
+                context.lineTo(x + 18, y + 24);
+                context.lineTo(x + 22, y + 20);
+                context.moveTo(x + 18, y + 24);
+                context.lineTo(x + 22, y + 28);
+              } else {
+                context.moveTo(x + 24, y + 34);
+                context.lineTo(x + 24, y + 18);
+                context.lineTo(x + 20, y + 22);
+                context.moveTo(x + 24, y + 18);
+                context.lineTo(x + 28, y + 22);
+              }
+              context.stroke();
             }
-            context.stroke();
           }
         }
 
@@ -4528,12 +4568,15 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         </div>
         <div class="row">
           <span class="small">${(() => {
-            if (!isCurrentEditorSelectionDirectional()) {
+            const selectedPart = resolvePartForSelection(editorSelection);
+            if (!shouldShowTemplateDirectionForPart(selectedPart)) {
               return "Direction: n/a (undirectional component)";
             }
-            const selectedPart = resolvePartForSelection(editorSelection);
-            const facingQuarter = getDirectionalFacingQuarter(selectedPart, editorWeaponRotateQuarter);
-            return `Direction: ${facingQuarter * 90}deg (${getRotationSymbol(facingQuarter)})`;
+            const facingQuarter = getDirectionalFacingQuarter(
+              selectedPart,
+              isDirectionalPart(selectedPart) ? editorWeaponRotateQuarter : 0,
+            );
+            return `Direction: ${facingQuarter * 90}deg (${getRotationSymbol(facingQuarter)})${isDirectionalPart(selectedPart) ? "" : " | fixed"}`;
           })()}</span>
         </div>
         <div class="row">
@@ -4611,6 +4654,12 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         loaderMinLoadTime: baseStats.loader?.minLoadTime !== undefined ? String(baseStats.loader.minLoadTime) : "none",
         loaderStoreCapacity: baseStats.loader?.storeCapacity !== undefined ? String(baseStats.loader.storeCapacity) : "none",
         loaderMinBurstInterval: baseStats.loader?.minBurstInterval !== undefined ? String(baseStats.loader.minBurstInterval) : "none",
+        cwAngle: baseStats.type === "engine"
+          ? String(baseStats.propulsion?.thrustAngleDeg ?? 30)
+          : (baseStats.shootAngleDeg !== undefined ? String(baseStats.shootAngleDeg * 0.5) : "none"),
+        ccwAngle: baseStats.type === "engine"
+          ? String(baseStats.propulsion?.thrustAngleDeg ?? 30)
+          : (baseStats.shootAngleDeg !== undefined ? String(baseStats.shootAngleDeg * 0.5) : "none"),
       };
 
       const partProps = partDesignerDraft.properties ?? {};
@@ -4624,6 +4673,8 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       const propIsEngine = resolvedPartType === "engine";
       const propIsWeapon = resolvedPartType === "weapon";
       const propIsLoader = resolvedPartType === "loader";
+      const showAngleLimitControls = propIsEngine || propIsWeapon;
+      const hasAngleLimitChecked = partRuntimeProps.hasAngleLimit === true;
       const weaponSupportsExplosive = partRuntimeProps.explodeOnHit === true || baseStats.explosive !== undefined;
       const weaponSupportsTracking = partRuntimeProps.tracking === true || resolvedPartCategory === "missile";
       const loaderSupportsPlaceholder = baseStats.loader?.supports?.join(", ") ?? "none";
@@ -4709,6 +4760,13 @@ export function bootstrap(options: BootstrapOptions = {}): void {
           <label class="small">Power <input id="partPower" type="number" step="1" value="${partRuntimeProps.power ?? ""}" placeholder="${runtimePlaceholders.power}" /></label>
           <label class="small">Max Speed <input id="partMaxSpeed" type="number" step="1" value="${partRuntimeProps.maxSpeed ?? ""}" placeholder="${runtimePlaceholders.maxSpeed}" /></label>
         </div>` : ""}
+        ${showAngleLimitControls ? `<div class="row">
+          <label class="small"><input id="partHasAngleLimit" type="checkbox" ${hasAngleLimitChecked ? "checked" : ""} /> hasAngleLimit</label>
+        </div>` : ""}
+        ${showAngleLimitControls && hasAngleLimitChecked ? `<div class="row">
+          <label class="small">cwAngle <input id="partCwAngle" type="number" step="0.1" min="0" value="${partRuntimeProps.cwAngle ?? ""}" placeholder="${runtimePlaceholders.cwAngle}" /></label>
+          <label class="small">ccwAngle <input id="partCcwAngle" type="number" step="0.1" min="0" value="${partRuntimeProps.ccwAngle ?? ""}" placeholder="${runtimePlaceholders.ccwAngle}" /></label>
+        </div>` : ""}
         ${propIsWeapon ? `<div class="row">
           <label class="small">Recoil <input id="partRecoil" type="number" step="0.1" value="${partRuntimeProps.recoil ?? ""}" placeholder="${runtimePlaceholders.recoil}" /></label>
           <label class="small">Hit Impulse <input id="partHitImpulse" type="number" step="0.1" value="${partRuntimeProps.hitImpulse ?? ""}" placeholder="${runtimePlaceholders.hitImpulse}" /></label>
@@ -4720,7 +4778,6 @@ export function bootstrap(options: BootstrapOptions = {}): void {
           <label class="small">Cooldown <input id="partCooldown" type="number" step="0.05" value="${partRuntimeProps.cooldown ?? ""}" placeholder="${runtimePlaceholders.cooldown}" /></label>
         </div>
         <div class="row">
-          <label class="small">Shoot Angle <input id="partShootAngle" type="number" step="1" value="${partRuntimeProps.shootAngleDeg ?? ""}" placeholder="${runtimePlaceholders.shootAngleDeg}" /></label>
           <label class="small">Projectile Speed <input id="partProjectileSpeed" type="number" step="1" value="${partRuntimeProps.projectileSpeed ?? ""}" placeholder="${runtimePlaceholders.projectileSpeed}" /></label>
           <label class="small">Projectile Gravity <input id="partProjectileGravity" type="number" step="1" value="${partRuntimeProps.projectileGravity ?? ""}" placeholder="${runtimePlaceholders.projectileGravity}" /></label>
         </div>
@@ -5915,6 +5972,19 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       }
       renderPanels();
     });
+    getOptionalElement<HTMLInputElement>("#partHasAngleLimit")?.addEventListener("change", (event) => {
+      const checked = (event.currentTarget as HTMLInputElement).checked;
+      const nextProps = {
+        ...(partDesignerDraft.partProperties ?? {}),
+        hasAngleLimit: checked,
+      };
+      if (!checked) {
+        nextProps.cwAngle = undefined;
+        nextProps.ccwAngle = undefined;
+      }
+      partDesignerDraft.partProperties = nextProps;
+      renderPanels();
+    });
     getOptionalElement<HTMLInputElement>("#partExplodeOnHit")?.addEventListener("change", (event) => {
       const checked = (event.currentTarget as HTMLInputElement).checked;
       partDesignerDraft.partProperties = {
@@ -6263,7 +6333,6 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     bindRuntimeInput("#partPenetration", "penetration", "penetration");
     bindRuntimeInput("#partRange", "range", "range");
     bindRuntimeInput("#partCooldown", "cooldown", "cooldown");
-    bindRuntimeInput("#partShootAngle", "shootAngleDeg", "shootAngleDeg");
     bindRuntimeInput("#partProjectileSpeed", "projectileSpeed", "projectileSpeed");
     bindRuntimeInput("#partProjectileGravity", "projectileGravity", "projectileGravity");
     bindRuntimeInput("#partSpread", "spreadDeg", "spreadAngleDeg");
@@ -6277,6 +6346,22 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     bindRuntimeInput("#partLoaderStoreCapacity", "loaderStoreCapacity", "maxCapacity");
     bindRuntimeInput("#partLoaderMinBurstInterval", "loaderMinBurstInterval", "minBurstInterval");
     bindRuntimeInput("#partGasCost", "gasCost", "gasCost");
+    getOptionalElement<HTMLInputElement>("#partCwAngle")?.addEventListener("input", (event) => {
+      const raw = (event.currentTarget as HTMLInputElement).value.trim();
+      const numeric = raw.length > 0 ? Number(raw) : Number.NaN;
+      partDesignerDraft.partProperties = {
+        ...(partDesignerDraft.partProperties ?? {}),
+        cwAngle: Number.isFinite(numeric) ? Math.max(0, numeric) : undefined,
+      };
+    });
+    getOptionalElement<HTMLInputElement>("#partCcwAngle")?.addEventListener("input", (event) => {
+      const raw = (event.currentTarget as HTMLInputElement).value.trim();
+      const numeric = raw.length > 0 ? Number(raw) : Number.NaN;
+      partDesignerDraft.partProperties = {
+        ...(partDesignerDraft.partProperties ?? {}),
+        ccwAngle: Number.isFinite(numeric) ? Math.max(0, numeric) : undefined,
+      };
+    });
 
     getOptionalElement<HTMLButtonElement>("#btnNewPartDraft")?.addEventListener("click", () => {
       const newName = "Custom Part";
@@ -6643,12 +6728,20 @@ export function bootstrap(options: BootstrapOptions = {}): void {
 
     if (isEditorScreen()) {
       if (event.key === "q" || event.key === "Q") {
+        if (isTemplateEditorScreen() && !isCurrentEditorSelectionDirectional()) {
+          event.preventDefault();
+          return;
+        }
         event.preventDefault();
         editorWeaponRotateQuarter = ((editorWeaponRotateQuarter + 3) % 4) as 0 | 1 | 2 | 3;
         renderPanels();
         return;
       }
       if (event.key === "e" || event.key === "E") {
+        if (isTemplateEditorScreen() && !isCurrentEditorSelectionDirectional()) {
+          event.preventDefault();
+          return;
+        }
         event.preventDefault();
         editorWeaponRotateQuarter = ((editorWeaponRotateQuarter + 1) % 4) as 0 | 1 | 2 | 3;
         renderPanels();

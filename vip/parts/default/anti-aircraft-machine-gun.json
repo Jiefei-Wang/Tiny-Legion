@@ -5,8 +5,8 @@
   "partType": "weapon",
   "partCategory": "bullet",
   "baseComponent": "rapidGun",
-  "directional": true,
-  "direction": "right",
+  "directional": false,
+  "direction": "up",
   "anchor": {
     "x": 0,
     "y": 0
@@ -50,13 +50,20 @@
     "damage": 8,
     "range": 500,
     "cooldown": 0.1,
-    "shootAngleDeg": 360,
+    "shootAngleDeg": 30,
     "projectileSpeed": 500,
     "penetration": 500,
     "spreadDeg": 0
   },
   "partProperties": {
-    "computingConsumption": 1
+    "computingConsumption": 1,
+    "directional": false,
+    "defaultDirection": "up",
+    "hasAngleLimit": true,
+    "cwAngle": 15,
+    "ccwAngle": 15,
+    "explodeOnHit": false,
+    "shootAngleDeg": 30
   },
   "properties": {
     "category": "weapon",

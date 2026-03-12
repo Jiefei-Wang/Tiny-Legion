@@ -459,12 +459,14 @@ Editor UX implementation details:
 - Heavy-shot weapons use grouped multi-cell occupancy in editor and rotate footprint with `rotateQuarter`.
 - Functional component rotation/rendering now keys off a `directional` property (default undirectional).
 - Directional facing uses additive composition: part-level default `direction` + runtime/template `rotateQuarter` (used by editor arrows and propeller directional thrust/lift).
+- Directional angle limits for weapon/engine now use part properties `hasAngleLimit` + `cwAngle`/`ccwAngle` (relative to part direction); legacy `shootAngleDeg`/`thrustAngleDeg` remain as backward-compatible fallback only.
 - Editor grid is user-resizable (up to 10x10) and supports mouse drag panning.
 - Template editor supports optional center-based placement (`center place on click`) for multi-cell part footprints.
 - Runtime unit instancing and battle rendering consume template coordinates, so visual shape and hit cell layout match editor placement.
 - Battle shot origin is computed from per-part shooting-point box offsets when defined; otherwise it falls back to attachment anchor/cell coordinates.
 - Template parsing normalizes legacy weapon IDs (`mg`, `cannonL`, `cannonM`, `rocket`) to current IDs so old object designs remain valid.
 - Weapon firing clamps out-of-angle aim to the nearest allowed boundary before projectile spawn/cooldown.
+- Engine directional thrust and weapon firing both evaluate limits in part-local facing space (part default direction + template rotation + unit facing).
 - Runtime mobility derives from current engine power and current mass (power-to-mass), recalculated during battle updates.
 - Runtime mobility also applies per-engine max-speed caps; multiple-engine cap is computed as a power-weighted average, then used as a hard upper bound on computed speed.
 - Projectile runtime state now carries firing origin metadata (`sourceUnitType`, `fireOriginY`, `initialVy`) so ground-vehicle non-tracking shots fired above horizontal can be terminated when they fall too far below the firing origin, while downward-fired shots remain unaffected.
@@ -522,6 +524,9 @@ Developer Part Designer UX:
   - `attachPoint`,
   - `anchorPoint` (single),
   - `firePoint` (single; weapon-only).
+- Part-level engine/weapon property controls include:
+  - `hasAngleLimit`
+  - `cwAngle` / `ccwAngle` (shown only when `hasAngleLimit = true`)
 - Canonical default part set is stored under `vip/parts/default/*.json`, and default template `partId` values align with those explicit IDs.
 
 In-app debug UI:

@@ -10,7 +10,7 @@ npm --prefix arena install
 npm --prefix arena-ui install
 ```
 
-## 2) Start Game UI (Player Interface)
+## 2) Start Game UI (Developer Interface)
 
 ```bash
 npm --prefix vip run dev

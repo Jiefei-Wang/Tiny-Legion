@@ -159,6 +159,9 @@ export interface PartPropertySet {
   powerAir?: boolean;
   directional?: boolean;
   defaultDirection?: PartDirection;
+  hasAngleLimit?: boolean;
+  cwAngle?: number;
+  ccwAngle?: number;
   thrustAngleDeg?: number;
   bulletType?: "bullet" | "missile" | "laser";
   damage?: number;
