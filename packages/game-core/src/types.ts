@@ -7,15 +7,13 @@ export type ComponentId =
 | "engineS"
 | "engineM"
 | "jetEngine"
-| "propeller"
 | "cannonLoader"
 | "missileLoader"
   | "rapidGun"
   | "heavyCannon"
   | "explosiveShell"
-  | "trackingMissile"
-  | "precisionBeam"
-  | "ammo";
+| "trackingMissile"
+  | "precisionBeam";
 
 export type WeaponClass =
   | "rapid-fire"
@@ -24,8 +22,8 @@ export type WeaponClass =
   | "tracking"
   | "beam-precision";
 
-export type PartType = "structure" | "control" | "engine" | "weapon" | "loader" | "ammo";
-export type PartCategory = "vehicle" | "jet" | "propeller" | "bullet" | "missile" | "beam";
+export type PartType = "structure" | "control" | "engine" | "weapon" | "loader";
+export type PartCategory = "vehicle" | "jet" | "bullet" | "missile" | "beam";
 
 export type UnitType = "ground" | "air";
 export type Side = "player" | "enemy";
@@ -40,16 +38,14 @@ export interface MaterialStats {
 }
 
 export interface ComponentStats {
-  readonly type: "control" | "engine" | "weapon" | "loader" | "ammo";
+  readonly type: "control" | "engine" | "weapon" | "loader";
   readonly mass: number;
   readonly hpMul: number;
   readonly gasCost?: number;
   readonly directional?: boolean;
   readonly propulsion?: {
     readonly platform: "ground" | "air";
-    readonly mode: "omni" | "directional";
-    readonly thrustAngleDeg?: number;
-    readonly preferVertical?: boolean;
+    readonly mode: "omni";
   };
   readonly placement?: {
     readonly footprintOffsets?: ReadonlyArray<{ x: number; y: number }>;
@@ -59,6 +55,7 @@ export interface ComponentStats {
   readonly power?: number;
   readonly maxSpeed?: number;
   readonly weaponClass?: WeaponClass;
+  readonly maxLoadedAmmo?: number;
   readonly recoil?: number;
   readonly hitImpulse?: number;
   readonly damage?: number;
@@ -86,7 +83,6 @@ export interface ComponentStats {
     readonly loadMultiplier: number;
     readonly fastOperation: boolean;
     readonly minLoadTime: number;
-    readonly storeCapacity: number;
     readonly minBurstInterval: number;
   };
 }
@@ -139,7 +135,6 @@ export interface PartStats {
   loaderLoadMultiplier?: number;
   loaderFastOperation?: boolean;
   loaderMinLoadTime?: number;
-  loaderStoreCapacity?: number;
   loaderMinBurstInterval?: number;
 }
 
@@ -151,6 +146,7 @@ export interface PartPropertySet {
   armor?: number;
   recover?: number;
   color?: string;
+  alpha?: number;
   computing?: number;
   computingConsumption?: number;
   power?: number;
@@ -162,11 +158,11 @@ export interface PartPropertySet {
   hasAngleLimit?: boolean;
   cwAngle?: number;
   ccwAngle?: number;
-  thrustAngleDeg?: number;
   bulletType?: "bullet" | "missile" | "laser";
   damage?: number;
   range?: number;
   cooldown?: number;
+  fireSoundVolume?: number;
   recoil?: number;
   hitImpulse?: number;
   penetration?: number;
@@ -183,6 +179,7 @@ export interface PartPropertySet {
   loadMultiplier?: number;
   minLoadTime?: number;
   minBurstInterval?: number;
+  /** Maximum ready rounds stored directly by a weapon. */
   maxCapacity?: number;
   explosionDamage?: number;
   explosionRadius?: number;
@@ -207,6 +204,7 @@ export interface PartDesignerProperties {
   materialArmor?: number;
   materialRecoverPerSecond?: number;
   materialColor?: string;
+  materialAlpha?: number;
   hp?: number;
   isEngine?: boolean;
   isWeapon?: boolean;
@@ -244,6 +242,8 @@ export interface StructureCellTemplate {
   partId: number;
   x?: number;
   y?: number;
+  /** Optional player-selected tint. The structure part color remains the default. */
+  color?: string;
 }
 
 export interface AttachmentTemplate {
@@ -281,6 +281,7 @@ export interface StructureCell {
   armor: number;
   mass: number;
   color: string;
+  alpha: number;
   strain: number;
   breakThreshold: number;
   recoverPerSecond: number;
@@ -296,6 +297,8 @@ export interface Attachment {
   y: number;
   rotateQuarter: number;
   alive: boolean;
+  /** Structure cells that support this functional part. Losing any one destroys the part. */
+  attachedStructureCellIds: number[];
   occupiedOffsets?: Array<{
     x: number;
     y: number;
@@ -335,11 +338,16 @@ export interface UnitInstance {
   weaponManualControl: boolean[];
   weaponAutoFire: boolean[];
   weaponFireTimers: number[];
+  /** Visual-only world-space barrel angle per weapon slot. */
+  weaponAimAngles: number[];
   weaponReadyCharges: number[];
   weaponLoadTimers: number[];
   loaderStates: LoaderState[];
   deploymentGasCost: number;
   returnedToBase: boolean;
+  escapeActive: boolean;
+  /** Seconds before an escaping craft turns to face its base. */
+  escapeFacingDelayS: number;
   targetHistory: Array<{ x: number; y: number }>;
   targetHistorySampleTimerS: number;
   aiTimer: number;
@@ -467,6 +475,16 @@ export interface MapNode {
   garrison: boolean;
   reward: number;
   defense: number;
+  kind?: "battlefield" | "oil" | "resource" | "outpost" | "remote-base" | "enemy-base";
+  x?: number;
+  y?: number;
+  links?: string[];
+  distanceFromHome?: number;
+  gasDeposit?: boolean;
+  resourceYieldPerMinute?: number;
+  gasYieldPerMinute?: number;
+  outpostTemplateIds?: number[];
+  outpostRange?: number;
   testEnemyMinActive?: number;
   testEnemyInfiniteGas?: boolean;
   testBaseHpOverride?: number;
@@ -493,6 +511,14 @@ export interface KeyState {
   w: boolean;
   s: boolean;
   space: boolean;
+  /** Optional normalized controller left-stick movement axes. */
+  moveX?: number;
+  moveY?: number;
+  /** Optional normalized controller right-stick aim direction. */
+  aimX?: number;
+  aimY?: number;
+  /** Optional controller primary-fire state (normally right trigger/bumper). */
+  manualFire?: boolean;
 }
 
 /** A fire request within a UnitCommand. */

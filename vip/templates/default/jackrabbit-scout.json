@@ -1,17 +1,27 @@
 {
-  "id": 2,
-  "name": "Line Tank",
+  "id": 1,
+  "name": "Jackrabbit Scout",
   "type": "ground",
   "structure": [
     {
-      "partId": 11,
+      "partId": 10,
       "x": -2,
       "y": 0
+    },
+    {
+      "partId": 10,
+      "x": -1,
+      "y": -1
     },
     {
       "partId": 11,
       "x": -1,
       "y": 0
+    },
+    {
+      "partId": 10,
+      "x": 0,
+      "y": -1
     },
     {
       "partId": 11,
@@ -19,30 +29,17 @@
       "y": 0
     },
     {
-      "partId": 11,
+      "partId": 10,
       "x": 1,
-      "y": 0
-    },
-    {
-      "partId": 11,
-      "x": 2,
       "y": 0
     }
   ],
   "attachments": [
     {
-      "component": "cannonLoader",
-      "partId": 2,
+      "component": "engineS",
+      "partId": 6,
       "cell": 0,
       "x": -2,
-      "y": 0,
-      "rotateQuarter": 0
-    },
-    {
-      "component": "engineM",
-      "partId": 5,
-      "cell": 1,
-      "x": -1,
       "y": 0,
       "rotateQuarter": 0
     },
@@ -50,14 +47,14 @@
       "component": "control",
       "partId": 3,
       "cell": 2,
-      "x": 0,
+      "x": -1,
       "y": 0,
       "rotateQuarter": 0
     },
     {
-      "component": "heavyCannon",
-      "partId": 8,
-      "cell": 3,
+      "component": "rapidGun",
+      "partId": 21,
+      "cell": 5,
       "x": 1,
       "y": 0,
       "rotateQuarter": 0
@@ -65,33 +62,39 @@
   ],
   "display": [
     {
-      "kind": "panel",
+      "kind": "stripe",
       "cell": 0,
       "x": -2,
       "y": 0
     },
     {
-      "kind": "panel",
+      "kind": "glass",
       "cell": 1,
+      "x": -1,
+      "y": -1
+    },
+    {
+      "kind": "panel",
+      "cell": 2,
       "x": -1,
       "y": 0
     },
     {
       "kind": "glass",
-      "cell": 2,
+      "cell": 3,
+      "x": 0,
+      "y": -1
+    },
+    {
+      "kind": "panel",
+      "cell": 4,
       "x": 0,
       "y": 0
     },
     {
-      "kind": "panel",
-      "cell": 3,
-      "x": 1,
-      "y": 0
-    },
-    {
       "kind": "stripe",
-      "cell": 4,
-      "x": 2,
+      "cell": 5,
+      "x": 1,
       "y": 0
     }
   ]

@@ -17,13 +17,13 @@ Build a 2D strategic-combat game where the player designs modular army units, ex
 
 ## 2. Core Gameplay Loop
 
-1. Build and expand base (top-down management).
+1. Configure the main base's four building spots (two small, two medium).
 2. Design/upgrade unit templates in workshop.
 3. Select a map node to attack, defend, or occupy.
 4. Enter battle and deploy army using global gas resource.
 5. Win by occupation or enemy defeat.
-6. Click **Next Round** to advance campaign time (gas income/upkeep, construction progress, battle resolution).
-7. Station garrison to hold captured territory (gas upkeep per round).
+6. Campaign time advances continuously: income, construction, research, deliveries, and battles all progress in real time.
+7. Capture resource/oil fields, outposts, and remote bases to improve income and logistics.
 8. Repeat until enemy core base is destroyed.
 
 Lose condition chain:
@@ -46,27 +46,45 @@ Lose condition chain:
   - Contested
 - Includes a dedicated `Test Arena` top-level tab (parallel to `Battle`) for debug scenarios.
 - Test Arena overrides both battle bases to extremely high HP so base destruction does not end the test run.
-- Test Arena controls allow setting enemy count, player count, battlefield simulation size (`W`/`H`), ground-zone height, display zoom percentage, selecting enemy and player auto-spawn templates from separate multi-select dropdowns, toggling `auto spawn on enemy side` and `auto spawn on player side` (both default ON), clearing all currently active arena units, and toggling controlled-unit invincibility (no HP loss, still collides and can be hit).
-- Test Arena Unit controls are arranged as a `Player`/`Enemy` two-column grid with three rows: count, spawn template, auto-spawn toggle.
+- Test Arena controls allow setting both bases' HP, enemy count, player count, battlefield simulation size (`W`/`H`), ground-zone height, display zoom percentage, selecting enemy and player auto-spawn templates from one shared two-column craft expansion, toggling `auto spawn on enemy side` and `auto spawn on player side` (both default ON), clearing all currently active arena units, and toggling controlled-unit invincibility (no HP loss, still collides and can be hit).
+- Test Arena defaults to four auto-spawned units per side with every available craft type selected for both sides. Its counts, craft selections, toggles, battlefield configuration, AI selections, and manual-spawn choices auto-save locally and restore when the game is opened again.
+- Test Arena Unit controls keep Player/Enemy count and auto-spawn controls side by side; opening the single `Craft types` expansion reveals both sides' checkboxes together for every craft.
 - Test Arena auto-spawn behavior: when enabled per side, the game auto-spawns the selected side template whenever alive units drop below the configured count target.
 - Test Arena starts with no extra starter units; units only appear through enabled auto-spawn behavior (or explicit deploy actions).
 - Battle Ops pane includes a spawn-side switch (`Player Spawn` / `Enemy Spawn`, default `Player Spawn`); enemy-side deploy from this pane is allowed only during active Test Arena.
-- Test Arena options panel is organized as collapsible tabs to save space: battle start/stop actions are always in the first row, `Unit` is expanded by default, `AI Selection` is collapsed by default, and `UI Configuration` is grouped in its own tab.
+- Test Arena options panel is organized as collapsible tabs to save space: battle start/stop actions are always in the first row, `Unit` is expanded by default, and `Manual Spawn`, `AI Selection`, and `UI Configuration` are collapsed by default. `Manual Spawn` deploys exactly one chosen craft immediately for either Player or Enemy during an active Test Arena.
+- Developer-only destinations (`Test Arena`, `Leaderboard`, `Craft Designer`, `Part Designer`, and `Global Settings`) live in the top-bar `Developer Tools` dropdown. The campaign sidebar is reserved for Base/Map/Battle, and its navigation/panel split can be dragged vertically and is persisted locally.
+- Runtime debug controls live in a compact top-bar dropdown that matches the `Developer Tools` trigger and popover presentation.
+- Global Settings includes a unit movement-speed multiplier for every ground and air unit plus a battle sound-volume multiplier for impacts, explosions, deployment, and engines. Movement defaults to `2x`; sound defaults to a louder `3x` and supports `0x` mute through `5x`. Saving applies both immediately and persists them locally for future game sessions.
 - Test Arena AI presets are local JS/TS-only and run without external Python bridge/service dependencies.
+- Browser battles are presented by Phaser while the shared simulation remains renderer-independent for headless training and verification.
 - Test Arena parameter inputs apply on `Enter` or input blur (no separate apply button).
 - Test Arena zoom percentage is live-synced when mouse-wheel zoom changes the battlefield view.
 
 ## 3.2 Base Layer (Top-Down)
 
-- Buildable area can be expanded by construction.
-- Buildings support economy, production, research, and defense.
-- Example building categories:
-  - Command Center (critical)
-  - Gas Refinery/Storage 
-  - Factory (unit production)
-  - Workshop (unit design unlocks)
-  - Research Lab (materials/composite tech)
-  - Defense Turret/Shield
+- The player has exactly one buildable Main Base, presented as a graphical compound around a permanent Command Core.
+- The Main Base has four limited spots: two `small` and two `medium`. A building must match its spot size, and occupied/in-progress spots cannot accept another project.
+- Small buildings are Gas Refinery (requires the main-base gas deposit; continuous income) and Research Lab (enables timed research).
+- Medium buildings are Workshop (craft fabrication/design support) and Delivery Center (adds three simultaneous friendly battle slots; base capacity is two).
+- Buildings consume gas when queued and complete after real-time durations from 35 to 60 seconds. Research also consumes gas and takes 55 to 85 seconds.
+- Construction, research, income, and battles continue while the player views Base, Map, or an off-screen campaign battle.
+- Base Command shows the live compound, building size, construction state, delivery capacity, continuous income, and project timers.
+- Main Base presentation uses a hand-painted top-down compound scene with a fortified Command Core, roads, perimeter terrain, visibly different small/medium pads, and facility portraits anchored directly to their pads. Facility interaction overlays remain compact so the scene reads as a place before its labels are read.
+- The compound is the first and dominant Base view: reserves, facility count, delivery capacity, project count, and status are compact overlays on the scene instead of content that pushes it below the fold.
+- Empty pads are selected directly in the compound. The selected pad drives a shared bottom construction palette, inspired by classic RTS command panels, that shows only buildings compatible with that pad size.
+
+## 3.3 Strategic Map Interface
+
+- The Map is a branching routed graph with battlefields, resource fields, oil fields, outposts, remote bases, and the enemy core.
+- Resource/oil fields add continuous per-minute income when controlled.
+- Controlled outposts provide their listed craft for free inside their support range.
+- Captured remote bases have no building spots. They become forward logistics origins, reducing distance, travel time, and distance cost to nearby battlefields.
+- The player may have only one active campaign battle. That battle continues in real time while the player views Base or Map.
+- The battle panel starts with three craft selected for off-screen AI logistics. The player can change this roster; when gas and delivery capacity permit, AI dispatches from it while the player is outside the battlefield.
+- Manual and AI dispatches enter an en-route queue. ETA is based on craft movement speed and distance from the nearest Main/remote base; distance also adds a bounded gas multiplier.
+- Strategic Map presentation uses a hand-painted terrain theater with compact ownership/resource markers, landmark-aligned positions, animated route signals, and safe edge padding instead of persistent rectangular node cards.
+- The map layout adapts from a wide routed network to a vertically readable compact arrangement.
 
 ---
 
@@ -92,8 +110,7 @@ Current implementation includes dedicated in-app editor tabs where the player ca
 - Functional placement now uses part footprints from part catalog definitions (instead of hardcoded component-only footprints), and footprint rotation follows `rotateQuarter`.
 - Functional parts may declare `directional: true`; only directional parts show direction UI and use rotation controls. Parts without it are undirectional by default.
 - For weapon parts with `directional: false`, template placement rotation is disabled and runtime firing facing stays fixed to the part `default direction`.
-- Effective facing for directional functional parts is computed as `part.direction` (default facing) + template `rotateQuarter` (user rotation). Template-editor direction arrows and propeller thrust/lift both use this combined facing.
-- For propellers, combined facing represents airflow/push direction; actual thrust (including lift contribution) is applied in the opposite direction.
+- Effective facing for directional weapon parts is computed as `part.direction` (default facing) + template `rotateQuarter` (user rotation).
 - Functional placement supports `center place on click` mode in template editor (developer/user toggle).
 - Editor canvas uses a resizable grid up to `10x10` with right-drag panning.
 - Editor viewport input supports right-click delete/erase on the targeted cell; right-click drag still pans (click vs drag), and mouse-wheel zoom is supported in editor views.
@@ -102,11 +119,12 @@ Current implementation includes dedicated in-app editor tabs where the player ca
 - In Template Editor, right-click delete is staged per cell: delete functional first; if no functional remains, delete structure (and attached display) on the next click.
 - Battle and editor views each render to their own canvas while sharing the same viewport window.
 - Editor canvas overlays show the current working template/part name at top-left.
-- Template Editor bottom-left combat preview shows `Achievable speed` and (for air templates) `Lift` vs hold-gravity threshold.
+- Template Editor bottom-left combat preview shows post-gravity `Achievable speed` and (for air templates) air thrust vs gravity.
 - First opening an editor view without a valid existing selection starts from an empty editor grid.
 - Editor views keep independent pan/view memory; switching tabs restores each view's last camera state.
 - Editor view defaults to centered origin (`0,0`) on first load and recenters only when loading a different template/part.
 - Battle rendering and hitboxes now honor stored structure/display/functional coordinates instead of compacting to a fixed index grid.
+- Destroying a structure cell never recenters surviving rows or attached visuals: every layer remains anchored to the craft's original coordinate grid, and the craft's battlefield position is unchanged.
 - Template gas cost defaults to the sum of part gas values (structure material parts + functional parts).
 - Save templates from editor with a single `Save` action (default storage) and deploy them in battle.
 - Saving to default storage (`Save`) removes any user-storage templates with the same template name (case-insensitive), then writes the default template.
@@ -139,16 +157,12 @@ Canonical part type list:
 - `engine`
   - Mobility and thrust provider.
   - Supports ground propulsion and/or air propulsion.
-  - Can be directional for air thrust-cone behavior.
 - `weapon`
   - Damage/control output module.
   - Handles projectile/beam behavior, firing constraints, and loader dependency.
 - `loader`
   - Reload service module.
   - Loads one weapon per cycle using weapon cooldown * load multiplier with minimum load time enforcement.
-- `ammo`
-  - Shared extra ammunition pool.
-  - Can be loaded by free loaders when no weapon is pending load, and can detonate when damaged/destroyed.
 
 #### 4.0.2 Property Meaning
 
@@ -156,24 +170,22 @@ Part-level properties:
 
 - `gas cost`: deployment/resource cost contribution of this part.
 - `mass`: mass contribution to unit total mass.
-- `tag`: semantic label(s) used by loaders/ammo/category filtering.
+- `tag`: semantic label(s) used by loaders and category filtering.
 - `HP`: part health baseline where applicable.
 - `armor`: flat mitigation value (structure-focused).
 - `recover`: structure self-recovery per second.
 - `color`: structure render/debug color.
+- `transparency`: per-block render alpha from `0` (invisible) to `1` (opaque); it does not change collision or damage behavior.
 - `computing`: control processing capability budget.
 - `power`: engine thrust power source.
 - `max speed`: engine speed cap contribution.
 - `power ground`: engine can provide ground propulsion.
 - `power air`: engine can provide air propulsion/lift.
-- `directional`:
-  - engine: directional air thrust mode.
-  - weapon: directional firing mode.
+- `directional`: weapon directional firing mode.
 - `default direction`: default facing (`up|down|left|right`) before template rotation.
-- `has angle limit`: enables directional angle limits on engine/weapon.
+- `has angle limit`: enables directional angle limits on weapons.
 - `cw angle`: clockwise limit angle relative to part direction.
 - `ccw angle`: anti-clockwise limit angle relative to part direction.
-- `thrust angle`: legacy one-sided directional air-thrust cone half-angle (auto-migrated to `cw/ccw` when `has angle limit` is not explicitly set).
 - `bullet type`: weapon projectile family (`bullet|missile|laser`).
 - `damage`: base hit damage.
 - `range`: maximum effective range.
@@ -190,20 +202,18 @@ Part-level properties:
 - `tracking turn rate`: homing turn acceleration/rate.
 - `shoot angle`: legacy one-sided directional shoot cone half-angle (`180` means omni); replaced by `has angle limit + cw/ccw`.
 - `need loader`: weapon requires loader participation to reload/fire cycle.
-- `supported weapon tags`: weapon tags that a loader/ammo can service.
+- `supported weapon tags`: weapon tags that a loader can service.
 - `load multiplier`: loader time multiplier on weapon cooldown.
 - `min load time`: minimum enforced loader cycle time.
 - `min burst interval`: minimum interval for burst/charge transfer cadence.
-- `max capacity`: ammo storage capacity.
-- `explosion damage`: ammo explosion damage.
-- `explosion radius`: ammo explosion radius.
+- `max capacity`: maximum number of loaded rounds stored directly by a weapon.
 
 Cell-level properties:
 
 - `structure occupy`: occupies structure layer space.
 - `functional occupy`: occupies functional layer space.
 - `need structure behind`: requires structure support for functional-only cells.
-- `take damage`: for non-structure parts, if there is no structure behind the functional part, incoming damage is shared through attached structure points.
+- `take damage`: marks exposed functional geometry as hittable. A hit there is relayed in full, without armor deduction, to the attached structure cell closest to the hit point.
 - `attach point`: attachment support marker on functional parts; if multiple attach points exist, all must attach to structure.
 - `anchor point`: unique part center reference (mouse placement center).
 - `fire point`: unique muzzle/spawn point for weapon projectiles.
@@ -220,19 +230,15 @@ Cell-level properties:
 
 `engine` should expose:
 
-- `gas cost`, `mass`, `tag`, `power`, `max speed`, `power ground`, `power air`, `directional` (air only), `default direction`, `has angle limit`, `cw angle`, `ccw angle` (engine + weapon only).
+- `gas cost`, `mass`, `tag`, `power`, `max speed`, `power ground`, `power air`.
 
 `weapon` should expose:
 
-- `gas cost`, `mass`, `tag`, `bullet type`, `damage`, `range`, `cooldown`, `recoil`, `hit impulse`, `penetration`, `spread angle`, `explode on hit`, `explode radius` (when `explode on hit = true`), `projectile speed` (non-laser), `projectile gravity` (non-laser), `tracking` (non-laser), `tracking turn rate` (tracking only), `directional`, `has angle limit`, `cw angle`, `ccw angle`, `need loader`, `default direction`, `computing consumption`.
+- `gas cost`, `mass`, `tag`, `bullet type`, `damage`, `range`, `cooldown`, `max capacity`, `fire sound volume`, `recoil`, `hit impulse`, `penetration`, `spread angle`, `explode on hit`, `explode radius` (when `explode on hit = true`), `projectile speed` (non-laser), `projectile gravity` (non-laser), `tracking` (non-laser), `tracking turn rate` (tracking only), `directional`, `has angle limit`, `cw angle`, `ccw angle`, `need loader`, `default direction`, `computing consumption`.
 
 `loader` should expose:
 
 - `gas cost`, `mass`, `tag`, `supported weapon tags`, `load multiplier`, `min load time`, `min burst interval`.
-
-`ammo` should expose:
-
-- `gas cost`, `supported weapon tags`, `max capacity`, `explosion damage`, `explosion radius`.
 
 #### 4.0.4 Default Values (By Type)
 
@@ -262,11 +268,7 @@ Cell-level properties:
 - `max speed`: `100`
 - `power ground`: `true`
 - `power air`: `false`
-- `directional` (air only): `true`
-- `default direction`: `down`
-- `has angle limit`: `true` (directional engines)
-- `cw angle`: `30`
-- `ccw angle`: `30`
+- Air engines are isotropic and have no direction or angle-limit properties.
 
 `weapon` defaults:
 
@@ -284,6 +286,7 @@ Cell-level properties:
 - `explode on hit`: `false`
 - `explode radius` (when `explode on hit = true`): `50`
 - `projectile speed` (non-laser): `400`
+- `fire sound volume`: `1x` (`0x..2x`; affects only the firing part's muzzle sound and `0x` mutes it)
 - `projectile gravity` (non-laser): `100`
 - `tracking` (non-laser): `false`
 - `tracking turn rate` (tracking only): `50`
@@ -304,14 +307,6 @@ Cell-level properties:
 - `load multiplier`: `1.0`
 - `min load time`: `0.5`
 - `min burst interval`: `0.2`
-
-`ammo` defaults:
-
-- `gas cost`: `10`
-- `supported weapon tags`: `cannon`
-- `max capacity`: `1`
-- `explosion damage`: `100`
-- `explosion radius`: `100`
 
 #### 4.0.5 Unified Part Editor Behavior (Authoritative)
 
@@ -340,16 +335,14 @@ Part-level property visibility (left pane):
   - part-type default/common fields (`gas cost`, and other per-type defaults)
 - `structure` selected:
   - Show structure-only fields: `mass`, `HP`, `armor`, `recover`, `color`.
-  - Hide engine/weapon/loader/ammo-only fields.
+  - Hide engine/weapon/loader-only fields.
 - `control` selected:
   - Show: `mass`, `computing`.
 - `engine` selected:
   - Show: `mass`, `power`, `max speed`, `power ground`, `power air`.
-  - Show `directional`, `default direction`, and `has angle limit` for engine parts.
-  - If `has angle limit = true`, show `cw angle` and `ccw angle`.
 - `weapon` selected:
   - Weapon category options are `bullet`, `missile`, and `beam` (no separate `explosive` category).
-  - Show: `mass`, `bullet type`, `damage`, `range`, `cooldown`, `recoil`, `hit impulse`, `penetration`, `spread angle`, `explode on hit`, `need loader`, `directional`, `computing consumption`.
+  - Show: `mass`, `bullet type`, `damage`, `range`, `cooldown`, `max loaded ammo`, `recoil`, `hit impulse`, `penetration`, `spread angle`, `explode on hit`, `need loader`, `directional`, `computing consumption`.
   - Show `projectile speed` and `projectile gravity` only for non-laser bullets.
   - Show explosive tuning (`blast radius`, `blast damage`, `falloff`) only when `explode on hit = true`.
   - Show `tracking` only for non-laser bullets; show `tracking turn rate` only when `tracking = true`.
@@ -357,8 +350,6 @@ Part-level property visibility (left pane):
   - If `has angle limit = true`, show `cw angle` and `ccw angle`.
 - `loader` selected:
   - Show: `mass`, `supported weapon tags`, `load multiplier`, `min load time`, `min burst interval`.
-- `ammo` selected:
-  - Show: `supported weapon tags`, `max capacity`, `explosion damage`, `explosion radius`.
 
 Cell-level property visibility (right pane):
 
@@ -424,13 +415,16 @@ Progression requirement:
 
 ## 4.2 Functional Layer (Inner)
 
-Functional modules are placed inside structure cells. If surrounding structure is breached, modules can be disabled/destroyed.
+Functional modules have no HP or armor. Their survival is inherited entirely from their supporting structure.
 
 Attachment rules:
 
 - Every functional component must be attached to at least one structure cell.
-- Functional components contribute to **mass** and performance only; they do **not** add armor.
-- A detached or destroyed structure cell takes all attached functional components with it.
+- Functional components contribute to **mass** and performance only; they have neither HP nor armor.
+- Structure overlapped by a functional part receives direct hits normally, including its armor deduction.
+- Hits on exposed functional geometry relay all damage to the attached structure cell closest to the hit point and ignore that cell's armor.
+- A functional component can attach to multiple structure cells; destruction of any attached cell destroys the whole functional component.
+- Destroying every controller makes the craft an inoperable wreck: it remains visible at a fixed battlefield position but cannot move or fire.
 - A unit can have one or more Control Units.
 
 ### Functional Module Catalog
@@ -439,7 +433,6 @@ Attachment rules:
   - Track Drive
   - Hover Thruster
   - Jet Engine (air units, omni thrust)
-  - Propeller (air units, directional thrust)
 - Power
   - Engine Core (power output)
   - Battery Pack
@@ -455,7 +448,6 @@ Attachment rules:
   - Radar/Sensor
   - ECM/Jammer
 - Logistics
-  - Ammo Rack
   - Drone Bay
 
 Design constraints:
@@ -463,9 +455,7 @@ Design constraints:
 - Mass and power budget must be valid.
 - Air unit validity rule: at least one engine with `power air = true` is required. Engines with only `power ground = true` do not provide lift/thrust to aircraft.
 - Weapon recoil/stability depends on structure and module placement.
-- Exposed ammo modules create high-risk weak points.
 - The unit blueprint is invalid without at least one Control Unit.
-- Propeller placement rule: multi-cell footprint, clearance area must stay empty, and anchor requires structure support from below.
 
 ## 4.3 Display Layer (Visual-Only)
 
@@ -477,7 +467,10 @@ Display layer provides optional visual mesh/sprite styling and silhouette polish
   - no mass contribution
   - no functional contribution
 - Physics, collision, damage, and module breakage are evaluated only on Structure + Functional layers.
-- Battle display-layer visibility is controlled from top-bar `Debug Options` (`Show Display Layer`), and defaults to `OFF`.
+- Each structure cell is the visible craft body: it uses a shared armor-panel texture with the structure part's color as its default tint. The Craft Designer can save a different tint per cell, including a color-only paint mode that preserves the cell's material, armor, mass, HP, and texture.
+- Battle rendering does not add a separate full-tank or full-aircraft silhouette behind the structure grid; the designed blocks define the craft's visible shape.
+- Craft paint (`panel`, `stripe`, and `glass`) is a visual-only display layer attached to structure and is always rendered in battle; it does not contribute armor, mass, HP, or simulation collisions.
+- Functional parts use their own recognizable icon in the craft palette/editor grid and a component-specific vector glyph on the Phaser battlefield.
 - Editor placement rule: display elements are attached to structure cells only, so display visuals stay on/inside structure bounds.
 
 ### 4.4 Template Storage
@@ -530,7 +523,12 @@ Recommended starter values:
 - Player may directly control any friendly unit at any time.
 - Non-controlled units are AI-driven.
 - Player can switch controlled unit instantly (short cooldown recommended).
-- Strategic layer is round-based: campaign battles resolve at end of round when **Next Round** is pressed (Test Arena ignores round resolution).
+- A unit has an available weapon when at least one surviving weapon can fire a loaded round or has a surviving compatible loader that can reload it.
+- If every weapon is destroyed, or all loader paths are destroyed and all loaded rounds are exhausted, the unit enters irreversible escape mode, returns to its base, and cannot be selected for player control. Escape movement preserves the craft's current facing for one second, then turns it toward its base and continues retreating.
+- Campaign battles and the strategic layer are continuous real time; there is no **Next Round** action or artificial round deadline.
+- Battlefield presentation uses two deliberately simple illustrated layers: an air image above the runtime ground boundary and a ground-surface image below it. Hand-painted command-bunker sprites, plated modular craft without per-unit ground shades, and glowing projectile trails sit above those layers. Friendly and enemy bunkers share a transparent source sprite with side tinting, edge anchoring, and in-world health treatment.
+- Tactical overlays are enabled by default outside replay mode: live structure-cell hitboxes, faint faction-colored effective weapon ranges for every craft (with stronger controlled/selected emphasis), movement vectors, and AI aimed-target lines with target reticles. They can still be disabled from Runtime Debug.
+- Every live weapon renders its own barrel from the attachment anchor to the simulation muzzle. Barrel direction follows the per-slot clamped world-space aim angle for both AI and manual control, including mirrored left-facing craft; projectiles spawn exactly at that visible barrel tip, while weapon spread affects their outgoing velocity rather than shifting the spawn point.
 
 ## 6.2 Ground Battle Space
 
@@ -539,7 +537,8 @@ Recommended starter values:
   - Right: enemy side/base/buildings
 - Battle simulation defaults to a logical battlefield size of `2000x1000` (shared by browser runtime and headless/arena runs).
 - Test Arena can override battlefield simulation size at runtime; this changes combat space dimensions, not just display scale.
-- Test Arena zoom only changes display scale (camera/view transform), not simulation dimensions.
+- Battle camera zoom defaults to a vertical fit that keeps the playable span from the air-lane top through the ground-lane bottom visible; Test Arena recalculates that fit from its runtime battlefield height.
+- Test Arena zoom only changes display scale (camera/view transform), not simulation dimensions, and can still be adjusted manually after the default vertical fit.
 - Ground units move freely on X and Y axes inside the ground combat zone.
 - Ground maneuver is continuous positioning (flank, intercept, disengage), not discrete lane switching.
 - Unit-vs-unit body overlap is soft-limited: partial overlap is allowed for flow, but deep/full stacking is resolved by runtime separation.
@@ -551,10 +550,10 @@ Recommended starter values:
 - On 2D screen, altitude Z is rendered on vertical axis; combat logic treats air layer separately from ground Y matching.
 - Air thrust model:
   - Aircraft use only engines with `power air = true` for movement and anti-gravity.
-  - If upward thrust is below gravity, aircraft lose altitude with fall acceleration based on thrust deficit.
-  - Unless the player requests descent, flight control prioritizes maintaining altitude and uses spare thrust for horizontal movement.
-  - Air movement is thrust-speed driven (direct speed from thrust), not acceleration-ramp driven.
-  - When lift becomes critically low, aircraft enter a crash state: they push horizontally toward their base, then use any remaining directional thrust to slow descent; otherwise they fall at full crash gravity and are destroyed on ground impact unless they reach base in time.
+  - Pre-gravity thrust speed is total air-engine power divided by current mass and scaled by the shared air-thrust factor.
+  - Effective movement speed is `max(0, preGravityThrustSpeed - gravity)`, capped by the aggregate engine speed cap.
+  - Horizontal, vertical, and diagonal commands all use the same speed magnitude; only the normalized direction vector changes.
+  - If pre-gravity thrust cannot overcome gravity, the aircraft enters a crash state and falls toward the ground.
 - Altitude affects:
   - weapon effectiveness
   - bomb accuracy
@@ -565,6 +564,9 @@ Recommended starter values:
 
 - Mouse controls player aim target in battle.
 - Hold left mouse is the primary fire action; controlled unit keeps firing all manual-controlled weapon slots toward current mouse aim target.
+- When a standard controller is connected during a battlefield, the left stick moves the controlled unit and the right stick sets its firing angle. The right trigger or right bumper fires all manual-controlled weapon slots.
+- Controller axes use a deadzone and retain the last meaningful right-stick aim while the stick returns to center, allowing the trigger to fire without requiring constant stick deflection.
+- Target-dependent manual weapons such as tracking missiles automatically lock the valid enemy closest to the forward aim ray; ordinary projectile weapons continue to use the exact player aim angle without target assistance.
 - Battle viewport keeps the battlefield's original aspect ratio and hides native scrollbars.
 - Battle viewport panning controls: keyboard arrow keys and right-click drag.
 - Battle viewport supports mouse-wheel zoom (wheel up to zoom in, wheel down to zoom out).
@@ -586,8 +588,12 @@ Recommended starter values:
 - Ground cannon rounds can pass through multiple air targets along X path (piercing air layer).
 - Enemy units should engage from weapon distance and should not win by direct body contact with player base.
 - Ground combat zone is rendered with a visible grid, and aircraft minimum altitude must remain above this grid zone.
-- During battle, developer debug tools can switch **Display Layer ON/OFF** from top-bar `Debug Options`.
+- During battle, functional parts use recognizable component-specific glyphs while visual paint remains visibly attached to structure.
 - Developer debug tools can enable **Show Part HP Overlay** to visualize per-structure-cell remaining HP with red damage tint and numeric HP text.
+- Phaser debug presentation shows live unit/projectile/evading counts, collision radii, velocity vectors, projectile trails, and target lines.
+- The dev probe `battle.debug` path exposes compact per-craft position, velocity, structure/functional health counts, AI target and state, dodge state, prediction lead time, aim angle/range, decision path, and fire-block reason.
+- Projectile avoidance predicts closest approach, includes craft/projectile radii and projectile gravity, ranks danger using collision clearance plus time-to-impact, and chooses a perpendicular escape vector. Stable per-unit jink phases keep runs reproducible without making stacked crafts move identically.
+- Weapon fire, projectile impact, explosion, deployment, and moving-engine sounds are positional relative to the user's current panned/zoomed battlefield view. Fire sound uses alternating recorded variants with class-specific pitch/timbre for rapid-fire, heavy-shot, explosive, tracking, and precision-beam weapons. Heavy cannon combines a cannon recording with a low recoil tail; tracking rockets use a broadband rocket-launch source without an extra synthetic tone. Rapid-fire muzzle sound uses the short broadband bullet-on-metal transients selected by the developer, while rapid-fire and other light-projectile hits use a separate four-variant hard-surface ricochet pool with descending metallic tails. Light ricochets are mixed below heavy impacts so sustained rapid fire remains readable. Heavy impacts use their own pool, with pitch influenced by struck material and loudness driven by damage actually delivered after armor.
 
 ---
 
@@ -597,19 +603,20 @@ No simple fixed hitpoint exchange for whole units. Damage emerges from impacts, 
 
 - There is **no object-level HP bar** for units.
 - Unit kill state is caused by structural breakup and/or critical functional loss (especially Control Unit failure), not by a single aggregated HP pool.
+- Functional parts have no durability pool. Hits on exposed functional geometry are routed to supporting structure, and the part fails as soon as any supporting structure cell fails.
 - Broken debris must come from actual destroyed structure/functional parts (no fake-only VFX substitution).
 - Ground unit debris stays where it breaks in ground zone; it does not fall to screen bottom.
 - Air unit debris falls down with Y-axis gravity until reaching ground zone.
 
 ## 7.1 Damage Pipeline
 
-1. Collision/projectile contact on structure cell.
+1. Collision/projectile contact resolves against the earliest structure cell or exposed damageable functional box along the projectile sweep.
 2. Compute local impact energy and contact impulse.
 3. Compare vs material resistance.
 4. Apply structural damage, crack, or breach on the impacted local structure cell (when a sweep intersects multiple cells in one tick, use the earliest intersection along projectile travel).
-5. If breach occurs, inner functional modules can be hit.
-6. If structure is detached, all attached modules are removed with it.
-7. Module damage creates performance penalties or critical failure.
+5. A functional box overlapping live structure resolves as a normal direct structure hit.
+6. An exposed functional hit relays full damage to its closest attached structure cell with no armor deduction.
+7. If any attached structure cell is destroyed or detached, the functional module is removed with it.
 8. Connectivity rule: any structure cluster disconnected from all alive control units is destroyed immediately.
 9. Armor is applied as flat damage deduction per impacted cell: `damageAfterArmor = incomingDamage - cellArmor`, `effectiveDamage = damageAfterArmor <= 0 ? 1 : damageAfterArmor`.
 10. Hit impulse still applies physical response (knockback/vibration) even on low/fully mitigated hits.
@@ -618,6 +625,7 @@ No simple fixed hitpoint exchange for whole units. Damage emerges from impacts, 
    - per-hit cost is `(cellArmor * PENETRATION_ARMOR_SCALER) + cellCurrentHPBeforeDamage`,
    - projectile continues only while `remainingPenetration > 0`,
    - penetration does not scale damage amount.
+12. A structure cell's visible world-space panel and projectile hitbox use the same canonical size, so hits anywhere on a live displayed cell register consistently.
 
 Structure durability recovery:
 
@@ -653,7 +661,6 @@ Module outcomes:
 
 - Engine damaged -> reduced speed/power
 - Weapon damaged -> jam/misfire/disabled
-- Ammo rack hit -> explosion chain risk
 
 Control Unit outcome:
 
@@ -734,7 +741,7 @@ Battle rewards:
 Post-battle occupation:
 
 - Player can station army to protect captured area.
-- Stationed force consumes gas upkeep per round.
+- Territory provides its node-specific continuous benefit once captured; garrison upkeep remains a future balancing layer.
 - Enemy can counterattack occupied zones.
 
 Strategic tension:
@@ -748,7 +755,7 @@ Strategic tension:
 
 Primary global resource: **Gas**
 
-- Strategic economy is turn-based: gas income/upkeep is applied only when the player clicks **Next Round**.
+- Strategic income accrues continuously each real-time second and is displayed as a per-minute rate.
 
 Gas used for:
 
@@ -828,23 +835,24 @@ The current playable implementation already includes:
 - Ground XY movement and air XZ movement abstraction.
 - Battle bases auto-place vertically from runtime lane bounds (midpoint of the air/ground boundary band between `airMaxZ` and `groundMinY`), and reflow when battlefield size or ground height changes.
 - On battle start, viewport Y is auto-centered to the player-base vertical midpoint using current base world Y and viewport height (X offset remains unchanged).
-- Structure/functional/display layer split with debug-menu display toggle (default display OFF) and optional per-cell part HP overlay.
+- Structure/functional/display layer split with always-visible visual-only paint and an optional per-cell part HP debug overlay.
 - Multi-weapon units and independent weapon cooldown timers.
 - Weapon slot manual-control toggles (default `ON`) and per-slot auto-fire toggles.
 - Player-controlled manual slots fire together and runtime-suppress auto fire while keeping the auto toggle state intact.
 - Out-of-angle firing is clamped to the nearest allowed weapon-angle boundary, so shots still fire at edge angle.
 - Engine modules now provide explicit power; object mobility scales proportionally with total engine power and inversely with current mass.
 - Each engine type also defines a max-speed cap. With multiple engines, cap is aggregated by power-weighted average, and real speed is power-to-mass based but never exceeds aggregated max speed.
-- Aircraft must satisfy a minimum reachable-speed threshold of `100` (based on computed max speed). If not (including no-engine cases), they lose lift, fall, and crash at a random ground-lane Y.
+- Aircraft must have pre-gravity thrust greater than the gravity budget. Otherwise they lose lift, fall, and crash at a random ground-lane Y.
 - Heavy-shot/explosive/tracking weapons now use loader modules and charge-based firing:
   - Loaders process one supported weapon at a time.
   - Player-controlled selected weapon is prioritized for loading.
   - Loader `loadMultiplier` + `fastOperation` modify load time, bounded by `minLoadTime`.
-  - Loader `storeCapacity` allows charge overfill (burst behavior), with minimum burst interval floor of `0.5s`.
+  - A weapon's `max capacity` sets its ready-round limit; loaders only control compatibility and reload timing, with a minimum burst interval floor of `0.5s`.
   - Fire commands sent to a cooling/reloading weapon slot are ignored (no projectile and no recoil/knockback side effects).
+- Weapon availability includes future reload capability: a surviving loaded round remains usable after loader loss, but escape mode begins immediately after the last loaded round is spent; destroying every weapon starts escape mode immediately.
 - Part-level functional overrides now drive runtime behavior for all current functional families:
-  - weapon parts can override recoil/hit impulse, projectile speed/gravity, explosive blast parameters, tracking turn rate, and control-impair tuning;
-  - loader parts can override supported weapon classes and loader timing/capacity parameters;
+  - weapon parts can override recoil/hit impulse, projectile speed/gravity, explosive blast parameters, tracking turn rate, control-impair tuning, and their own fire-sound volume;
+  - loader parts can override supported weapon classes and loader timing parameters;
   - armor `hp` metadata is translated into effective attachment durability scaling.
 - Projectile gravity, range-limited lifetime, and debris persistence.
 - Ground-vehicle-fired non-tracking projectiles now auto-terminate after falling `200` Y-units below their firing Y origin only when the shot was fired above horizontal (`initialVy < 0`); downward-fired shots are excluded.
@@ -852,6 +860,8 @@ The current playable implementation already includes:
 - AI split into targeting, movement, and shooting modules with a shared composite interface in `packages/game-core/src/ai/composite/`.
 - Baseline combat AI now runs through `createCompositeAiController(...)` (target -> movement -> shoot), and the legacy decision-tree entrypoint is kept as a compatibility wrapper.
 - Baseline shoot AI now receives per-slot runtime fire inputs from battle runtime (`effectiveRange`, resolved projectile speed/gravity, and world-space firepoint), and no longer assumes a global projectile model.
+- Default rapid weapons use quieter per-part muzzle levels (`0.5x` twin cycler, `0.45x` anti-air machine gun); other default weapon parts remain `1x`.
+- Weapon fire is progressively muffled with distance from the camera/listener: nearby fire retains its full high-frequency detail, while far and off-screen fire receives stronger high-frequency rolloff in addition to spatial panning and volume attenuation.
 - Baseline shoot AI range gating is evaluated from each weapon firepoint (not unit center), and ballistic solve now compensates for runtime semi-implicit projectile integration to reduce long-range edge-angle misses under gravity.
 - Player-side auto-fire now uses the same composite fire-decision pipeline as AI-controlled units (manual-controlled slots still suppress auto fire).
 - Baseline shoot prediction keeps movement lead enabled but now applies anti-jitter damping: filtered target velocity (EMA), partial lead-gain scaling (distance + acceleration guard), plus per-weapon angle deadband and slew-rate limiting.
@@ -876,6 +886,8 @@ The current playable implementation already includes:
 - Composite phase scenarios are configurable in `arena/composite-training.phases.json`, including per-phase template-name filters with wildcard support (`*`) and battlefield sizing (`width`, `height`, optional `groundHeight`).
 - Test Arena includes a `2 x 3` AI component grid (player/enemy x target/movement/shoot), and each cell is a single dropdown for quick switching.
 - Test Arena AI Selection now includes per-side composed-model selectors (saved leaderboard runs + built-ins); selecting a composed model applies the full target/movement/shoot bundle for that side.
+- Built-in composed choices expose the preserved baseline plus `low`, `medium`, and `high` skill tiers. Skill tiers improve target coordination, predictive shooting, and danger-aware movement without replacing the baseline option.
+- `npm --prefix arena run eval:tiers -- --seeds <N>` runs deterministic headless matchup series (two games per seed with sides swapped) and fails unless each higher adjacent tier wins at least 80% of those mirrored series.
 - Each dropdown lists built-in module options plus all saved module specs discovered from arena run artifacts (`arena/.arena-data/runs/*/best-composite.json`).
 - Grid changes apply immediately (no manual apply step).
 - Left-side mode menu includes a dedicated `Leaderboard` screen (new row in the mode grid) that shows ranked composite run scores.
@@ -978,20 +990,11 @@ Combined cell rule (starter):
 
 ## 15.3 Functional Component Mass and Vulnerability (Starter)
 
-Functional components add mass and capability, but no armor.
-
-| Component | Mass | HP Multiplier vs Structure Cell | On Destroyed Effect |
-| --- | ---: | ---: | --- |
-| Control Unit | 8 | 0.9 | Unit mission-killed |
-| Engine Core (small) | 10 | 1.0 | -45% thrust/power |
-| Engine Core (medium) | 16 | 1.0 | -60% thrust/power |
-| Ammo Rack | 7 | 0.8 | 30% secondary explosion chance |
-| Fire Control Unit | 6 | 0.9 | +35% weapon spread |
-| Radar/Sensor | 5 | 0.9 | Reduced detection range |
+Functional components add mass and capability, but have no independent HP or armor. Their loss effect is triggered when any structure cell supporting that component is destroyed.
 
 Attachment enforcement:
 
-- If host structure cell detaches, all attached functional components are removed instantly.
+- If any attached structure cell detaches, every functional component linked to it is removed instantly.
 
 ## 15.4 Vibration/Hit-Reaction Performance Presets
 
@@ -1021,12 +1024,12 @@ GPU acceleration guidance:
 | --- | ---: | --- |
 | Base Army Cap | 3 | At commander skill 1 |
 | Cap Growth | +1 every 2 skill levels | Rounded down |
-| Battle Active Cap | `ArmyCap` | Hard limit per battle |
+| Battle Active Cap | 2 + 3 per Delivery Center | Hard friendly logistics limit per battle |
 | Unit Call-In Gas Cost | 18 to 65 | By unit tier/mass |
-| Garrison Upkeep | 4 gas/round/unit | Paid each round while stationed |
-| Base Passive Gas Income | 20 gas/round | Before expansion bonuses |
+| Refinery Income | 6 gas/minute | Requires a Main Base gas deposit |
+| Field Income | 8 to 10/minute | Node-specific resource/oil output while controlled |
 
 Balancing guardrails:
 
-- Average call-in cadence target: one mid unit every 1 to 3 rounds.
+- Average call-in cadence target: one mid unit every 8 to 25 seconds depending on speed and logistics distance.
 - If matches snowball too hard, raise garrison upkeep before increasing call-in cost.

@@ -175,6 +175,18 @@ export function validatePartDefinitionDetailed(part: PartDefinition): PartValida
   if (part.properties?.materialColor !== undefined && !/^#[0-9a-fA-F]{6}$/.test(part.properties.materialColor)) {
     errors.push("part properties.materialColor must be a #RRGGBB value.");
   }
+  if (part.properties?.materialAlpha !== undefined && (!Number.isFinite(part.properties.materialAlpha) || part.properties.materialAlpha < 0 || part.properties.materialAlpha > 1)) {
+    errors.push("part properties.materialAlpha must be between 0 and 1.");
+  }
+  if (part.partProperties?.alpha !== undefined && (!Number.isFinite(part.partProperties.alpha) || part.partProperties.alpha < 0 || part.partProperties.alpha > 1)) {
+    errors.push("part partProperties.alpha must be between 0 and 1.");
+  }
+  if (
+    part.partProperties?.fireSoundVolume !== undefined
+    && (!Number.isFinite(part.partProperties.fireSoundVolume) || part.partProperties.fireSoundVolume < 0 || part.partProperties.fireSoundVolume > 2)
+  ) {
+    errors.push("part partProperties.fireSoundVolume must be between 0 and 2.");
+  }
   if (part.properties?.loaderCooldownMultiplier !== undefined && (!Number.isFinite(part.properties.loaderCooldownMultiplier) || part.properties.loaderCooldownMultiplier <= 0)) {
     errors.push("part properties.loaderCooldownMultiplier must be > 0.");
   }
@@ -190,8 +202,9 @@ export function validatePartDefinitionDetailed(part: PartDefinition): PartValida
   if (part.stats?.loaderMinLoadTime !== undefined && (!Number.isFinite(part.stats.loaderMinLoadTime) || part.stats.loaderMinLoadTime < 0)) {
     errors.push("part stats.loaderMinLoadTime must be >= 0.");
   }
-  if (part.stats?.loaderStoreCapacity !== undefined && (!Number.isFinite(part.stats.loaderStoreCapacity) || part.stats.loaderStoreCapacity < 0)) {
-    errors.push("part stats.loaderStoreCapacity must be >= 0.");
+  if (part.partType === "weapon" && part.partProperties?.maxCapacity !== undefined
+    && (!Number.isInteger(part.partProperties.maxCapacity) || part.partProperties.maxCapacity < 1)) {
+    errors.push("weapon maxCapacity must be an integer >= 1.");
   }
   if (part.stats?.loaderMinBurstInterval !== undefined && (!Number.isFinite(part.stats.loaderMinBurstInterval) || part.stats.loaderMinBurstInterval <= 0)) {
     errors.push("part stats.loaderMinBurstInterval must be > 0.");

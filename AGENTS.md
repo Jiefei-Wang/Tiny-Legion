@@ -35,6 +35,11 @@ If you are a new coding agent/session, read this file first, then read:
   - `Shift+1..9`: toggle auto fire for slot
   - Hold left mouse: fire all manual-controlled slots
   - Manual-controlled slots temporarily suppress auto fire (auto toggle state is preserved)
+- Battlefield controller controls (standard Gamepad API):
+  - Left stick: move controlled unit
+  - Right stick: set firing angle
+  - Right trigger or right bumper: fire manual-controlled slots
+  - Tracking/target-dependent weapons auto-lock the valid enemy nearest the aim ray
 
 ## Debug Instructions (Agent)
 

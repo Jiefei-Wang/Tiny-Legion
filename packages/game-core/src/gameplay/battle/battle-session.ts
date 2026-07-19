@@ -1,10 +1,12 @@
 import { armyCap } from "../../config/balance/commander.ts";
 import {
+  DEFAULT_UNIT_MOVEMENT_SPEED_MULTIPLIER,
+  MIN_UNIT_MOVEMENT_SPEED_MULTIPLIER,
+  MAX_UNIT_MOVEMENT_SPEED_MULTIPLIER,
   DEFAULT_GROUND_HEIGHT_RATIO,
   AIR_MIN_Z_RATIO,
   AIR_GROUND_GAP_RATIO,
   AIR_TARGET_Z_TOLERANCE_RATIO,
-  AIR_MIN_LIFT_SPEED,
   AIR_HOLD_GRAVITY,
   AIR_DROP_GRAVITY,
   AIR_DROP_SPEED_CAP,
@@ -12,6 +14,7 @@ import {
   GROUND_PROJECTILE_MAX_DROP_BELOW_FIRE_Y,
   BATTLE_SALVAGE_REFUND_FACTOR,
   PENETRATION_ARMOR_SCALER,
+  getStructureCellSize,
   UNIT_SEPARATION_ENABLED,
   UNIT_OVERLAP_ALLOWANCE_RATIO,
   UNIT_SEPARATION_POSITION_FACTOR,
@@ -29,7 +32,7 @@ import {
   getAircraftAltitudeBonus,
 } from "../../config/balance/range.ts";
 import { applyHitToUnit, applyStructureRecovery } from "../../simulation/combat/damage-model.ts";
-import { applyRecoilForAttachment, firstAliveWeaponAttachment, getAliveWeaponAttachments } from "../../simulation/combat/recoil.ts";
+import { applyRecoilForAttachment, getAliveWeaponAttachments } from "../../simulation/combat/recoil.ts";
 import { clamp } from "../../simulation/physics/impulse-model.ts";
 import { canOperate } from "../../simulation/units/control-unit-rules.ts";
 import { instantiateUnit } from "../../simulation/units/unit-builder.ts";
@@ -59,7 +62,35 @@ export interface BattleSessionOptions {
   disableDefaultStarters?: boolean;
   externalAiSides?: Partial<Record<Side, boolean>>;
   partCatalog?: ReadonlyArray<PartDefinition>;
+  movementSpeedMultiplier?: number;
 }
+
+export type BattleAudioEvent =
+  | {
+      kind: "fire";
+      x: number;
+      y: number;
+      weaponClass: WeaponClass;
+      damage: number;
+      projectileSpeed: number;
+      volume: number;
+    }
+  | {
+      kind: "impact";
+      x: number;
+      y: number;
+      weaponClass: WeaponClass;
+      materialColor: string;
+      armor: number;
+      incomingDamage: number;
+      deliveredDamage: number;
+    }
+  | { kind: "explosion"; x: number; y: number; intensity: number; radius: number };
+
+type UnitProjectileHit = {
+  structureCellId: number;
+  ignoreArmor: boolean;
+};
 
 export class BattleSession {
   private readonly canvas: HTMLCanvasElement;
@@ -79,6 +110,7 @@ export class BattleSession {
   private playerControlledId: string | null;
   private aimX: number;
   private aimY: number;
+  private controllerAimAngleRad: number | null;
   private manualFireHeld: boolean;
   private displayEnabled: boolean;
   private debugDrawEnabled: boolean;
@@ -92,6 +124,8 @@ export class BattleSession {
   private playerSpawnTemplateAllowList: Set<number> | null;
   private groundHeightPx: number;
   private readonly baselineController: BattleAiController;
+  private audioEvents: BattleAudioEvent[];
+  private movementSpeedMultiplier: number;
 
   constructor(canvas: HTMLCanvasElement, hooks: BattleHooks, templates: UnitTemplate[], options: BattleSessionOptions = {}) {
     const context = canvas.getContext("2d");
@@ -120,6 +154,7 @@ export class BattleSession {
     this.playerControlledId = null;
     this.aimX = canvas.width * 0.7;
     this.aimY = canvas.height * 0.5;
+    this.controllerAimAngleRad = null;
     this.manualFireHeld = false;
     this.displayEnabled = false;
     this.debugDrawEnabled = false;
@@ -133,6 +168,17 @@ export class BattleSession {
     this.playerSpawnTemplateAllowList = null;
     this.groundHeightPx = Math.max(80, canvas.height * DEFAULT_GROUND_HEIGHT_RATIO);
     this.baselineController = createBaselineCompositeAiController();
+    this.audioEvents = [];
+    this.movementSpeedMultiplier = this.normalizeMovementSpeedMultiplier(options.movementSpeedMultiplier);
+  }
+
+  public getMovementSpeedMultiplier(): number {
+    return this.movementSpeedMultiplier;
+  }
+
+  public setMovementSpeedMultiplier(multiplier: number): number {
+    this.movementSpeedMultiplier = this.normalizeMovementSpeedMultiplier(multiplier);
+    return this.movementSpeedMultiplier;
   }
 
   public getState(): BattleState {
@@ -186,7 +232,7 @@ export class BattleSession {
       if (unit.airDropActive) {
         continue;
       }
-      if (!this.hasAliveWeapons(unit)) {
+      if (!this.hasAvailableWeapons(unit)) {
         continue;
       }
       pending.push(unit);
@@ -229,6 +275,20 @@ export class BattleSession {
     return this.debugPartHpEnabled;
   }
 
+  public getRenderOptions(): {
+    displayLayer: boolean;
+    debugDraw: boolean;
+    debugTargetLines: boolean;
+    debugPartHp: boolean;
+  } {
+    return {
+      displayLayer: this.displayEnabled,
+      debugDraw: this.debugDrawEnabled,
+      debugTargetLines: this.debugTargetLineEnabled,
+      debugPartHp: this.debugPartHpEnabled,
+    };
+  }
+
   public setDebugPartHpEnabled(enabled: boolean): void {
     this.debugPartHpEnabled = enabled === true;
   }
@@ -256,11 +316,11 @@ export class BattleSession {
   }
 
   public getAliveEnemyCount(): number {
-    return this.state.units.filter((unit) => unit.side === "enemy" && unit.alive).length;
+    return this.state.units.filter((unit) => unit.side === "enemy" && unit.alive && canOperate(unit)).length;
   }
 
   public getAlivePlayerCount(): number {
-    return this.state.units.filter((unit) => unit.side === "player" && unit.alive).length;
+    return this.state.units.filter((unit) => unit.side === "player" && unit.alive && canOperate(unit)).length;
   }
 
   public setEnemyActiveCount(targetCount: number): number {
@@ -271,7 +331,7 @@ export class BattleSession {
       return this.getAliveEnemyCount();
     }
 
-    const aliveEnemies = this.state.units.filter((unit) => unit.side === "enemy" && unit.alive);
+    const aliveEnemies = this.state.units.filter((unit) => unit.side === "enemy" && unit.alive && canOperate(unit));
     if (aliveEnemies.length > normalizedTarget) {
       const removeCount = aliveEnemies.length - normalizedTarget;
       for (let i = 0; i < removeCount; i += 1) {
@@ -399,6 +459,7 @@ export class BattleSession {
   public setAim(mouseX: number, mouseY: number): void {
     this.aimX = clamp(mouseX, 0, this.canvas.width);
     this.aimY = clamp(mouseY, 0, this.canvas.height);
+    this.controllerAimAngleRad = null;
   }
 
   public setControlByClick(mouseX: number, mouseY: number): void {
@@ -409,11 +470,11 @@ export class BattleSession {
     if (lockedControlled?.airDropActive) {
       this.clearControlSelection();
     }
-    if (lockedControlled && this.hasAliveWeapons(lockedControlled)) {
+    if (lockedControlled && this.hasAvailableWeapons(lockedControlled)) {
       this.setAim(mouseX, mouseY);
       return;
     }
-    if (lockedControlled && !this.hasAliveWeapons(lockedControlled)) {
+    if (lockedControlled && !this.hasAvailableWeapons(lockedControlled)) {
       this.clearControlSelection();
     }
     let picked: UnitInstance | null = null;
@@ -422,7 +483,7 @@ export class BattleSession {
       if (!unit.alive || unit.side !== "player") {
         continue;
       }
-      if (unit.returnedToBase || unit.airDropActive || !this.hasAliveWeapons(unit)) {
+      if (unit.returnedToBase || unit.airDropActive || unit.escapeActive || !this.hasAvailableWeapons(unit)) {
         continue;
       }
       const dx = unit.x - mouseX;
@@ -466,13 +527,7 @@ export class BattleSession {
     for (let slot = 0; slot < controlled.weaponAttachmentIds.length; slot += 1) {
       if (this.isWeaponManualControlEnabled(controlled, slot)) {
         const angleRad = Math.atan2(this.aimY - controlled.y, this.aimX - controlled.x);
-        fireReqs.push({
-          slot,
-          angleRad,
-          intendedTargetId: null,
-          intendedTargetY: null,
-          manual: true,
-        });
+        fireReqs.push(this.createManualFireRequest(controlled, slot, angleRad));
       }
     }
     if (fireReqs.length > 0) {
@@ -588,6 +643,7 @@ export class BattleSession {
     this.manualFireHeld = false;
     this.aimX = this.canvas.width * 0.7;
     this.aimY = this.canvas.height * 0.5;
+    this.controllerAimAngleRad = null;
   }
 
   public deployUnit(templateId: number): void {
@@ -599,7 +655,7 @@ export class BattleSession {
       return;
     }
 
-    const friendlyActive = this.state.units.filter((unit) => unit.side === "player" && unit.alive).length;
+    const friendlyActive = this.state.units.filter((unit) => unit.side === "player" && unit.alive && canOperate(unit)).length;
     if (friendlyActive >= armyCap(this.hooks.getCommanderSkill())) {
       this.hooks.addLog("Commander cap reached", "warn");
       return;
@@ -644,12 +700,21 @@ export class BattleSession {
 
     const laneBounds = this.getLaneBounds();
     for (const unit of this.state.units) {
-      if (!unit.alive || !canOperate(unit)) {
+      if (!unit.alive) {
+        continue;
+      }
+      if (!canOperate(unit)) {
+        unit.vx = 0;
+        unit.vy = 0;
+        unit.vibrate = 0;
+        if (unit.id === this.playerControlledId || unit.id === this.selectedUnitId) {
+          this.clearControlSelection();
+        }
         continue;
       }
       this.refreshUnitMobility(unit);
 
-      if (unit.type === "air" && !unit.airDropActive && unit.maxSpeed < AIR_MIN_LIFT_SPEED) {
+      if (unit.type === "air" && !unit.airDropActive && this.computeAirThrustSpeed(unit) <= AIR_HOLD_GRAVITY) {
         unit.airDropActive = true;
         unit.airDropTargetY = laneBounds.groundMinY + Math.random() * (laneBounds.groundMaxY - laneBounds.groundMinY);
         unit.aiDebugDecisionPath = "air-no-lift-drop";
@@ -663,6 +728,7 @@ export class BattleSession {
       }
 
       this.enforceWeaponComputingBudget(unit);
+      this.activateEscapeIfUnavailable(unit);
 
       const isControlled = unit.side === "player" && unit.id === this.playerControlledId;
       let command: UnitCommand;
@@ -671,7 +737,10 @@ export class BattleSession {
         command = this.playerInputToCommand(unit, dt, keys);
       } else if (unit.airDropActive) {
         command = this.airDropReturnToCommand(unit, dt);
-      } else if (this.hasAliveWeapons(unit)) {
+      } else if (unit.escapeActive) {
+        unit.escapeFacingDelayS = Math.max(0, unit.escapeFacingDelayS - dt);
+        command = this.retreatToCommand(unit);
+      } else if (this.hasAvailableWeapons(unit)) {
         if (this.isExternalAiEnabled(unit.side)) {
           command = this.consumeExternalCommandOrNoop(unit);
         } else {
@@ -685,24 +754,7 @@ export class BattleSession {
           const decision = this.getCombatDecision(unit, dt);
           command = this.aiDecisionToCommand(unit, decision);
         }
-      } else if (unit.type === "air") {
-        if (!unit.airDropActive) {
-          unit.airDropActive = true;
-          unit.airDropTargetY = laneBounds.groundMinY + Math.random() * (laneBounds.groundMaxY - laneBounds.groundMinY);
-          unit.aiDebugDecisionPath = "weaponless-air-drop";
-        }
-        if (unit.id === this.playerControlledId || unit.id === this.selectedUnitId) {
-          this.clearControlSelection();
-          this.hooks.addLog(`${unit.name} has no weapon and is returning to base`, "warn");
-        }
-        command = this.airDropReturnToCommand(unit, dt);
       } else {
-        if (unit.returnedToBase) continue;
-        if (unit.id === this.playerControlledId || unit.id === this.selectedUnitId) {
-          this.clearControlSelection();
-          this.hooks.addLog(`${unit.name} has no weapon and is returning to base`, "warn");
-        }
-        unit.facing = unit.side === "player" ? 1 : -1;
         command = this.retreatToCommand(unit);
       }
 
@@ -720,9 +772,12 @@ export class BattleSession {
         unit.vy *= unit.controlImpairFactor;
       }
 
-      const speedCap = unit.airDropActive ? Math.max(unit.maxSpeed, AIR_DROP_SPEED_CAP) : unit.maxSpeed;
+      const speedCap = this.scaleMovementSpeed(
+        unit.airDropActive ? Math.max(unit.maxSpeed, AIR_DROP_SPEED_CAP) : unit.maxSpeed,
+      );
       unit.vx = clamp(unit.vx, -speedCap, speedCap);
-      unit.vy = clamp(unit.vy, -speedCap * 0.75, speedCap * 0.75);
+      const verticalSpeedCap = unit.type === "air" ? speedCap : speedCap * 0.75;
+      unit.vy = clamp(unit.vy, -verticalSpeedCap, verticalSpeedCap);
       unit.x += unit.vx * dt;
       unit.y += unit.vy * dt;
 
@@ -740,6 +795,7 @@ export class BattleSession {
         unit.weaponFireTimers[i] = Math.max(0, unit.weaponFireTimers[i] - dt);
       }
       this.updateWeaponLoaders(unit, dt, isControlled);
+      this.activateEscapeIfUnavailable(unit);
       unit.vibrate *= 0.85;
       applyStructureRecovery(unit, dt);
 
@@ -756,7 +812,7 @@ export class BattleSession {
         }
       }
 
-      if (!this.hasAliveWeapons(unit) && unit.type === "ground" && !unit.returnedToBase) {
+      if (unit.escapeActive && !unit.returnedToBase) {
         const base = unit.side === "player" ? this.state.playerBase : this.state.enemyBase;
         if (this.isUnitInsideBase(unit, base)) {
           this.onUnitReturnedToBase(unit);
@@ -814,8 +870,9 @@ export class BattleSession {
           continue;
         }
         if (target.type === "air") {
-          const hitCellId = this.projectileHitsLiveCell(projectile, target, true);
-          if (hitCellId !== null) {
+          const hit = this.projectileHitsUnitPart(projectile, target, true);
+          if (hit !== null) {
+            const hitCellId = hit.structureCellId;
             const hitPartKey = `${target.id}:${hitCellId}`;
             if (projectile.hitPartKeys.includes(hitPartKey)) {
               continue;
@@ -825,15 +882,17 @@ export class BattleSession {
               continue;
             }
             const currentHp = Math.max(0, hitCell.breakThreshold - hitCell.strain);
-            const penetrationCost = (Math.max(0, hitCell.armor) * PENETRATION_ARMOR_SCALER) + currentHp;
+            const penetrationCost = (hit.ignoreArmor ? 0 : Math.max(0, hitCell.armor) * PENETRATION_ARMOR_SCALER) + currentHp;
             projectile.remainingPenetration -= penetrationCost;
             const beforeDestroyed = new Set(target.structure.filter((cell) => cell.destroyed).map((cell) => cell.id));
             const beforeAliveAttachments = new Set(target.attachments.filter((attachment) => attachment.alive).map((attachment) => attachment.id));
             const wasAlive = target.alive;
             const impactSide = projectile.vx >= 0 ? -1 : 1;
+            let deliveredDamage = 0;
             if (!this.shouldIgnoreDamageForUnit(target)) {
-              applyHitToUnit(target, projectile.damage, projectile.hitImpulse, impactSide, hitCellId);
+              deliveredDamage = applyHitToUnit(target, projectile.damage, projectile.hitImpulse, impactSide, hitCellId, hit.ignoreArmor).deliveredDamage;
             }
+            this.queueImpactAudioEvent(projectile, hitCell, deliveredDamage, hit.ignoreArmor);
             projectile.hitPartKeys.push(hitPartKey);
             this.hooks.addLog(`Hit ${target.name} (air) by projectile from ${projectile.sourceId}`, "warn");
             this.spawnBreakDebris(target, beforeDestroyed, beforeAliveAttachments, wasAlive);
@@ -859,8 +918,9 @@ export class BattleSession {
           continue;
         }
 
-        const hitCellId = this.projectileHitsLiveCell(projectile, target, false);
-        if (hitCellId !== null) {
+        const hit = this.projectileHitsUnitPart(projectile, target, false);
+        if (hit !== null) {
+          const hitCellId = hit.structureCellId;
           const hitPartKey = `${target.id}:${hitCellId}`;
           if (projectile.hitPartKeys.includes(hitPartKey)) {
             continue;
@@ -870,15 +930,17 @@ export class BattleSession {
             continue;
           }
           const currentHp = Math.max(0, hitCell.breakThreshold - hitCell.strain);
-          const penetrationCost = (Math.max(0, hitCell.armor) * PENETRATION_ARMOR_SCALER) + currentHp;
+          const penetrationCost = (hit.ignoreArmor ? 0 : Math.max(0, hitCell.armor) * PENETRATION_ARMOR_SCALER) + currentHp;
           projectile.remainingPenetration -= penetrationCost;
           const beforeDestroyed = new Set(target.structure.filter((cell) => cell.destroyed).map((cell) => cell.id));
           const beforeAliveAttachments = new Set(target.attachments.filter((attachment) => attachment.alive).map((attachment) => attachment.id));
           const wasAlive = target.alive;
           const impactSide = projectile.vx >= 0 ? -1 : 1;
+          let deliveredDamage = 0;
           if (!this.shouldIgnoreDamageForUnit(target)) {
-            applyHitToUnit(target, projectile.damage, projectile.hitImpulse, impactSide, hitCellId);
+            deliveredDamage = applyHitToUnit(target, projectile.damage, projectile.hitImpulse, impactSide, hitCellId, hit.ignoreArmor).deliveredDamage;
           }
+          this.queueImpactAudioEvent(projectile, hitCell, deliveredDamage, hit.ignoreArmor);
           projectile.hitPartKeys.push(hitPartKey);
           this.hooks.addLog(`Hit ${target.name} (ground) by projectile from ${projectile.sourceId}`, "warn");
           this.spawnBreakDebris(target, beforeDestroyed, beforeAliveAttachments, wasAlive);
@@ -1250,7 +1312,7 @@ export class BattleSession {
     if (!UNIT_SEPARATION_ENABLED) {
       return;
     }
-    const alive = this.state.units.filter((unit) => unit.alive);
+    const alive = this.state.units.filter((unit) => unit.alive && canOperate(unit));
     if (alive.length <= 1) {
       return;
     }
@@ -1301,7 +1363,7 @@ export class BattleSession {
   }
 
   private maybeSpawnEnemy(): boolean {
-    const aliveEnemy = this.state.units.filter((unit) => unit.side === "enemy" && unit.alive).length;
+    const aliveEnemy = this.state.units.filter((unit) => unit.side === "enemy" && unit.alive && canOperate(unit)).length;
     if (aliveEnemy >= this.state.enemyCap) {
       return false;
     }
@@ -1407,7 +1469,7 @@ export class BattleSession {
     const chargeGas = opts.chargeGas ?? true;
     const ignoreCap = opts.ignoreCap ?? false;
     if (side === "player") {
-      const friendlyActive = this.state.units.filter((unit) => unit.side === "player" && unit.alive).length;
+      const friendlyActive = this.state.units.filter((unit) => unit.side === "player" && unit.alive && canOperate(unit)).length;
       if (!ignoreCap && friendlyActive >= armyCap(this.hooks.getCommanderSkill())) {
         return false;
       }
@@ -1426,7 +1488,7 @@ export class BattleSession {
       return true;
     }
 
-    const aliveEnemy = this.state.units.filter((unit) => unit.side === "enemy" && unit.alive).length;
+    const aliveEnemy = this.state.units.filter((unit) => unit.side === "enemy" && unit.alive && canOperate(unit)).length;
     if (!ignoreCap && aliveEnemy >= this.state.enemyCap) {
       return false;
     }
@@ -1454,7 +1516,7 @@ export class BattleSession {
     if (this.state.enemyMinActive <= 0) {
       return;
     }
-    let aliveEnemy = this.state.units.filter((unit) => unit.side === "enemy" && unit.alive).length;
+    let aliveEnemy = this.state.units.filter((unit) => unit.side === "enemy" && unit.alive && canOperate(unit)).length;
     let attempts = 0;
     const maxAttempts = Math.max(2, this.state.enemyMinActive * 3);
     while (aliveEnemy < this.state.enemyMinActive && attempts < maxAttempts) {
@@ -1469,10 +1531,10 @@ export class BattleSession {
 
   private applyBaseDamage(projectile: BattleState["projectiles"][number]): void {
     const playerHasDefenders = this.state.units.some((unit) => {
-      return unit.alive && unit.side === "player" && canOperate(unit) && this.hasAliveWeapons(unit);
+      return unit.alive && unit.side === "player" && canOperate(unit) && this.hasAvailableWeapons(unit);
     });
     const enemyHasDefenders = this.state.units.some((unit) => {
-      return unit.alive && unit.side === "enemy" && canOperate(unit) && this.hasAliveWeapons(unit);
+      return unit.alive && unit.side === "enemy" && canOperate(unit) && this.hasAvailableWeapons(unit);
     });
 
     if (projectile.side === "player") {
@@ -1516,6 +1578,7 @@ export class BattleSession {
     if (radius <= 0 || maxDamage <= 0) {
       return;
     }
+    this.queueAudioEvent({ kind: "explosion", x: projectile.x, y: projectile.y, intensity: maxDamage, radius });
 
     for (const target of this.state.units) {
       if (!target.alive || !canOperate(target) || target.side === projectile.side) {
@@ -1536,10 +1599,11 @@ export class BattleSession {
       if (splashDamage <= 0.25) {
         continue;
       }
-      const hitCellId = this.projectileHitsLiveCell(projectile, target, target.type === "air");
+      const splashHit = this.projectileHitsUnitPart(projectile, target, target.type === "air");
+      const hitCellId = splashHit?.structureCellId ?? null;
       const impactSide = dx >= 0 ? 1 : -1;
       if (!this.shouldIgnoreDamageForUnit(target)) {
-        applyHitToUnit(target, splashDamage, projectile.hitImpulse * 0.45, impactSide, hitCellId);
+        applyHitToUnit(target, splashDamage, projectile.hitImpulse * 0.45, impactSide, hitCellId, splashHit?.ignoreArmor ?? false);
       }
       if (projectile.controlImpairDuration > 0) {
         this.applyControlImpair(target, projectile.controlImpairFactor, projectile.controlImpairDuration * 0.8);
@@ -1605,25 +1669,23 @@ export class BattleSession {
     const resolvedHomingTargetId = shot.weaponClass === "tracking"
       ? (intendedTargetId ?? this.findClosestEnemyToPoint(unit.side, finalIntendedTargetX, finalIntendedTargetY)?.id ?? null)
       : null;
-    const firepoint = this.getAttachmentFirepointWorld(unit, attachment);
-    const weaponOriginX = firepoint.x;
-    const weaponOriginY = firepoint.y;
     // Clamp angle directly (no dx/dy round-trip)
     const fireAngle = this.clampAndAdjustAngle(unit, attachment.component, safeAngle, attachment.stats?.shootAngleDeg, attachment);
     const spreadRad = (((Math.random() * 2) - 1) * shot.spreadDeg * Math.PI) / 180;
     const finalFireAngle = fireAngle + spreadRad;
     const ux = Math.cos(finalFireAngle);
     const uy = Math.sin(finalFireAngle);
-    const weaponCellSize = Math.max(8, Math.min(14, unit.radius * 1.7 * 0.24));
-    const muzzleDistance = weaponCellSize * 0.55 + 2;
+    // Projectile position starts at the visible barrel tip. Spread changes the
+    // projectile velocity, but not the physical point where it leaves the gun.
+    const muzzle = this.getAttachmentVisualMuzzleWorld(unit, attachment, fireAngle);
     const projectileSpeed = shot.projectileSpeed;
     const gravity = shot.projectileGravity;
     const ttl = Math.max(2.0, effectiveRange / Math.max(120, projectileSpeed));
     this.state.projectiles.push({
-      x: weaponOriginX + ux * muzzleDistance,
-      y: weaponOriginY + uy * muzzleDistance,
-      prevX: weaponOriginX + ux * muzzleDistance,
-      prevY: weaponOriginY + uy * muzzleDistance,
+      x: muzzle.x,
+      y: muzzle.y,
+      prevX: muzzle.x,
+      prevY: muzzle.y,
       vx: ux * projectileSpeed,
       vy: uy * projectileSpeed,
       traveledDistance: 0,
@@ -1648,7 +1710,7 @@ export class BattleSession {
       sourceId: unit.id,
       side: unit.side,
       sourceUnitType: unit.type,
-      fireOriginY: weaponOriginY,
+      fireOriginY: muzzle.y,
       initialVy: uy * projectileSpeed,
       sourceWeaponAttachmentId: attachmentId,
       damage: shot.damage,
@@ -1662,6 +1724,15 @@ export class BattleSession {
     } else {
       unit.weaponFireTimers[slot] = shot.cooldown;
     }
+    this.queueAudioEvent({
+      kind: "fire",
+      x: muzzle.x,
+      y: muzzle.y,
+      weaponClass: shot.weaponClass,
+      damage: shot.damage,
+      projectileSpeed,
+      volume: clamp(this.getAttachmentPart(attachment)?.partProperties?.fireSoundVolume ?? 1, 0, 2),
+    });
     if (manual) {
       this.hooks.addLog(`${unit.name} fired weapon #${slot + 1}`, "warn");
     }
@@ -1695,6 +1766,89 @@ export class BattleSession {
     const clampedRelative = clamp(relativeAngle, -angleLimit.ccwRad, angleLimit.cwRad);
 
     return facingAngle + clampedRelative;
+  }
+
+  public setBaseHp(side: Side | "both", maxHp: number, refill = true): number {
+    const normalized = clamp(Math.floor(maxHp), 1, 1_000_000_000);
+    const bases = side === "both"
+      ? [this.state.playerBase, this.state.enemyBase]
+      : [side === "player" ? this.state.playerBase : this.state.enemyBase];
+    for (const base of bases) {
+      const ratio = base.maxHp > 0 ? clamp(base.hp / base.maxHp, 0, 1) : 1;
+      base.maxHp = normalized;
+      base.hp = refill ? normalized : normalized * ratio;
+    }
+    return normalized;
+  }
+
+  private queueAudioEvent(event: BattleAudioEvent): void {
+    if (this.audioEvents.length >= 96) this.audioEvents.shift();
+    this.audioEvents.push(event);
+  }
+
+  private queueImpactAudioEvent(projectile: BattleState["projectiles"][number], cell: UnitInstance["structure"][number], deliveredDamage: number, ignoreArmor = false): void {
+    this.queueAudioEvent({
+      kind: "impact",
+      x: projectile.x,
+      y: projectile.y,
+      weaponClass: projectile.weaponClass,
+      materialColor: cell.color,
+      armor: ignoreArmor ? 0 : cell.armor,
+      incomingDamage: projectile.damage,
+      deliveredDamage,
+    });
+  }
+
+  /** Browser renderers consume these transient events; simulation/headless callers can ignore them. */
+  public consumeBattleAudioEvents(): BattleAudioEvent[] {
+    const events = this.audioEvents;
+    this.audioEvents = [];
+    return events;
+  }
+
+  public getDebugSnapshot(): Record<string, unknown> {
+    const aliveUnits = this.state.units.filter((unit) => unit.alive);
+    return {
+      battlefield: this.getBattlefieldInfo(),
+      active: this.state.active,
+      nodeId: this.state.nodeId,
+      outcome: this.state.outcome,
+      counts: {
+        units: aliveUnits.length,
+        playerUnits: aliveUnits.filter((unit) => unit.side === "player").length,
+        enemyUnits: aliveUnits.filter((unit) => unit.side === "enemy").length,
+        projectiles: this.state.projectiles.length,
+        particles: this.state.particles.length,
+        debris: this.state.debris.length,
+      },
+      selection: this.getSelection(),
+      units: aliveUnits.map((unit) => ({
+        id: unit.id,
+        name: unit.name,
+        side: unit.side,
+        type: unit.type,
+        position: { x: unit.x, y: unit.y },
+        velocity: { x: unit.vx, y: unit.vy },
+        mass: unit.mass,
+        structureAlive: unit.structure.filter((cell) => !cell.destroyed).length,
+        structureTotal: unit.structure.length,
+        functionalAlive: unit.attachments.filter((part) => part.alive).length,
+        functionalTotal: unit.attachments.length,
+        functionalSupportLinks: unit.attachments.reduce((sum, part) => sum + part.attachedStructureCellIds.length, 0),
+        operational: canOperate(unit),
+        escapeActive: unit.escapeActive,
+        ai: {
+          state: unit.aiState,
+          targetId: unit.aiDebugTargetId,
+          shouldEvade: unit.aiDebugShouldEvade,
+          leadTimeS: unit.aiDebugLeadTimeS,
+          aimAngleRad: unit.aiDebugLastAngleRad,
+          range: unit.aiDebugLastRange,
+          decisionPath: unit.aiDebugDecisionPath,
+          fireBlockReason: unit.aiDebugFireBlockReason,
+        },
+      })),
+    };
   }
 
   private getAttachmentWeaponFacingAngleRad(
@@ -1748,7 +1902,6 @@ export class BattleSession {
     loadMultiplier: number;
     fastOperation: boolean;
     minLoadTime: number;
-    storeCapacity: number;
     minBurstInterval: number;
   } | null {
     const loaderStats = COMPONENTS[loaderAttachment.component];
@@ -1776,7 +1929,6 @@ export class BattleSession {
         ?? loaderStats.loader.loadMultiplier,
       fastOperation: loaderAttachment.stats?.loaderFastOperation ?? loaderStats.loader.fastOperation,
       minLoadTime: loaderAttachment.stats?.loaderMinLoadTime ?? loaderStats.loader.minLoadTime,
-      storeCapacity: loaderAttachment.stats?.loaderStoreCapacity ?? loaderStats.loader.storeCapacity,
       minBurstInterval: loaderAttachment.stats?.loaderMinBurstInterval ?? loaderStats.loader.minBurstInterval,
     };
   }
@@ -1819,7 +1971,7 @@ export class BattleSession {
     if (!this.requiresDedicatedLoader(weaponStats.weaponClass ?? "rapid-fire")) {
       return 1;
     }
-    let capacity = 0;
+    let hasCompatibleLoader = false;
     for (const loaderState of unit.loaderStates) {
       const loaderAttachment = unit.attachments.find((entry) => entry.id === loaderState.attachmentId && entry.alive);
       if (!loaderAttachment) {
@@ -1829,9 +1981,15 @@ export class BattleSession {
       if (!loader || !loader.supports.includes(weaponStats.weaponClass ?? "rapid-fire")) {
         continue;
       }
-      capacity += 1 + Math.max(0, loader.storeCapacity);
+      hasCompatibleLoader = true;
     }
-    return Math.max(0, capacity);
+    if (!hasCompatibleLoader) {
+      return 0;
+    }
+    const partDefinition = weaponAttachment.partId
+      ? this.partCatalog.find((part) => part.id === weaponAttachment.partId)
+      : undefined;
+    return Math.max(1, Math.floor(partDefinition?.partProperties?.maxCapacity ?? weaponStats.maxLoadedAmmo ?? 1));
   }
 
   private computeLoaderDuration(
@@ -1995,26 +2153,13 @@ export class BattleSession {
     }
     const speedCap = Math.max(1, weightedSpeedCap / Math.max(1, capWeight));
     const powerToMass = totalPower / Math.max(16, unit.mass);
-    const speedScale = unit.type === "ground" ? 74 : 82;
-    const rawSpeed = powerToMass * speedScale;
+    const rawSpeed = unit.type === "ground"
+      ? powerToMass * 74
+      : Math.max(0, powerToMass * AIR_THRUST_ACCEL_SCALE - AIR_HOLD_GRAVITY);
     unit.maxSpeed = clamp(Math.min(rawSpeed, speedCap), 0, speedCap);
     unit.accel = clamp(rawSpeed * 0.92, 0, Math.max(16, unit.maxSpeed * 1.6));
     const speedRatio = unit.maxSpeed / Math.max(1, speedCap);
     unit.turnDrag = clamp(0.8 + speedRatio * 0.14, 0.8, 0.94);
-  }
-
-  private getPropellerDirection(unit: UnitInstance, rotateQuarter: number): { x: number; y: number } {
-    const q = ((rotateQuarter % 4) + 4) % 4;
-    if (q === 0) {
-      return { x: unit.facing, y: 0 };
-    }
-    if (q === 1) {
-      return { x: 0, y: 1 };
-    }
-    if (q === 2) {
-      return { x: -unit.facing, y: 0 };
-    }
-    return { x: 0, y: -1 };
   }
 
   private getDirectionQuarter(direction: PartDirection | undefined): 0 | 1 | 2 | 3 {
@@ -2072,14 +2217,6 @@ export class BattleSession {
     return stats.propulsion?.platform === "ground";
   }
 
-  private getAttachmentThrustAngleDeg(attachment: UnitInstance["attachments"][number], stats: ComponentStats): number {
-    const part = this.getAttachmentPart(attachment);
-    if (typeof part?.partProperties?.thrustAngleDeg === "number" && Number.isFinite(part.partProperties.thrustAngleDeg)) {
-      return part.partProperties.thrustAngleDeg;
-    }
-    return stats.propulsion?.thrustAngleDeg ?? 25;
-  }
-
   private resolveWeaponAngleLimit(
     stats: ComponentStats,
     shootAngleDegOverride?: number,
@@ -2104,33 +2241,6 @@ export class BattleSession {
       return { enabled: false, cwRad: 0, ccwRad: 0 };
     }
     const halfRad = Math.max(0, (shootAngleDeg ?? 0) * 0.5) * Math.PI / 180;
-    return { enabled: true, cwRad: halfRad, ccwRad: halfRad };
-  }
-
-  private resolveEngineAngleLimit(
-    attachment: UnitInstance["attachments"][number],
-    stats: ComponentStats,
-  ): { enabled: boolean; cwRad: number; ccwRad: number } {
-    const part = this.getAttachmentPart(attachment);
-    const hasAngleLimit = part?.partProperties?.hasAngleLimit;
-    if (hasAngleLimit === false) {
-      return { enabled: false, cwRad: 0, ccwRad: 0 };
-    }
-    const explicitCw = part?.partProperties?.cwAngle;
-    const explicitCcw = part?.partProperties?.ccwAngle;
-    if (hasAngleLimit === true && Number.isFinite(explicitCw) && Number.isFinite(explicitCcw)) {
-      return {
-        enabled: true,
-        cwRad: Math.max(0, explicitCw ?? 0) * Math.PI / 180,
-        ccwRad: Math.max(0, explicitCcw ?? 0) * Math.PI / 180,
-      };
-    }
-
-    const legacyHalf = this.getAttachmentThrustAngleDeg(attachment, stats);
-    if (!Number.isFinite(legacyHalf)) {
-      return { enabled: false, cwRad: 0, ccwRad: 0 };
-    }
-    const halfRad = Math.max(0, legacyHalf) * Math.PI / 180;
     return { enabled: true, cwRad: halfRad, ccwRad: halfRad };
   }
 
@@ -2172,14 +2282,23 @@ export class BattleSession {
     }
   }
 
-  private computeDirectedAirAccel(unit: UnitInstance, dirX: number, dirY: number): number {
-    const len = Math.hypot(dirX, dirY);
-    if (len <= 1e-6) {
-      return 0;
-    }
-    const ux = dirX / len;
-    const uy = dirY / len;
-    let accel = 0;
+  private normalizeMovementSpeedMultiplier(multiplier: number | undefined): number {
+    const finiteMultiplier = typeof multiplier === "number" && Number.isFinite(multiplier)
+      ? multiplier
+      : DEFAULT_UNIT_MOVEMENT_SPEED_MULTIPLIER;
+    return clamp(
+      finiteMultiplier,
+      MIN_UNIT_MOVEMENT_SPEED_MULTIPLIER,
+      MAX_UNIT_MOVEMENT_SPEED_MULTIPLIER,
+    );
+  }
+
+  private scaleMovementSpeed(speed: number): number {
+    return speed * this.movementSpeedMultiplier;
+  }
+
+  private computeAirThrustSpeed(unit: UnitInstance): number {
+    let thrustSpeed = 0;
     for (const attachment of unit.attachments) {
       if (!attachment.alive) {
         continue;
@@ -2188,87 +2307,31 @@ export class BattleSession {
       if (stats.type !== "engine" || !this.engineSupportsAir(attachment, stats)) {
         continue;
       }
-      const propulsion = stats.propulsion;
-      if (!propulsion) {
-        continue;
-      }
       const enginePower = Math.max(0, attachment.stats?.power ?? stats.power ?? 0);
-      const baseAccel = (enginePower / Math.max(16, unit.mass)) * AIR_THRUST_ACCEL_SCALE;
-      if (propulsion.mode === "omni") {
-        accel += baseAccel;
-        continue;
-      }
-      const facingQuarter = this.resolveAttachmentFacingQuarter(attachment);
-      const propDir = this.getPropellerDirection(unit, facingQuarter);
-      // Propeller facing represents push/airflow direction; thrust is the opposite direction.
-      const thrustX = -propDir.x;
-      const thrustY = -propDir.y;
-      const thrustAngle = Math.atan2(thrustY, thrustX);
-      const desiredAngle = Math.atan2(uy, ux);
-      const relativeAngle = Math.atan2(Math.sin(desiredAngle - thrustAngle), Math.cos(desiredAngle - thrustAngle));
-      const angleLimit = this.resolveEngineAngleLimit(attachment, stats);
-      if (angleLimit.enabled) {
-        if (relativeAngle > angleLimit.cwRad || relativeAngle < -angleLimit.ccwRad) {
-          continue;
-        }
-        const sideLimit = relativeAngle >= 0 ? angleLimit.cwRad : angleLimit.ccwRad;
-        const inConeScale = sideLimit > 1e-6
-          ? clamp(1 - Math.abs(relativeAngle) / sideLimit, 0, 1)
-          : 1;
-        accel += baseAccel * inConeScale;
-        continue;
-      }
-      accel += baseAccel;
+      thrustSpeed += (enginePower / Math.max(16, unit.mass)) * AIR_THRUST_ACCEL_SCALE;
     }
-    return accel;
+    return thrustSpeed;
   }
 
   private applyAirThrustMovement(unit: UnitInstance, dt: number, inputX: number, inputY: number, allowDescend: boolean): void {
     const clampedX = clamp(inputX, -1.4, 1.4);
     const clampedY = clamp(inputY, -1.4, 1.4);
-    const wantsDescend = allowDescend && clampedY > 0.06;
-
-    const liftAccel = this.computeDirectedAirAccel(unit, 0, -1);
-    const descendFactor = wantsDescend ? clamp(clampedY, 0, 1) : 0;
-    const reservedLift = wantsDescend ? AIR_HOLD_GRAVITY * (1 - descendFactor) : AIR_HOLD_GRAVITY;
-    const spareLiftRatio = liftAccel > 0
-      ? clamp((liftAccel - reservedLift) / Math.max(1, liftAccel), 0, 1)
-      : 0;
-
-    let moveDirX = clampedX;
-    let moveDirY = 0;
-    if (!wantsDescend && clampedY < -0.06) {
-      moveDirY = clampedY;
-    }
-    const moveLen = Math.hypot(moveDirX, moveDirY);
-    const ux = moveLen > 1e-6 ? moveDirX / moveLen : 0;
-    const uy = moveLen > 1e-6 ? moveDirY / moveLen : 0;
-    const directedAccel = moveLen > 1e-6 ? this.computeDirectedAirAccel(unit, ux, uy) : 0;
-    const effectiveMoveAccel = directedAccel * (wantsDescend ? 1 : spareLiftRatio);
-    const moveSpeedRatio = clamp(effectiveMoveAccel / Math.max(1, AIR_HOLD_GRAVITY), 0, 1);
-    const moveSpeed = unit.maxSpeed * moveSpeedRatio;
+    void allowDescend;
+    const moveLen = Math.hypot(clampedX, clampedY);
+    const ux = moveLen > 1e-6 ? clampedX / moveLen : 0;
+    const uy = moveLen > 1e-6 ? clampedY / moveLen : 0;
+    const moveSpeed = this.scaleMovementSpeed(unit.maxSpeed);
 
     unit.vx = ux * moveSpeed;
     unit.vy = uy * moveSpeed;
 
-    const fallAccel = Math.max(0, AIR_HOLD_GRAVITY - liftAccel);
+    const fallAccel = Math.max(0, AIR_HOLD_GRAVITY - this.computeAirThrustSpeed(unit));
     if (fallAccel > 0) {
       unit.vy += fallAccel * dt;
       unit.aiDebugFireBlockReason = "low-lift";
-    } else if (wantsDescend) {
-      unit.vy += unit.maxSpeed * 0.45 * descendFactor;
     } else if (Math.abs(unit.vy) < 1.2) {
       unit.vy = 0;
     }
-
-      if (liftAccel <= 1) {
-        if (!unit.airDropActive) {
-          unit.airDropActive = true;
-          const laneBounds = this.getLaneBounds();
-          unit.airDropTargetY = laneBounds.groundMinY + Math.random() * (laneBounds.groundMaxY - laneBounds.groundMinY);
-          unit.aiDebugDecisionPath = "air-no-lift-drop";
-        }
-      }
   }
 
   private executeCommand(unit: UnitInstance, command: UnitCommand, dt: number): CommandResult {
@@ -2281,27 +2344,18 @@ export class BattleSession {
 
     // --- Movement ---
     if (unit.airDropActive) {
-      // AIR-DROP 50/50 thrust split
       const dirX = command.move.dirX;
-
-      // 50% of thrust for horizontal
-      const horizontalAccel = dirX !== 0 ? this.computeDirectedAirAccel(unit, Math.sign(dirX), 0) : 0;
-      const effectiveHorizontal = horizontalAccel * 0.5;
-      const horizontalSpeedRatio = clamp(effectiveHorizontal / Math.max(1, AIR_HOLD_GRAVITY), 0, 1);
-      unit.vx = Math.sign(dirX) * unit.maxSpeed * horizontalSpeedRatio;
-
-      // 50% of thrust for vertical (fighting gravity)
+      unit.vx = Math.sign(dirX) * this.scaleMovementSpeed(unit.maxSpeed);
       unit.vy = Math.max(0, unit.vy);
-      const liftAccel = this.computeDirectedAirAccel(unit, 0, -1);
-      const effectiveVertical = liftAccel * 0.5;
-      const fallAccel = Math.max(0, AIR_DROP_GRAVITY - effectiveVertical);
+      const fallAccel = Math.max(0, AIR_DROP_GRAVITY - this.computeAirThrustSpeed(unit));
       unit.vy += fallAccel * dt;
     } else if (unit.type === "air") {
       this.applyAirThrustMovement(unit, dt, command.move.dirX, command.move.dirY, command.move.allowDescend ?? false);
     } else {
       // Ground movement
-      unit.vx += command.move.dirX * unit.accel * dt;
-      unit.vy += command.move.dirY * unit.accel * dt;
+      const movementAccel = this.scaleMovementSpeed(unit.accel);
+      unit.vx += command.move.dirX * movementAccel * dt;
+      unit.vy += command.move.dirY * movementAccel * dt;
     }
 
     // --- Fire ---
@@ -2312,6 +2366,9 @@ export class BattleSession {
       return result;
     }
     for (const req of command.fire) {
+      if (req.slot >= 0 && req.slot < unit.weaponAimAngles.length) {
+        unit.weaponAimAngles[req.slot] = req.angleRad;
+      }
       const fired = this.fireWeaponSlot(unit, req.slot, req.manual, req.angleRad, req.intendedTargetId, req.intendedTargetY);
       if (fired) {
         result.firedSlots.push(req.slot);
@@ -2348,32 +2405,46 @@ export class BattleSession {
   }
 
   private playerInputToCommand(unit: UnitInstance, _dt: number, keys: KeyState): UnitCommand {
-    let dx = 0;
-    let dy = 0;
+    let dx = clamp(keys.moveX ?? 0, -1, 1);
+    let dy = clamp(keys.moveY ?? 0, -1, 1);
     if (keys.a) dx -= 1;
     if (keys.d) dx += 1;
     if (keys.w) dy -= 1;
     if (keys.s) dy += 1;
+    const moveLength = Math.hypot(dx, dy);
+    if (moveLength > 1) {
+      dx /= moveLength;
+      dy /= moveLength;
+    }
+
+    const controllerAimX = keys.aimX ?? 0;
+    const controllerAimY = keys.aimY ?? 0;
+    if (Math.hypot(controllerAimX, controllerAimY) > 0.01) {
+      const aimAngle = Math.atan2(controllerAimY, controllerAimX);
+      this.controllerAimAngleRad = aimAngle;
+      const aimDistance = Math.max(this.canvas.width, this.canvas.height);
+      this.aimX = clamp(unit.x + Math.cos(aimAngle) * aimDistance, 0, this.canvas.width);
+      this.aimY = clamp(unit.y + Math.sin(aimAngle) * aimDistance, 0, this.canvas.height);
+    }
 
     const fire: FireRequest[] = [];
 
-    if (!this.hasAliveWeapons(unit)) {
-      // Weaponless player unit — no fire, just movement
-      return { move: { dirX: dx, dirY: dy, allowDescend: keys.s }, facing: null, fire };
+    const manualAimAngle = this.controllerAimAngleRad ?? Math.atan2(this.aimY - unit.y, this.aimX - unit.x);
+    for (let slot = 0; slot < unit.weaponAttachmentIds.length; slot += 1) {
+      if (this.isWeaponManualControlEnabled(unit, slot)) unit.weaponAimAngles[slot] = manualAimAngle;
     }
 
-    // Manual fire from mouse hold
-    if (this.manualFireHeld) {
+    if (!this.hasAvailableWeapons(unit)) {
+      // Weaponless player unit — no fire, just movement
+      return { move: { dirX: dx, dirY: dy, allowDescend: dy > 0.06 }, facing: null, fire };
+    }
+
+    // Manual fire from mouse hold or controller trigger/bumper.
+    if (this.manualFireHeld || keys.manualFire === true) {
       for (let slot = 0; slot < unit.weaponAttachmentIds.length; slot += 1) {
         if (this.isWeaponManualControlEnabled(unit, slot)) {
-          const angleRad = Math.atan2(this.aimY - unit.y, this.aimX - unit.x);
-          fire.push({
-            slot,
-            angleRad,
-            intendedTargetId: null,
-            intendedTargetY: null,
-            manual: true,
-          });
+          const angleRad = manualAimAngle;
+          fire.push(this.createManualFireRequest(unit, slot, angleRad));
         }
       }
     }
@@ -2385,7 +2456,49 @@ export class BattleSession {
     const decision = this.getCombatDecision(unit, _dt);
     this.appendFireRequestsFromDecision(unit, decision, fire, suppressedAutoSlots);
 
-    return { move: { dirX: dx, dirY: dy, allowDescend: keys.s }, facing: null, fire };
+    return { move: { dirX: dx, dirY: dy, allowDescend: dy > 0.06 }, facing: null, fire };
+  }
+
+  private createManualFireRequest(unit: UnitInstance, slot: number, angleRad: number): FireRequest {
+    const attachmentId = unit.weaponAttachmentIds[slot];
+    const attachment = unit.attachments.find((entry) => entry.id === attachmentId && entry.alive) ?? null;
+    const stats = attachment ? COMPONENTS[attachment.component] : null;
+    const needsTarget = stats?.type === "weapon"
+      && ((stats.weaponClass ?? "rapid-fire") === "tracking" || (attachment?.stats?.trackingTurnRateDegPerSec ?? 0) > 0);
+    const target = needsTarget ? this.findEnemyAlongAim(unit, slot, angleRad) : null;
+    return {
+      slot,
+      angleRad,
+      intendedTargetId: target?.id ?? null,
+      intendedTargetY: target?.y ?? null,
+      manual: true,
+    };
+  }
+
+  /** Selects the target closest to the forward aim ray for target-dependent player weapons. */
+  private findEnemyAlongAim(unit: UnitInstance, slot: number, angleRad: number): UnitInstance | null {
+    const weapon = this.getWeaponFireInput(unit, slot);
+    const maxRange = weapon?.effectiveRange ?? Math.max(this.canvas.width, this.canvas.height);
+    const ux = Math.cos(angleRad);
+    const uy = Math.sin(angleRad);
+    let best: UnitInstance | null = null;
+    let bestScore = Number.POSITIVE_INFINITY;
+    for (const candidate of this.state.units) {
+      if (!candidate.alive || !canOperate(candidate) || candidate.side === unit.side) continue;
+      const relX = candidate.x - unit.x;
+      const relY = candidate.y - unit.y;
+      const forwardDistance = relX * ux + relY * uy;
+      if (forwardDistance <= 0 || forwardDistance > maxRange * 1.2) continue;
+      const perpendicularDistance = Math.abs(relX * uy - relY * ux);
+      const lockWidth = Math.max(candidate.radius + 36, forwardDistance * 0.32);
+      if (perpendicularDistance > lockWidth) continue;
+      const score = perpendicularDistance + forwardDistance * 0.035;
+      if (score < bestScore) {
+        best = candidate;
+        bestScore = score;
+      }
+    }
+    return best;
   }
 
   private aiDecisionToCommand(unit: UnitInstance, decision: CombatDecision): UnitCommand {
@@ -2481,7 +2594,7 @@ export class BattleSession {
     unit.aiDebugDecisionPath = unit.aiDebugDecisionPath || "air-drop-return";
 
     // Try to fire at closest enemy while dropping
-    if (this.hasAliveWeapons(unit)) {
+    if (this.hasAvailableWeapons(unit)) {
       const target = this.pickTarget(unit);
       if (target) {
         unit.aiDebugTargetId = target.id;
@@ -2514,7 +2627,9 @@ export class BattleSession {
     const baseCenterX = base.x + base.w / 2;
     const baseCenterY = base.y + base.h / 2;
     const laneBounds = this.getLaneBounds();
-    const retreatY = clamp(baseCenterY, laneBounds.groundMinY, laneBounds.groundMaxY);
+    const retreatY = unit.type === "air"
+      ? clamp(baseCenterY, laneBounds.airMinZ, laneBounds.airMaxZ)
+      : clamp(baseCenterY, laneBounds.groundMinY, laneBounds.groundMaxY);
 
     const dx = baseCenterX - unit.x;
     const dy = retreatY - unit.y;
@@ -2526,14 +2641,14 @@ export class BattleSession {
     unit.aiState = "evade";
     unit.aiDebugShouldEvade = true;
     unit.aiDebugTargetId = null;
-    unit.aiDebugDecisionPath = "weaponless-retreat";
-    unit.aiDebugFireBlockReason = "no-weapons";
+    unit.aiDebugDecisionPath = "escape-return";
+    unit.aiDebugFireBlockReason = "no-available-weapons";
     unit.aiDebugPreferredWeaponSlot = -1;
     unit.aiDebugLeadTimeS = 0;
 
     return {
       move: { dirX: ux, dirY: uy },
-      facing: unit.side === "player" ? 1 : -1,
+      facing: unit.escapeFacingDelayS > 0 ? null : (ux < 0 ? -1 : ux > 0 ? 1 : null),
       fire: [],
     };
   }
@@ -2668,7 +2783,8 @@ export class BattleSession {
     return suppressed;
   }
 
-  private getSelectedWeaponRange(unit: UnitInstance): number {
+  /** Renderer-facing effective range for the unit's active/manual weapon selection. */
+  public getSelectedWeaponRange(unit: UnitInstance): number {
     if (unit.id === this.playerControlledId) {
       let bestRange = 0;
       for (let slot = 0; slot < unit.weaponAttachmentIds.length; slot += 1) {
@@ -2739,15 +2855,48 @@ export class BattleSession {
     return globalBuff * (1 + airBonus);
   }
 
-  private hasAliveWeapons(unit: UnitInstance): boolean {
-    return getAliveWeaponAttachments(unit).length > 0;
+  private hasAvailableWeapons(unit: UnitInstance): boolean {
+    for (let slot = 0; slot < unit.weaponAttachmentIds.length; slot += 1) {
+      const attachmentId = unit.weaponAttachmentIds[slot];
+      const weaponAttachment = unit.attachments.find((attachment) => attachment.id === attachmentId && attachment.alive);
+      if (!weaponAttachment) continue;
+      const weaponStats = COMPONENTS[weaponAttachment.component];
+      if (weaponStats.type !== "weapon") continue;
+      const weaponClass = weaponStats.weaponClass ?? "rapid-fire";
+      if (!this.requiresDedicatedLoader(weaponClass) || (unit.weaponReadyCharges[slot] ?? 0) > 0) {
+        return true;
+      }
+      const canReload = unit.loaderStates.some((loaderState) => {
+        const loaderAttachment = unit.attachments.find((attachment) => attachment.id === loaderState.attachmentId && attachment.alive);
+        const loaderConfig = loaderAttachment ? this.getLoaderConfig(loaderAttachment) : null;
+        return loaderConfig?.supports.includes(weaponClass) === true;
+      });
+      if (canReload) return true;
+    }
+    return false;
+  }
+
+  private activateEscapeIfUnavailable(unit: UnitInstance): void {
+    if (unit.escapeActive || unit.returnedToBase || this.hasAvailableWeapons(unit)) {
+      return;
+    }
+    unit.escapeActive = true;
+    unit.escapeFacingDelayS = 1;
+    unit.aiState = "evade";
+    unit.aiDebugShouldEvade = true;
+    unit.aiDebugDecisionPath = "escape-return";
+    unit.aiDebugFireBlockReason = "no-available-weapons";
+    if (unit.id === this.playerControlledId || unit.id === this.selectedUnitId) {
+      this.clearControlSelection();
+    }
+    this.hooks.addLog(`${unit.name} has no available weapon and entered escape mode`, "warn");
   }
 
   private getAttachmentFirepointWorld(
     unit: UnitInstance,
     attachment: UnitInstance["attachments"][number],
   ): { x: number; y: number } {
-    const weaponCellSize = Math.max(8, Math.min(14, unit.radius * 1.7 * 0.24));
+    const weaponCellSize = getStructureCellSize(unit.radius);
     const weaponOffset = attachment.shootingOffset
       ? this.getCoordOffsetWorld(
           unit,
@@ -2755,11 +2904,56 @@ export class BattleSession {
           attachment.y + attachment.shootingOffset.y,
           weaponCellSize,
         )
-      : this.getCellOffsetWorld(unit, attachment.cell, weaponCellSize);
+      : this.getCoordOffsetWorld(unit, attachment.x, attachment.y, weaponCellSize);
     return {
       x: unit.x + weaponOffset.x,
       y: unit.y + weaponOffset.y,
     };
+  }
+
+  private getAttachmentVisualMuzzleWorld(
+    unit: UnitInstance,
+    attachment: UnitInstance["attachments"][number],
+    angleRad: number,
+  ): { x: number; y: number } {
+    // Keep this geometry synchronized with structure rendering and collision.
+    const visualCellSize = getStructureCellSize(unit.radius);
+    const center = this.getCoordOffsetWorld(unit, attachment.x, attachment.y, visualCellSize);
+    const barrelLength = (visualCellSize / 14) * 10;
+    return {
+      x: unit.x + center.x + Math.cos(angleRad) * barrelLength,
+      y: unit.y + center.y + Math.sin(angleRad) * barrelLength,
+    };
+  }
+
+  /** Shared weapon presentation geometry used by rendering and projectile spawn. */
+  public getWeaponVisualState(
+    unit: UnitInstance,
+    attachmentId: number,
+  ): { angleRad: number; firepointX: number; firepointY: number; muzzleX: number; muzzleY: number } | null {
+    const slot = unit.weaponAttachmentIds.indexOf(attachmentId);
+    if (slot < 0) return null;
+    const attachment = unit.attachments.find((entry) => entry.id === attachmentId && entry.alive);
+    if (!attachment) return null;
+    const firepoint = this.getAttachmentFirepointWorld(unit, attachment);
+    const requestedAngle = unit.weaponAimAngles[slot] ?? this.getAttachmentWeaponFacingAngleRad(unit, attachment);
+    const angleRad = this.clampAndAdjustAngle(unit, attachment.component, requestedAngle, attachment.stats?.shootAngleDeg, attachment);
+    const muzzle = this.getAttachmentVisualMuzzleWorld(unit, attachment, angleRad);
+    return {
+      angleRad,
+      firepointX: firepoint.x,
+      firepointY: firepoint.y,
+      muzzleX: muzzle.x,
+      muzzleY: muzzle.y,
+    };
+  }
+
+  /** Stable world center for a structure cell on the craft's original coordinate grid. */
+  public getStructureCellWorldCenter(unit: UnitInstance, cellId: number): { x: number; y: number } | null {
+    const cell = unit.structure.find((entry) => entry.id === cellId);
+    if (!cell) return null;
+    const offset = this.getCellOffsetWorld(unit, cell.id, getStructureCellSize(unit.radius));
+    return { x: unit.x + offset.x, y: unit.y + offset.y };
   }
 
   private getWeaponFireInput(unit: UnitInstance, slot: number): WeaponFireAiInput | null {
@@ -2979,7 +3173,7 @@ export class BattleSession {
 
     this.ctx.scale(sideSign, 1);
 
-    this.drawStructureAndFunctionalLayer(unit, 1, w, h);
+    this.drawStructureAndFunctionalLayer(unit);
 
     if (this.displayEnabled) {
       this.drawDisplayLayer(unit, w, h, template);
@@ -3000,7 +3194,7 @@ export class BattleSession {
     if (aliveCells.length === 0) {
       return;
     }
-    const cellSize = Math.max(8, Math.min(14, unit.radius * 1.7 * 0.24));
+    const cellSize = getStructureCellSize(unit.radius);
     const pad = 1.5;
     const key = (x: number, y: number): string => `${x},${y}`;
     const aliveSet = new Set(aliveCells.map((cell) => key(cell.x, cell.y)));
@@ -3065,16 +3259,13 @@ export class BattleSession {
       return;
     }
 
-    const cellSize = Math.max(8, Math.min(14, w * 0.24));
+    const cellSize = getStructureCellSize(unit.radius);
     for (const item of items) {
-      if (item.cell < 0 || item.cell >= unit.structure.length) {
-        continue;
-      }
-      const cell = unit.structure[item.cell];
+      const cell = unit.structure.find((entry) => entry.id === item.cell);
       if (!cell || cell.destroyed) {
         continue;
       }
-      const offset = this.getCellOffsetLocal(unit, item.cell, cellSize);
+      const offset = this.getCoordOffsetLocal(unit, item.x ?? cell.x, item.y ?? cell.y, cellSize);
       if (item.kind === "panel") {
         this.ctx.fillStyle = "rgba(134, 158, 183, 0.72)";
         this.ctx.fillRect(offset.x - cellSize * 0.4, offset.y - cellSize * 0.4, cellSize * 0.8, cellSize * 0.8);
@@ -3089,8 +3280,8 @@ export class BattleSession {
     }
   }
 
-  private drawStructureAndFunctionalLayer(unit: UnitInstance, sideSign: number, w: number, h: number): void {
-    const cellSize = Math.max(8, Math.min(14, w * 0.24));
+  private drawStructureAndFunctionalLayer(unit: UnitInstance): void {
+    const cellSize = getStructureCellSize(unit.radius);
 
     if (this.debugPartHpEnabled) {
       this.ctx.font = "9px Trebuchet MS";
@@ -3124,21 +3315,40 @@ export class BattleSession {
       if (!attachment.alive) {
         continue;
       }
-      const offset = this.getCellOffsetLocal(unit, attachment.cell, cellSize);
+      const offset = this.getCoordOffsetLocal(unit, attachment.x, attachment.y, cellSize);
       const component = COMPONENTS[attachment.component];
       this.ctx.fillStyle = component.type === "weapon" ? "#f0b39f" : component.type === "control" ? "#9dd7ff" : "#a7c9a3";
       this.ctx.fillRect(offset.x - 2, offset.y - 2, 4, 4);
     }
 
-    const weapon = firstAliveWeaponAttachment(unit);
-    if (weapon) {
-      this.ctx.fillStyle = unit.side === "player" ? "#a7d9ff" : "#f4b09d";
-      this.ctx.fillRect(0, -2, sideSign * 16, 4);
+    for (const weapon of getAliveWeaponAttachments(unit)) {
+      const slot = unit.weaponAttachmentIds.indexOf(weapon.id);
+      if (slot < 0) continue;
+      const anchor = this.getCoordOffsetLocal(unit, weapon.x, weapon.y, cellSize);
+      const worldAngle = unit.weaponAimAngles[slot] ?? (unit.facing === 1 ? 0 : Math.PI);
+      const localAngle = unit.facing === 1 ? worldAngle : Math.PI - worldAngle;
+      const length = cellSize * 0.82;
+      const muzzleX = anchor.x + Math.cos(localAngle) * length;
+      const muzzleY = anchor.y + Math.sin(localAngle) * length;
+      this.ctx.strokeStyle = unit.side === "player" ? "#a7d9ff" : "#f4b09d";
+      this.ctx.lineWidth = Math.max(3, cellSize * 0.24);
+      this.ctx.lineCap = "round";
+      this.ctx.beginPath();
+      this.ctx.moveTo(anchor.x, anchor.y);
+      this.ctx.lineTo(muzzleX, muzzleY);
+      this.ctx.stroke();
+      this.ctx.fillStyle = this.ctx.strokeStyle;
+      this.ctx.beginPath();
+      this.ctx.arc(anchor.x, anchor.y, Math.max(2.5, cellSize * 0.22), 0, Math.PI * 2);
+      this.ctx.fill();
     }
 
     if (!this.displayEnabled) {
+      const bounds = this.getUnitLayoutBounds(unit);
+      const layoutWidth = (bounds.maxX - bounds.minX + 1) * cellSize;
+      const layoutHeight = (bounds.maxY - bounds.minY + 1) * cellSize;
       this.ctx.strokeStyle = "rgba(210, 228, 246, 0.5)";
-      this.ctx.strokeRect(-w * 0.55, -h * 0.5, w * 1.1, h);
+      this.ctx.strokeRect(-layoutWidth / 2, -layoutHeight / 2, layoutWidth, layoutHeight);
     }
 
     if (this.debugPartHpEnabled) {
@@ -3191,7 +3401,7 @@ export class BattleSession {
   }
 
   private getLiveCellRects(unit: UnitInstance): Array<{ id: number; x: number; y: number; w: number; h: number }> {
-    const cellSize = Math.max(8, Math.min(14, unit.radius * 1.7 * 0.24));
+    const cellSize = getStructureCellSize(unit.radius);
     const rects: Array<{ id: number; x: number; y: number; w: number; h: number }> = [];
     for (const cell of unit.structure) {
       if (cell.destroyed) {
@@ -3209,10 +3419,10 @@ export class BattleSession {
     return rects;
   }
 
-  private projectileHitsLiveCell(projectile: BattleState["projectiles"][number], unit: UnitInstance, isAir: boolean): number | null {
+  private projectileHitsUnitPart(projectile: BattleState["projectiles"][number], unit: UnitInstance, isAir: boolean): UnitProjectileHit | null {
     const laneBounds = this.getLaneBounds();
     const rects = this.getLiveCellRects(unit);
-    let bestCellId: number | null = null;
+    let bestHit: UnitProjectileHit | null = null;
     let bestEntryTime = Number.POSITIVE_INFINITY;
     for (const rect of rects) {
       const expandedLeft = rect.x - projectile.r;
@@ -3237,10 +3447,51 @@ export class BattleSession {
       }
       if (entryTime < bestEntryTime) {
         bestEntryTime = entryTime;
-        bestCellId = rect.id;
+        bestHit = { structureCellId: rect.id, ignoreArmor: false };
       }
     }
-    return bestCellId;
+
+    const cellSize = getStructureCellSize(unit.radius);
+    const liveStructureByCoord = new Map(
+      unit.structure
+        .filter((cell) => !cell.destroyed)
+        .map((cell) => [`${cell.x},${cell.y}`, cell] as const),
+    );
+    for (const attachment of unit.attachments) {
+      if (!attachment.alive) continue;
+      const attachedCells = attachment.attachedStructureCellIds
+        .map((cellId) => unit.structure.find((cell) => cell.id === cellId && !cell.destroyed) ?? null)
+        .filter((cell): cell is UnitInstance["structure"][number] => cell !== null);
+      if (attachedCells.length <= 0) continue;
+      for (const offset of attachment.occupiedOffsets ?? []) {
+        if (!offset.takesDamage || (!offset.occupiesFunctionalSpace && !offset.occupiesStructureSpace)) continue;
+        const coordX = attachment.x + offset.x;
+        const coordY = attachment.y + offset.y;
+        // A functional box over structure is hit as structure, including normal armor.
+        if (liveStructureByCoord.has(`${coordX},${coordY}`)) continue;
+        const worldOffset = this.getCoordOffsetWorld(unit, coordX, coordY, cellSize);
+        const entryTime = this.segmentAabbEntryTime(
+          projectile.prevX,
+          projectile.prevY,
+          projectile.x,
+          projectile.y,
+          unit.x + worldOffset.x - cellSize / 2 - projectile.r,
+          unit.y + worldOffset.y - cellSize / 2 - projectile.r,
+          unit.x + worldOffset.x + cellSize / 2 + projectile.r,
+          unit.y + worldOffset.y + cellSize / 2 + projectile.r,
+        );
+        if (entryTime === null || entryTime >= bestEntryTime) continue;
+        if (isAir && Math.abs(unit.y + worldOffset.y - projectile.y) > laneBounds.airTargetTolerance + projectile.r) continue;
+        const closestAttachedCell = attachedCells.reduce((closest, cell) => {
+          const closestDistance = Math.hypot(closest.x - coordX, closest.y - coordY);
+          const cellDistance = Math.hypot(cell.x - coordX, cell.y - coordY);
+          return cellDistance < closestDistance ? cell : closest;
+        });
+        bestEntryTime = entryTime;
+        bestHit = { structureCellId: closestAttachedCell.id, ignoreArmor: true };
+      }
+    }
+    return bestHit;
   }
 
   private segmentAabbEntryTime(
@@ -3310,7 +3561,7 @@ export class BattleSession {
     beforeAliveAttachments: Set<number>,
     wasAlive: boolean,
   ): void {
-    const cellSize = Math.max(8, Math.min(14, unit.radius * 1.7 * 0.24));
+    const cellSize = getStructureCellSize(unit.radius);
 
     for (const cell of unit.structure) {
       if (!cell.destroyed || beforeDestroyed.has(cell.id)) {

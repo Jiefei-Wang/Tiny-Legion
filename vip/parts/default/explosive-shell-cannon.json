@@ -70,11 +70,14 @@
   },
   "partProperties": {
     "computingConsumption": 1,
-    "explodeOnHit": true
+    "fireSoundVolume": 2,
+    "explodeOnHit": true,
+    "maxCapacity": 2
   },
   "properties": {
     "category": "weapon",
     "subcategory": "explosive",
+    "materialAlpha": 1,
     "isEngine": false,
     "isWeapon": true,
     "isLoader": false,

@@ -6,7 +6,7 @@ This document includes target architecture and current shipped implementation.
 
 Current active stack/runtime:
 
-- Runtime: Browser (`HTML5 Canvas`)
+- Runtime: Browser (`Phaser 3` on HTML5 Canvas; DOM developer panels)
 - Language: `TypeScript`
 - Build tool: `Vite`
 - Active app path: `vip/`
@@ -17,8 +17,9 @@ Implemented gameplay architecture highlights:
 
 - Ground combat: continuous `X/Y` movement zone
 - Air combat: `X/Z` abstraction (rendered on screen vertical axis)
-- Air propulsion split: `jetEngine` (omni thrust) + `propeller` (directional thrust with placement constraints)
+- Air propulsion uses a single isotropic `jetEngine` model.
 - Unit layers: `structure + functional + display`
+- Runtime rendering resolves display survivability by stable structure-cell ID, but positions display and functional layers from their authored `x/y` coordinates. Destruction therefore cannot compact a row or change its local origin.
 - AI modules split by concern:
   - `src/ai/composite/composite-ai.ts` (shared composite interface)
   - `src/ai/composite/baseline-modules.ts` (baseline target/movement/shoot modules)
@@ -30,13 +31,25 @@ Implemented gameplay architecture highlights:
 - Multi-weapon units with independent cooldown timers, per-slot manual-control toggles, and per-slot auto-fire toggles
 - AI shoot input contract includes per-slot resolved firepoint world coordinates plus resolved projectile speed/gravity from runtime weapon stats (with fallback), so aim solve and projectile spawn use consistent ballistics.
 - Player-controlled manual slots suppress auto-fire execution at runtime without mutating stored auto-fire flags
+- Browser battlefield input polls the standard Gamepad API each simulation update. Deadzoned left/right stick axes and right-trigger/right-bumper fire state extend `KeyState`, then flow through the same `playerInputToCommand()` and `UnitCommand` execution path as keyboard/mouse input.
+- Manual target-dependent weapons resolve an intended enemy by scoring valid enemies along the forward aim ray; the resulting target ID/Y is carried by `FireRequest` for homing behavior, while non-tracking manual weapons remain angle-only.
 - Top-level mode tabs include dedicated `Template Editor` and `Part Editor` entries (alongside `Base`/`Map`/`Battle`)
+- The production shell groups navigation into `Campaign` and `Developer Tools`, with context-aware inspector titles and wider authoring/scenario layouts.
+- Base and Map use `#managementCenter` as a DOM workspace in the central panel; battle/Test Arena/editors retain their canvas workspaces.
+- The Base management workspace renders the compound before secondary research content. Live base metrics are scene overlays, while a single bottom construction dock is populated from the selected empty `BaseBuildingSlot` and its size-compatible `BUILDING_CATALOG` entries.
+- Developer destinations are routed through the top-bar `#developerMenu`; the left campaign navigation and active panel are separated by a pointer-driven, locally persisted vertical resizer.
+- `#debugMenu` reuses the Developer Tools dropdown shell and floating popover pattern while retaining dedicated checkbox controls for runtime overlays and resource debugging.
 - `Test Arena` is a dedicated top-level tab for debug battles (not part of the map node list)
 - Display layer visibility is debug-controlled (top-bar `Debug Options`) and defaults to OFF in battle runtime
 - In-app debug options plus local runtime log pipeline (`/__debug/*` -> `vip/.debug/runtime.log`)
 - Battle simulation defaults are centralized in shared balance config (`battlefield.ts`) including dimensions, ground height, air layer ratios, air physics constants, battle rules (salvage refund factor), and unit soft-separation tuning constants - all reused by browser + headless/arena paths
-- Test Arena supports runtime battlefield simulation-size overrides (`W`/`H`) and ground-height tuning in the browser app; display zoom remains a separate view-only transform
-- Strategic layer is turn-based: **Next Round** advances gas economy, construction, and resolves campaign battles (Test Arena skips round resolution)
+- Test Arena supports runtime battlefield simulation-size overrides (`W`/`H`) and ground-height tuning in the browser app; display zoom remains a separate view-only transform. Battle entry derives its default zoom from the live viewport and lane bounds (`airMinZ` through `groundMaxY`), and Test Arena recomputes that vertical fit when runtime battlefield dimensions change.
+- Strategic layer uses `RealTimeCampaign`: the fixed game loop advances continuous income, timed building/research jobs, deployment ETAs, and off-screen campaign battles (Test Arena behavior remains isolated)
+- `packages/game-core/src/gameplay/campaign/real-time-campaign.ts` owns building catalogs, four sized Main Base slots, timed jobs, delivery capacity, nearest-base logistics quotes, distance cost, and outpost support rules
+- `MapNode` carries optional strategic metadata (`kind`, routed `links`, map coordinates, home distance, yields, deposits, outpost roster/range); remote bases are logistics-only and never receive building slots
+- Campaign art assets live under `vip/public/assets/campaign/` as optimized WebP scene/facility art plus an alpha PNG command-bunker sprite. Base and Map consume scene/facility assets through DOM/CSS composition. Phaser independently preloads `battle-air-layer.webp` and `battle-ground-layer.webp`, resizes their boundary from the runtime `groundMinY`, positions side-specific bunker instances behind its immediate-mode effects layer, and keeps simulation state renderer-independent.
+- Phaser's tactical overlay reads renderer-safe `BattleSession` state: per-cell structure geometry for hitboxes, `getSelectedWeaponRange(...)` for each craft's effective range ring, velocity for movement vectors, and `aiDebugTargetId` for faction-colored aim lines/reticles. Selected/controlled range rings receive stronger emphasis; the two related Runtime Debug checkboxes default ON outside replay mode.
+- `UnitInstance.weaponAimAngles` stores per-slot presentation aim. Command processing updates it from manual/AI fire requests, and `BattleSession.getWeaponVisualState(...)` exposes the clamped angle plus exact projectile muzzle geometry. Phaser draws each live barrel from its attachment center to that muzzle, and projectile creation reuses the same muzzle calculation so shots originate at the visible barrel tip.
 
 ## 1. Target Stack
 
@@ -45,7 +58,7 @@ Use a browser-first stack with TypeScript for maintainability.
 - Runtime: Browser (`HTML5`, `Canvas/WebGL`, `WebAudio`)
 - Language: `TypeScript` (compiles to JS)
 - Build tool: `Vite`
-- Rendering: `Canvas 2D` (current implementation)
+- Rendering: `Phaser 3` for battles; direct Canvas 2D remains scoped to the template and part editors
 - Physics/combat model: custom deterministic simulation modules
 
 ---
@@ -60,12 +73,12 @@ Use a browser-first stack with TypeScript for maintainability.
 | `typescript` | Type safety for large modular systems |
 | `vite` | Dev/build pipeline |
 | `typescript` | Type safety and maintainability |
+| `phaser` | Battle scene lifecycle, Graphics rendering, and WebAudio integration |
 
 ## 2.2 Optional Expansion Packages (Future)
 
 | Package | Why useful |
 | --- | --- |
-| `pixi.js` | If switching from Canvas to GPU sprite renderer |
 | `@dimforge/rapier2d-compat` | If migrating to rigid-body physics engine |
 | `zustand` | If state complexity outgrows current app orchestration |
 | `howler` | If audio system is expanded |
@@ -93,13 +106,9 @@ Use a browser-first stack with TypeScript for maintainability.
   - Pros: simple API and fast prototyping.
   - Cons: weaker for heavy unit counts and strict physical consistency.
 
-### Renderer options
+### Renderer
 
-- `pixi.js` (recommended)
-  - Pros: built for 2D games, excellent batching and sprite workflows.
-- `phaser`
-  - Pros: many built-in game systems.
-  - Cons: if you want strict custom architecture, can feel framework-heavy.
+- `phaser` is the active browser battle renderer. The shared simulation does not import Phaser, keeping headless Arena execution DOM-free.
 
 ---
 
@@ -111,7 +120,7 @@ Split implementation into 4 runtime layers plus 2 integration surfaces:
    - Deterministic-ish fixed-timestep world update.
    - Physics, combat, unit state, AI decisions.
 2. **Presentation Layer**
-   - Pixi rendering, VFX (vibration, hit flashes), audio.
+   - Phaser rendering, debug overlays, VFX, and hit audio.
 3. **Game Meta Layer**
    - Base building, map progression, unlocks, commander skill, economy.
 4. **Platform Layer**
@@ -207,6 +216,7 @@ Arena-specific architecture notes:
 - Training and evaluation run headless through `WorkerPool` + `match-worker.ts` for parallel CPU usage.
 - Model ranking now prioritizes `winRateLowerBound` then `winRate`, then `score`.
 - Arena composite AI path can supply per-side `{ target, movement, shoot }` module specs that instantiate game-core `createCompositeAiController(...)`.
+- Built-in skill bundles resolve `skill-{low|medium|high}-{target|movement|shoot}` through `skill-tier-modules.ts`; baseline family IDs remain unchanged. The `eval-tiers` CLI scores each seed as a two-game, side-swapped mirrored series and exits non-zero when an adjacent tier is below the 80% series-win contract.
 - `run-composite-training.ts` optimizes modules in staged order (`shoot -> movement -> target`) with phase scenarios:
   - no-base 1v1,
   - no-base NvN,
@@ -234,8 +244,10 @@ Map node metadata supports test-only battle tuning via optional fields on `MapNo
 - `testBaseHpOverride` sets both player/enemy battle base HP and max HP for long-running test battles.
 - The `Test Arena` tab uses these overrides while skipping campaign rewards/ownership changes.
 - Test Arena UI controls for enemy count / battlefield size / zoom apply on input commit (`Enter` or blur) without extra apply buttons.
-- Test Arena enemy/player spawn selection uses separate template multi-select dropdowns (one per side).
-- Test Arena Unit tab includes two auto-spawn toggles (`enemy side`, `player side`, both default ON), side count inputs, and side template dropdowns; runtime keeps alive units per side at/above configured targets by auto-spawning the selected side template when enabled.
+- Test Arena enemy/player spawn selection uses one shared template expansion whose rows expose Player and Enemy checkboxes together.
+- Test Arena Unit tab includes two auto-spawn toggles (`enemy side`, `player side`, both default ON), side count inputs (both default `4`), and the shared craft expansion (all available templates selected by default); runtime keeps alive units per side at/above configured targets by auto-spawning from the selected side templates when enabled.
+- Test Arena includes a separate collapsible Manual Spawn tab. It calls `BattleSession.arenaDeploy(...)` once for the chosen side/template with arena-style free deployment and ignored unit caps, and is enabled only while Test Arena is active.
+- Browser bootstrap auto-persists Test Arena counts, craft filters, auto-spawn/invincibility toggles, battlefield geometry, AI selections, and manual-spawn choices under `forge-command.test-arena-settings.v1`; saved template IDs are reconciled after the file-backed template catalog loads.
 - Test Arena start path clears default starter units so no extra non-auto units remain.
 - Test Arena Unit tab includes a `Clear all units` action that removes all currently active units from the running Test Arena session.
 - Battle Ops panel includes spawn-side toggles (`Player Spawn` / `Enemy Spawn`, default player); enemy-side deploy via Battle Ops is restricted to active Test Arena sessions.
@@ -277,22 +289,22 @@ Encode your game rules as explicit modules (not scattered checks):
   - object can include multiple control units.
   - if all controls are destroyed: object mission-killed.
 - `damage-model.ts`
-  - resolves projectile hits to impacted structure cells (localized front/back damage).
+  - applies localized structure damage with either normal armor deduction or explicit armor bypass for relayed functional hits.
   - applies per-cell strain recovery using material `recoverPerSecond`.
 - `structure-grid.ts`
   - after cell destruction, enforces control-connectivity and destroys any disconnected structure cluster.
 - `functional-attachments.ts`
   - functional components must attach to structure cells.
-  - detached structure removes attached functional components.
+  - detached structure removes every functional component whose support-link list contains that cell.
 - `mass-cache.ts`
   - maintain incremental total mass (`M_total`) for fast recoil/knockback calculations.
 - `recoil.ts` and `impulse-model.ts`
   - shared formulas for fire recoil and incoming hit impulse.
 - `battle-session.ts` (air movement sub-system)
-  - aircraft only gain propulsion from air components (`jetEngine`/`propeller`).
-  - lift-vs-gravity deficit drives altitude loss.
-  - non-descent commands reserve thrust for vertical hold and spend spare thrust on horizontal movement.
-  - air-drop state uses 50/50 thrust split: half for horizontal, half for fighting gravity.
+  - aircraft only gain propulsion from `jetEngine` components.
+  - pre-gravity thrust speed is total jet power-to-mass scaled by `AIR_THRUST_ACCEL_SCALE`.
+  - effective movement speed is pre-gravity thrust speed minus `AIR_HOLD_GRAVITY`, capped by aggregate engine max speed.
+  - normalized horizontal, vertical, and diagonal commands receive the same speed magnitude.
 - `battle-session.ts` (unit overlap management)
   - same-layer units (`ground-ground`, `air-air`) use soft separation after movement integration.
   - partial overlap is allowed via configurable overlap allowance ratio, but deep stacking is pushed apart.
@@ -304,7 +316,11 @@ Encode your game rules as explicit modules (not scattered checks):
   - `FireRequest` carries `slot`, `manual`, and world-space `angleRad` (radians); fire execution derives aim projection from angle and effective range, then applies weapon-policy/angle clamps.
   - `executeCommand()` applies the command with unified enforcement of movement physics, weapon constraints, and boundary clamping.
   - command builders: `playerInputToCommand`, `aiDecisionToCommand`, `airDropReturnToCommand`, `retreatToCommand`.
-  - controller priority: player-controlled → air-drop → armed AI (decision tree) → weaponless air (triggers air-drop) → ground weaponless (retreat).
+  - Escape return delays its base-facing command for one second so newly asymmetric damage remains spatially stable before the retreat turn.
+  - `alive` represents a unit that remains present in battlefield state; `canOperate(unit)` distinguishes active units from persistent controller-loss wrecks. Active counts, spawning, targeting, collision separation, and arena scoring exclude inoperable wrecks.
+  - controller priority: player-controlled available weapon → thrust-loss air-drop → escape return → armed AI decision tree.
+  - weapon availability means a surviving weapon has a loaded round, does not require a loader, or has a surviving compatible loader that can eventually reload it.
+  - loss of all weapon availability sets persistent `UnitInstance.escapeActive`, releases player control immediately, and routes both ground and air units through return-to-base escape behavior.
   - `CommandResult` reports which slots fired and which were blocked (with reason).
   - weapon-control computing budget is enforced per unit:
     - control attachments contribute computing capacity (`partProperties.computing`, default `1` each),
@@ -324,10 +340,10 @@ Use fixed timestep simulation for gameplay, interpolated rendering for smooth vi
 3. Run simulation ticks (`dt = 1/60`) as needed.
 4. Physics + damage + AI updates.
 5. Publish simulation snapshot.
-6. Render interpolation in Pixi.
+6. Phaser reads current simulation state and presents the battle on its own scene clock.
 7. Present UI using latest snapshot/meta-state.
 
-Strategic progression is round-based (user-driven): **Next Round** applies gas income/upkeep, advances construction timers, and forces any active battle to resolve by the end of the round.
+Strategic progression shares the fixed real-time loop. `RealTimeCampaign.update(dt, nodes)` accrues resource income and advances building/research jobs regardless of the active campaign screen. A campaign `BattleSession` also updates off-screen with neutral player input. The browser integration owns a deployment ETA queue: it quotes the closest controlled Main/remote base, craft speed, outpost eligibility, and distance multiplier before spawning the craft into battle. Off-screen AI chooses from the player's default craft roster while gas and Delivery Center capacity allow.
 
 ---
 
@@ -429,6 +445,7 @@ Startup flow in `bootstrap.ts` merges templates from built-in defaults + file-ba
 Editor UX implementation details:
 
 - Canvas editor uses a resizable placement grid up to `10x10`.
+- Shared design tokens and responsive layout rules in `style.css` provide consistent cards, metrics, action states, developer introductions, navigation, focus hierarchy, and compact breakpoints across Base, Map, Test Arena, Leaderboard, and both editors.
 - Right-side palette renders component cards (placeholder thumbnail + label + type) in a scrollable list with hover detail text.
 - Active layer (`structure`, `functional`, `display`) is switched from right-panel controls above the part palette.
 - Template editor functional palette uses part catalog entries (not only hardcoded component IDs).
@@ -438,7 +455,7 @@ Editor UX implementation details:
 - Template persistence omits template gas fields; normalized runtime gas remains derived from part totals so part edits auto-refresh template gas.
 - Template parsing is strict for structure cells: invalid or missing structure `partId` fails parsing (no legacy `material` fallback path).
 - Part Designer supports optional `stats.gasCost` override per part; deleting the field reverts to default gas calculation from base component/material defaults.
-- Part Designer supports a unique per-part firepoint marker (`Fire point`) on box flags (max one per part); runtime uses it as muzzle spawn origin and AI receives that resolved world coordinate via battle AI input.
+- Part Designer supports a unique per-part firepoint marker (`Fire point`) on box flags (max one per part); runtime resolves it for AI targeting input, while projectile spawn uses the live clamped barrel-tip geometry shared with rendering.
 - Editor `Open` window lists all templates; clicking a template row opens it directly, and right-aligned `Copy` / `Delete` actions clone (`-copy` suffix) or remove file-backed entries.
 - Template Editor has a single `Save` action that persists to default templates; save path runs template normalization before writing JSON.
 - Template ID is internal integer/auto-managed for new and copied templates (no manual ID field in editor UI).
@@ -446,7 +463,14 @@ Editor UX implementation details:
 - Editor templates persist coordinates per placed part (`x`,`y`, origin `(0,0)`; negatives allowed).
 - Template Editor and Part Editor maintain separate grid pan/view state, so tab switching restores each editor's last viewport.
 - Editor grid viewport defaults to screen-centered origin and only recenters when loading a different template/part.
-- Battle, Template Editor, and Part Editor now each render to dedicated canvases (`#battleCanvas`, `#templateEditorCanvas`, `#partEditorCanvas`) layered in the shared viewport container.
+- Battle, Template Editor, and Part Editor use dedicated canvases (`#battleCanvas`, `#templateEditorCanvas`, `#partEditorCanvas`) layered in the shared viewport container. Phaser owns `#battleCanvas`; editor canvases intentionally remain direct Canvas tools.
+- `src/rendering/phaser-battle-renderer.ts` is the browser-only presentation adapter. It reads `BattleSession` state without owning game rules, preserving browser/headless combat parity.
+- `BattleSession.getDebugSnapshot()` publishes battlefield, entity counts, selection, craft motion/health, and AI target/evasion/lead/fire-block telemetry. The dev probe exposes it at `battle.debug`.
+- `BattleSession.consumeBattleAudioEvents()` bridges weapon-fire, impact, and explosion events to Phaser audio. Fire events include muzzle position, weapon class, damage, projectile speed, and the exact firing part's validated `partProperties.fireSoundVolume` (`0x..2x`, default `1x`); impact events include projectile class, struck structure material/armor, incoming damage, and actual post-armor delivered damage.
+- Phaser combines preloaded CC0 recorded samples with synthesized fallbacks for spatial weapon-fire and impacts, while explosion, deployment, and movement remain synthesized through Web Audio. Fire sample pools and playback-rate profiles are keyed by all five weapon classes; rapid-fire uses shortened broadband bullet-on-metal transients, heavy cannon adds a synthesized sub-bass recoil tail to a true cannon source, and tracking missiles use processed variants of a broadband rocket-launch recording without an extra synthesized layer. Light-projectile impacts use four individually segmented hard-surface ricochet variants with descending metallic tails and a lower mix level than heavy impacts; heavy impacts retain a separate pool. Impact playback rate still varies by material acoustics. The listener center and width come from the active CSS pan/zoom view rather than the fixed logical battlefield center. A live global sound multiplier (`0x..5x`, default `3x`) is applied to each event. Browser gesture listeners explicitly resume the Phaser Web Audio context, and combat events remain queued while autoplay policy keeps that context suspended. Asset provenance is recorded beside the files under `public/assets/audio/battle/`.
+- Display attachments are visual-only paint and render in the normal Phaser craft pass; functional attachments render component-family glyphs independently of paint.
+- `StructureCellTemplate.color` is an optional per-cell Craft Designer tint. Unit instancing falls back to the referenced structure part's `materialColor`, so existing templates retain their defaults. Phaser renders every cell with the same code-drawn armor-panel texture and applies the resolved cell color; it does not add vehicle- or aircraft-sized silhouette art behind the grid.
+- The Craft Designer functional palette and grid render per-component icons through `getFunctionalThumbGlyph(...)` and `drawFunctionalPartIcon(...)`, while the Phaser renderer uses its own world-scale functional glyph pass.
 - Template Editor and Part Editor canvas overlays include the currently opened template/part name at top-left.
 - Editor viewport controls use right-click click-to-delete and right-click drag for panning, plus mouse wheel zoom; battle keeps right-drag pan and wheel zoom.
 - Template Editor shows a 50% alpha hover ghost for selected parts only when the current mouse-target placement is valid.
@@ -458,19 +482,22 @@ Editor UX implementation details:
 - Weapon functional entries may carry `rotateQuarter` metadata (0..3, each step = 90deg).
 - Heavy-shot weapons use grouped multi-cell occupancy in editor and rotate footprint with `rotateQuarter`.
 - Functional component rotation/rendering now keys off a `directional` property (default undirectional).
-- Directional facing uses additive composition: part-level default `direction` + runtime/template `rotateQuarter` (used by editor arrows and propeller directional thrust/lift).
-- Directional angle limits for weapon/engine now use part properties `hasAngleLimit` + `cwAngle`/`ccwAngle` (relative to part direction); legacy `shootAngleDeg`/`thrustAngleDeg` remain as backward-compatible fallback only.
+- Directional weapon facing uses additive composition: part-level default `direction` + runtime/template `rotateQuarter`.
+- Directional angle limits apply to weapons through `hasAngleLimit` + `cwAngle`/`ccwAngle`; engines are isotropic.
 - Editor grid is user-resizable (up to 10x10) and supports mouse drag panning.
 - Template editor supports optional center-based placement (`center place on click`) for multi-cell part footprints.
 - Runtime unit instancing and battle rendering consume template coordinates, so visual shape and hit cell layout match editor placement.
-- Battle shot origin is computed from per-part shooting-point box offsets when defined; otherwise it falls back to attachment anchor/cell coordinates.
+- Battle AI fire input is computed from per-part shooting-point box offsets when defined (falling back to attachment anchor/cell coordinates); actual projectile creation starts at the live visible barrel tip.
 - Template parsing normalizes legacy weapon IDs (`mg`, `cannonL`, `cannonM`, `rocket`) to current IDs so old object designs remain valid.
 - Weapon firing clamps out-of-angle aim to the nearest allowed boundary before projectile spawn/cooldown.
-- Engine directional thrust and weapon firing both evaluate limits in part-local facing space (part default direction + template rotation + unit facing).
+- Weapon firing evaluates limits in part-local facing space (part default direction + template rotation + unit facing).
 - Runtime mobility derives from current engine power and current mass (power-to-mass), recalculated during battle updates.
 - Runtime mobility also applies per-engine max-speed caps; multiple-engine cap is computed as a power-weighted average, then used as a hard upper bound on computed speed.
+- `BattleSessionOptions.movementSpeedMultiplier` and the live `BattleSession.setMovementSpeedMultiplier(...)` setter scale commanded ground acceleration/velocity caps and commanded air speed without changing lift eligibility, gravity, recoil, or projectile physics. The shared default is `2x` and is bounded to `0.1x..10x` in `config/balance/battlefield.ts`.
+- Browser bootstrap persists the Global Settings payload under `forge-command.global-settings.v1`; the Developer Tools -> Global Settings panel saves the movement and battle-sound multipliers, applies movement to the active `BattleSession`, and exposes sound to the Phaser renderer through a live getter.
 - Projectile runtime state now carries firing origin metadata (`sourceUnitType`, `fireOriginY`, `initialVy`) so ground-vehicle non-tracking shots fired above horizontal can be terminated when they fall too far below the firing origin, while downward-fired shots remain unaffected.
 - Projectile runtime state also carries penetration state (`remainingPenetration`) plus per-part hit keys so one projectile can pass through multiple parts while never damaging the same part twice.
+- Structure-cell world sizing is centralized in `getStructureCellSize(...)` from battlefield balance config. Phaser rendering, projectile AABBs, targeting points, legacy Canvas/debug rendering, debris, and weapon geometry consume that shared size so presentation and hit resolution remain aligned.
 - AI shot-feedback correction has been removed from runtime projectile state and despawn handling; projectile aim now remains purely command/solver-driven for deterministic behavior.
 - Baseline shoot module now applies anti-jitter lead smoothing (filtered target velocity, partial lead gain with acceleration guard, and per-weapon aim slew/deadband) before issuing fire angles.
 - Battle runtime now maintains per-unit target history buffers (`targetHistory`) sampled by elapsed time (default 10 samples over 1 second; no frame-number coupling).
@@ -480,22 +507,23 @@ Editor UX implementation details:
 - AI-side angle deadband/slew damping is intentionally scoped to `baseline-shoot` only; `history-shoot`, `autoreg-shoot`, and `w11-shoot` keep ballistic solve output angles without additional per-tick angle-change clamping.
 - `train-composite` supports `--shootFamily history-shoot`, `--shootFamily w11-shoot`, and `--shootFamily autoreg-shoot`; when `shootSource=new`, Arena seeds default params (`history`: `history.recencyPower=1.0`, `w11`: descending alpha weights, `autoreg`: `alpha=0.5`) and mutates them during optimization.
 - Dev leaderboard model inventory keeps baseline and history built-ins; `autoreg-shoot` appears in leaderboard only from saved trained run artifacts.
-- Air units compute lift from air propulsion thrust (`jetEngine` omni, `propeller` directional cone) and compare against gravity hold.
-- Air movement reserves thrust for vertical hold first, then spends remaining thrust for horizontal/intentional altitude movement.
-- If lift becomes critically low, units transition into an air-drop crash path, pushing horizontally toward base; propeller aircraft can use remaining lift to slow descent during the crash, otherwise they fall at full crash gravity.
+- Air units compare isotropic jet thrust speed against gravity; only the post-gravity remainder becomes movement speed.
+- Horizontal, vertical, and diagonal movement share that same speed magnitude.
+- If jet thrust cannot overcome gravity, units transition into the air-drop crash path.
 - Loader subsystem added for selected weapon classes (heavy-shot/explosive/tracking):
 - Loader components (`cannonLoader`, `missileLoader`) are functional modules with per-loader capabilities.
   - Each loader services one weapon at a time via per-unit loader state.
   - Weapon slots now track ready charges and load timers.
-  - Loader settings (`supports`, `loadMultiplier`, `fastOperation`, `minLoadTime`, `storeCapacity`, `minBurstInterval`) drive reload and burst cadence.
+  - Loader settings (`supports`, `loadMultiplier`, `fastOperation`, `minLoadTime`, `minBurstInterval`) drive reload cadence; each weapon's `maxCapacity` property owns its ready-round limit.
 - Part-level runtime override coverage now includes full functional tuning:
-  - weapon overrides: recoil/hit impulse, projectile speed/gravity, explosive blast settings, tracking turn rate, control-impair factor/duration;
-  - loader overrides: supports/load-multiplier/fast-operation/min-load-time/store-capacity/min-burst-interval;
-  - armor `hp` metadata is converted to effective attachment durability scaling (`hpMul`) during unit instancing.
+  - weapon overrides: recoil/hit impulse, projectile speed/gravity, explosive blast settings, tracking turn rate, control-impair factor/duration, and per-attachment fire-sound volume;
+  - loader overrides: supports/load-multiplier/fast-operation/min-load-time/min-burst-interval;
+  - functional HP tuning is ignored because runtime functional attachments have no durability pool.
 - Selection highlight rendering traces outer alive-structure edges.
 - Tracking projectiles keep homing-aim coordinates and reacquire nearest valid enemy when initial target is unavailable.
-- Runtime attachment instances now carry part metadata (`partId`, footprint occupancy flags, optional runtime overrides) for movement/fire/damage systems.
-- Functional hit resolution can target part boxes marked as damageable functional space instead of only anchor-cell coupling.
+- Runtime attachment instances carry part metadata (`partId`, footprint occupancy flags, optional runtime overrides) plus explicit supporting structure-cell IDs.
+- Functional hit resolution sweeps exposed damageable part boxes alongside structure. Overlapping boxes defer to the structure hit; exposed boxes route damage to the closest support cell with armor bypass.
+- Weapon-control and selected-unit HUD labels resolve `Attachment.partId` through the live part catalog so authored part names are shown instead of base component IDs.
 
 Developer Part Designer UX:
 
@@ -509,6 +537,8 @@ Developer Part Designer UX:
 - `Open Part` modal includes tab-style filtering by part kind (`all`, `structure`, and functional component types).
 - In `partType=structure`, functional-only part-property and placement controls are hidden.
 - Part type/category default values auto-seed `partProperties` for new drafts and type/category switches.
+- Weapon Part Designer fields include `Fire Sound Volume` (`0x..2x`), persisted as `partProperties.fireSoundVolume`; the renderer applies it after resolving the firing attachment and before the global battle-volume multiplier.
+- Recorded and synthesized weapon-fire paths share a distance-aware Web Audio spatial bus. The bus derives listener distance from the current camera center and visible world width, then applies stereo pan, gain attenuation, and a progressive low-pass filter; impact samples retain their separate unfiltered spatial path so metallic transients remain distinct.
 - Material runtime defaults are sourced from balance config and can still be overridden by file-backed structure-material part definitions when present.
 - Part `Open` window mirrors template open-row actions with right-aligned `Copy` / `Delete` controls.
 - Part definitions use integer IDs internally (`id` and all template/attachment `partId` references).
@@ -535,7 +565,7 @@ In-app debug UI:
   - `Unlimited Resources`
   - `Draw Path + Hitbox`
   - `Draw Target Lines`
-  - `Show Display Layer` (default OFF)
+  - `Show Part HP Overlay`
   - `Show Part HP Overlay` (per-structure-cell HP text + red damage tint)
 
 Dev-server log endpoints (available via `vite.config.ts` middleware):
@@ -564,7 +594,7 @@ DEBUG_LOG=1 npm --prefix vip run dev
 
 ```bash
 npm create vite@latest modular-army -- --template vanilla-ts
-npm install pixi.js @dimforge/rapier2d-compat zustand zod nanoid howler comlink immer
+npm install phaser
 npm install -D vite-plugin-wasm
 ```
 
@@ -574,7 +604,7 @@ If you want pure JavaScript (no TypeScript), use `vanilla` template and remove `
 
 ## 13. First Implementation Milestones
 
-1. Boot app + fixed loop + Pixi scene + Rapier world.
+1. Boot app + fixed simulation loop + Phaser battle scene.
 2. Implement structure grid + attachment rules + at-least-one control unit validation.
 3. Implement impulse hit/recoil and mass-based velocity changes.
 4. Add damage pipeline (structure breach -> module loss).

@@ -1,6 +1,6 @@
 {
   "id": 19,
-  "name": "anti-aircraft machine gun",
+  "name": "Skyneedle AA Array",
   "layer": "functional",
   "partType": "weapon",
   "partCategory": "bullet",
@@ -48,26 +48,29 @@
   "stats": {
     "recoil": 4,
     "damage": 8,
-    "range": 500,
-    "cooldown": 0.1,
-    "shootAngleDeg": 30,
-    "projectileSpeed": 500,
-    "penetration": 500,
-    "spreadDeg": 0
+    "range": 720,
+    "cooldown": 0.08,
+    "shootAngleDeg": 360,
+    "projectileSpeed": 900,
+    "projectileGravity": 0,
+    "penetration": 18,
+    "spreadDeg": 0.7
   },
   "partProperties": {
     "computingConsumption": 1,
     "directional": false,
     "defaultDirection": "up",
-    "hasAngleLimit": true,
-    "cwAngle": 15,
-    "ccwAngle": 15,
+    "hasAngleLimit": false,
+    "cwAngle": 180,
+    "ccwAngle": 180,
+    "fireSoundVolume": 0.45,
     "explodeOnHit": false,
-    "shootAngleDeg": 30
+    "shootAngleDeg": 30,
+    "maxCapacity": 1
   },
   "properties": {
     "category": "weapon",
-    "subcategory": "rapid-fire",
+    "subcategory": "anti-air-high-velocity",
     "isEngine": false,
     "isWeapon": true,
     "isLoader": false,

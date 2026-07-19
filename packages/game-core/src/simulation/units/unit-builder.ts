@@ -50,7 +50,6 @@ export function createInitialTemplates(): UnitTemplate[] {
         { component: "engineM", cell: 1 },
         { component: "heavyCannon", cell: 3 },
         { component: "cannonLoader", cell: 2 },
-        { component: "ammo", cell: 2 },
       ],
     },
     {
@@ -86,7 +85,7 @@ export function createInitialTemplates(): UnitTemplate[] {
       ],
       attachments: [
         { component: "control", cell: 4, x: 0, y: 1 },
-        { component: "propeller", cell: 1, x: 0, y: 0, rotateQuarter: 3 },
+        { component: "jetEngine", cell: 1, x: 0, y: 0, rotateQuarter: 0 },
         { component: "trackingMissile", cell: 2, x: 1, y: 0, rotateQuarter: 0 },
         { component: "missileLoader", cell: 4, x: 0, y: 1 },
       ],
@@ -117,9 +116,13 @@ export function instantiateUnit(
     const recoverPerSecond = Math.max(0, part.properties?.materialRecoverPerSecond ?? 0);
     const armor = Math.max(0, part.properties?.materialArmor ?? 0);
     const mass = Math.max(0, part.stats?.mass ?? 0);
-    const color = (typeof part.properties?.materialColor === "string" && /^#[0-9a-fA-F]{6}$/.test(part.properties.materialColor))
+    const defaultColor = (typeof part.properties?.materialColor === "string" && /^#[0-9a-fA-F]{6}$/.test(part.properties.materialColor))
       ? part.properties.materialColor
       : "#95a4b8";
+    const color = typeof cell.color === "string" && /^#[0-9a-fA-F]{6}$/.test(cell.color)
+      ? cell.color
+      : defaultColor;
+    const alpha = Math.max(0, Math.min(1, part.properties?.materialAlpha ?? part.partProperties?.alpha ?? 1));
     return {
       id: index,
       partId: cell.partId,
@@ -128,6 +131,7 @@ export function instantiateUnit(
       armor,
       mass,
       color,
+      alpha,
       strain: 0,
       breakThreshold,
       recoverPerSecond,
@@ -162,12 +166,6 @@ export function instantiateUnit(
     );
     const anchorX = attachment.x ?? host?.x ?? attachment.cell;
     const anchorY = attachment.y ?? host?.y ?? 0;
-    const hpMulFromAbsoluteHp = ((): number | undefined => {
-      if (!part?.properties?.hp || !host) {
-        return undefined;
-      }
-      return Math.max(0.05, part.properties.hp / Math.max(1, host.breakThreshold));
-    })();
     const partOffsets = part
       ? getPartFootprintOffsets(part, rotateQuarter)
       : null;
@@ -194,6 +192,12 @@ export function instantiateUnit(
           takesDamage: true,
           takesFunctionalDamage: true,
         }];
+    const attachedStructureCellIds = Array.from(new Set([
+      ...(host ? [host.id] : []),
+      ...occupiedOffsets.flatMap((offset) => structure
+        .filter((cell) => cell.x === anchorX + offset.x && cell.y === anchorY + offset.y)
+        .map((cell) => cell.id)),
+    ]));
     const shootingOffset = partOffsets?.find((offset) => offset.isShootingPoint);
     return {
       id: index,
@@ -204,12 +208,12 @@ export function instantiateUnit(
       y: anchorY,
       rotateQuarter,
       alive: true,
+      attachedStructureCellIds,
       occupiedOffsets,
       shootingOffset: shootingOffset ? { x: shootingOffset.x, y: shootingOffset.y } : undefined,
       stats: part?.stats
         ? {
             mass: part.stats.mass,
-            hpMul: part.stats.hpMul ?? hpMulFromAbsoluteHp,
             power: part.stats.power,
             maxSpeed: part.stats.maxSpeed,
             recoil: part.stats.recoil,
@@ -232,12 +236,9 @@ export function instantiateUnit(
             loaderLoadMultiplier: part.stats.loaderLoadMultiplier,
             loaderFastOperation: part.stats.loaderFastOperation,
             loaderMinLoadTime: part.stats.loaderMinLoadTime,
-            loaderStoreCapacity: part.stats.loaderStoreCapacity,
             loaderMinBurstInterval: part.stats.loaderMinBurstInterval,
           }
-        : hpMulFromAbsoluteHp !== undefined
-          ? { hpMul: hpMulFromAbsoluteHp }
-          : undefined,
+        : undefined,
     };
   });
 
@@ -344,6 +345,7 @@ export function instantiateUnit(
     weaponManualControl: weaponAttachmentIds.map(() => true),
     weaponAutoFire: weaponAttachmentIds.map(() => true),
     weaponFireTimers: weaponAttachmentIds.map(() => 0),
+    weaponAimAngles: weaponAttachmentIds.map(() => side === "player" ? 0 : Math.PI),
     weaponReadyCharges: weaponAttachmentIds.map((_, slot) => {
       const weaponAttachmentId = weaponAttachmentIds[slot];
       const weaponAttachment = attachments.find((entry) => entry.id === weaponAttachmentId);
@@ -373,6 +375,8 @@ export function instantiateUnit(
     loaderStates,
     deploymentGasCost: options.deploymentGasCost ?? template.gasCost,
     returnedToBase: false,
+    escapeActive: false,
+    escapeFacingDelayS: 0,
     targetHistory: [{ x, y }],
     targetHistorySampleTimerS: 0,
     aiTimer: 0,

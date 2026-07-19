@@ -1,6 +1,6 @@
 {
-  "id": 20,
-  "name": "rapid gun",
+  "id": 8,
+  "name": "Railbreaker Cannon",
   "layer": "functional",
   "partType": "weapon",
   "partCategory": "bullet",
@@ -21,6 +21,17 @@
       "takeDamage": true,
       "attachPoint": false,
       "anchorPoint": true,
+      "firePoint": false
+    },
+    {
+      "x": 1,
+      "y": 0,
+      "structureOccupy": false,
+      "functionalOccupy": true,
+      "needStructureBehind": false,
+      "takeDamage": true,
+      "attachPoint": false,
+      "anchorPoint": false,
       "firePoint": true
     }
   ],
@@ -33,6 +44,18 @@
       "needsStructureBehind": true,
       "isAttachPoint": false,
       "isAnchorPoint": true,
+      "isShootingPoint": false,
+      "takesDamage": true,
+      "takesFunctionalDamage": true
+    },
+    {
+      "x": 1,
+      "y": 0,
+      "occupiesStructureSpace": false,
+      "occupiesFunctionalSpace": true,
+      "needsStructureBehind": false,
+      "isAttachPoint": false,
+      "isAnchorPoint": false,
       "isShootingPoint": true,
       "takesDamage": true,
       "takesFunctionalDamage": true
@@ -46,20 +69,26 @@
     "requireEmptyFunctionalOffsets": []
   },
   "stats": {
-    "recoil": 10,
-    "damage": 15,
-    "range": 500,
-    "shootAngleDeg": 360,
-    "projectileSpeed": 300,
-    "projectileGravity": 50,
-    "spreadDeg": 0
+    "recoil": 34,
+    "hitImpulse": 38,
+    "damage": 135,
+    "range": 680,
+    "cooldown": 1.15,
+    "shootAngleDeg": 100,
+    "projectileSpeed": 680,
+    "projectileGravity": 65,
+    "penetration": 150
   },
   "partProperties": {
-    "computingConsumption": 1
+    "computingConsumption": 1,
+    "fireSoundVolume": 0.5,
+    "explodeOnHit": false,
+    "maxCapacity": 2
   },
   "properties": {
     "category": "weapon",
-    "subcategory": "rapid-fire",
+    "subcategory": "heavy-shot",
+    "materialAlpha": 1,
     "isEngine": false,
     "isWeapon": true,
     "isLoader": false,
@@ -69,6 +98,6 @@
   "tags": [
     "default",
     "weapon",
-    "rapid-fire"
+    "heavy-shot"
   ]
 }

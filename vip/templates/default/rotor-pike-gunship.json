@@ -1,0 +1,160 @@
+{
+  "id": 4,
+  "name": "Rotor Pike Gunship",
+  "type": "air",
+  "structure": [
+    {
+      "partId": 10,
+      "x": -2,
+      "y": -1
+    },
+    {
+      "partId": 10,
+      "x": -1,
+      "y": -1
+    },
+    {
+      "partId": 11,
+      "x": 0,
+      "y": -1
+    },
+    {
+      "partId": 11,
+      "x": 1,
+      "y": -1
+    },
+    {
+      "partId": 10,
+      "x": 2,
+      "y": -1
+    },
+    {
+      "partId": 10,
+      "x": -1,
+      "y": 0
+    },
+    {
+      "partId": 11,
+      "x": 0,
+      "y": 0
+    },
+    {
+      "partId": 10,
+      "x": 1,
+      "y": 0
+    },
+    {
+      "partId": 12,
+      "x": -2,
+      "y": 1
+    },
+    {
+      "partId": 11,
+      "x": 0,
+      "y": 1
+    },
+    {
+      "partId": 12,
+      "x": 1,
+      "y": 1
+    }
+  ],
+  "attachments": [
+    {
+      "component": "jetEngine",
+      "partId": 9,
+      "cell": 0,
+      "x": -2,
+      "y": -1,
+      "rotateQuarter": 0
+    },
+    {
+      "component": "trackingMissile",
+      "partId": 20,
+      "cell": 3,
+      "x": 1,
+      "y": -1,
+      "rotateQuarter": 0
+    },
+    {
+      "component": "control",
+      "partId": 3,
+      "cell": 8,
+      "x": -2,
+      "y": 1,
+      "rotateQuarter": 0
+    },
+    {
+      "component": "jetEngine",
+      "partId": 9,
+      "cell": 9,
+      "x": 0,
+      "y": 1,
+      "rotateQuarter": 0
+    },
+    {
+      "component": "missileLoader",
+      "partId": 16,
+      "cell": 10,
+      "x": 1,
+      "y": 1,
+      "rotateQuarter": 0
+    }
+  ],
+  "display": [
+    {
+      "kind": "panel",
+      "cell": 0,
+      "x": -2,
+      "y": -1
+    },
+    {
+      "kind": "stripe",
+      "cell": 1,
+      "x": -1,
+      "y": -1
+    },
+    {
+      "kind": "panel",
+      "cell": 2,
+      "x": 0,
+      "y": -1
+    },
+    {
+      "kind": "stripe",
+      "cell": 3,
+      "x": 1,
+      "y": -1
+    },
+    {
+      "kind": "panel",
+      "cell": 4,
+      "x": 2,
+      "y": -1
+    },
+    {
+      "kind": "glass",
+      "cell": 6,
+      "x": 0,
+      "y": 0
+    },
+    {
+      "kind": "panel",
+      "cell": 8,
+      "x": -2,
+      "y": 1
+    },
+    {
+      "kind": "stripe",
+      "cell": 9,
+      "x": 0,
+      "y": 1
+    },
+    {
+      "kind": "panel",
+      "cell": 10,
+      "x": 1,
+      "y": 1
+    }
+  ]
+}

@@ -1,14 +1,26 @@
 import { armyCap } from "../config/balance/commander.ts";
+import { getIncomeAndUpkeep } from "../config/balance/economy.ts";
 import {
   AIR_HOLD_GRAVITY,
   AIR_THRUST_ACCEL_SCALE,
   BATTLEFIELD_HEIGHT,
   BATTLEFIELD_WIDTH,
+  DEFAULT_UNIT_MOVEMENT_SPEED_MULTIPLIER,
   DEFAULT_GROUND_HEIGHT_RATIO,
   BATTLE_SALVAGE_REFUND_FACTOR,
+  MAX_UNIT_MOVEMENT_SPEED_MULTIPLIER,
+  MIN_UNIT_MOVEMENT_SPEED_MULTIPLIER,
 } from "../config/balance/battlefield.ts";
-import { applyStrategicEconomyTick } from "../gameplay/map/garrison-upkeep.ts";
 import { createMapNodes } from "../gameplay/map/node-graph.ts";
+import {
+  BUILDING_CATALOG,
+  RealTimeCampaign,
+  RESEARCH_CATALOG,
+  quoteBattleLogistics,
+  type BaseBuildingSlot,
+  type BuildingKind,
+  type ResearchKind,
+} from "../gameplay/campaign/real-time-campaign.ts";
 import { settleGarrison as settleNodeGarrison, setNodeOwner } from "../gameplay/map/occupation.ts";
 import { GameLoop } from "./game-loop.ts";
 import { createInitialTemplates } from "../simulation/units/unit-builder.ts";
@@ -17,6 +29,12 @@ import { COMPONENTS } from "../config/balance/weapons.ts";
 import { MATERIALS } from "../config/balance/materials.ts";
 import { BattleSession } from "../gameplay/battle/battle-session.ts";
 import type { BattleSessionOptions } from "../gameplay/battle/battle-session.ts";
+import {
+  DEFAULT_BATTLE_SOUND_VOLUME,
+  MAX_BATTLE_SOUND_VOLUME,
+  MIN_BATTLE_SOUND_VOLUME,
+  PhaserBattleRenderer,
+} from "../rendering/phaser-battle-renderer.ts";
 import type { BattleAiController } from "../gameplay/battle/battle-session.ts";
 import { createBaselineCompositeAiController } from "../ai/composite/baseline-modules.ts";
 import {
@@ -140,15 +158,29 @@ export function bootstrap(options: BootstrapOptions = {}): void {
   root.innerHTML = `
     <div class="app-shell">
       <header class="topbar">
-        <div class="title">Modular Army 2D - MVP</div>
-        <details id="debugMenu" class="debug-menu">
-          <summary>Debug Options</summary>
-          <label><input id="debugResourcesChk" type="checkbox" /> Unlimited Resources</label>
-          <label><input id="debugVisualChk" type="checkbox" /> Draw Path + Hitbox</label>
-          <label><input id="debugTargetLineChk" type="checkbox" /> Draw Target Lines</label>
-          <label><input id="debugDisplayLayerChk" type="checkbox" /> Show Display Layer</label>
-          <label><input id="debugPartHpChk" type="checkbox" /> Show Part HP Overlay</label>
-          <button id="btnOpenPartDesigner" type="button">Part Designer</button>
+        <div class="brand-lockup">
+          <div class="brand-mark" aria-hidden="true"><span></span><span></span><span></span></div>
+          <div><div class="title">FORGE COMMAND</div><div class="brand-subtitle">Modular combat development suite</div></div>
+        </div>
+        <details id="debugMenu" class="developer-menu debug-menu">
+          <summary><span class="status-dot"></span> Runtime Debug</summary>
+          <div class="developer-menu-popover debug-menu-popover">
+            <label><input id="debugResourcesChk" type="checkbox" /><span>R</span><strong>Unlimited Resources</strong><small>Ignore resource limits</small></label>
+            <label><input id="debugVisualChk" type="checkbox" /><span>V</span><strong>Hitboxes + Weapon Range</strong><small>Show tactical geometry</small></label>
+            <label><input id="debugTargetLineChk" type="checkbox" /><span>A</span><strong>AI Aimed Targets</strong><small>Show target lines</small></label>
+            <label><input id="debugPartHpChk" type="checkbox" /><span>H</span><strong>Part HP Overlay</strong><small>Show per-part health</small></label>
+            <button id="btnOpenPartDesigner" type="button"><span>P</span><strong>Part Designer</strong><small>Author components</small></button>
+          </div>
+        </details>
+        <details id="developerMenu" class="developer-menu">
+          <summary>Developer Tools</summary>
+          <div class="developer-menu-popover">
+            <button id="tabTestArena"><span>T</span><strong>Test Arena</strong><small>Scenario lab</small></button>
+            <button id="tabLeaderboard"><span>L</span><strong>Leaderboard</strong><small>AI evaluation</small></button>
+            <button id="tabTemplateEditor"><span>O</span><strong>Craft Designer</strong><small>Assemble objects</small></button>
+            <button id="tabPartEditor"><span>P</span><strong>Part Designer</strong><small>Author components</small></button>
+            <button id="btnOpenGlobalSettings"><span>G</span><strong>Global Settings</strong><small>Runtime defaults</small></button>
+          </div>
         </details>
         <div class="topbar-status">
           <div id="metaBar" class="meta"></div>
@@ -164,17 +196,16 @@ export function bootstrap(options: BootstrapOptions = {}): void {
 
       <main class="layout">
         <section class="left-panel">
-          <div class="card">
-            <div class="tabs">
-              <button id="tabBase">Base</button>
-              <button id="tabMap">Map</button>
-              <button id="tabBattle">Battle</button>
-              <button id="tabTestArena">Test Arena</button>
-              <button id="tabLeaderboard">Leaderboard</button>
-              <button id="tabTemplateEditor">Template Editor</button>
-              <button id="tabPartEditor">Part Editor</button>
+          <div class="card nav-card">
+            <div class="nav-section-label">Campaign</div>
+            <div class="tabs nav-primary">
+              <button id="tabBase"><span class="nav-icon">B</span><span><strong>Base</strong><small>Build & research</small></span></button>
+              <button id="tabMap"><span class="nav-icon">M</span><span><strong>Map</strong><small>Territory control</small></span></button>
+              <button id="tabBattle"><span class="nav-icon">C</span><span><strong>Battle</strong><small>Live command</small></span></button>
             </div>
           </div>
+
+          <div id="leftPanelResizer" class="left-panel-resizer" role="separator" aria-orientation="horizontal" aria-label="Resize campaign navigation and active panel"><i></i></div>
 
           <div id="basePanel" class="card panel"></div>
           <div id="mapPanel" class="card panel hidden"></div>
@@ -185,6 +216,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         </section>
 
         <section class="center-panel card">
+          <div id="managementCenter" class="management-center hidden"></div>
           <div id="battleCanvasViewport" class="battle-canvas-viewport">
             <canvas id="battleCanvas" width="${BATTLEFIELD_WIDTH}" height="${BATTLEFIELD_HEIGHT}"></canvas>
             <canvas id="templateEditorCanvas" class="hidden"></canvas>
@@ -196,15 +228,15 @@ export function bootstrap(options: BootstrapOptions = {}): void {
 
         <section class="right-panel">
           <div class="card">
-            <h3>Selected Unit</h3>
+            <h3 id="contextInspectorTitle">Inspector</h3>
             <div id="selectedInfo" class="small"></div>
           </div>
-          <div class="card">
-            <h3>Log</h3>
+          <details class="card utility-drawer">
+            <summary>Mission Log</summary>
             <div id="logBox" class="log"></div>
-          </div>
-          <div class="card">
-            <h3>Controls</h3>
+          </details>
+          <details class="card utility-drawer">
+            <summary>Controls</summary>
             <div class="small">
               - Click a friendly unit to control it<br />
               - Move mouse to aim selected unit<br />
@@ -213,6 +245,9 @@ export function bootstrap(options: BootstrapOptions = {}): void {
               - Right-click drag: pan viewport (battle/editor)<br />
               - Mouse wheel: zoom viewport (battle/editor, wheel up=in, down=out)<br />
               - WASD: move selected unit<br />
+              - Controller left stick: move selected unit<br />
+              - Controller right stick: aim; right trigger or bumper: fire<br />
+              - Target-dependent weapons (such as missiles) lock near the aim direction<br />
               - Space: flip selected unit direction<br />
               - 1..9: toggle manual control for that weapon slot<br />
               - Shift+1..9: toggle auto fire for that slot<br />
@@ -220,31 +255,66 @@ export function bootstrap(options: BootstrapOptions = {}): void {
               - Ground units move freely on X/Y<br />
               - Air units move on X/Z (same screen Y axis)
             </div>
-          </div>
+          </details>
         </section>
       </main>
+      <div id="globalSettingsOverlay" class="global-settings-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="globalSettingsTitle">
+        <section class="card global-settings-modal">
+          <div class="panel-heading">
+            <div><span class="eyebrow">Developer tools</span><h2 id="globalSettingsTitle">Global Settings</h2></div>
+          </div>
+          <p class="small">Saved settings apply immediately to the current game and are restored the next time the game opens.</p>
+          <label class="global-setting-field" for="globalMovementSpeedMultiplier">
+            <span><strong>Unit movement speed</strong><small>Scales commanded movement for every ground and air unit.</small></span>
+            <span class="global-setting-value"><input id="globalMovementSpeedMultiplier" type="number" min="${MIN_UNIT_MOVEMENT_SPEED_MULTIPLIER}" max="${MAX_UNIT_MOVEMENT_SPEED_MULTIPLIER}" step="0.1" /> ×</span>
+          </label>
+          <label class="global-setting-field" for="globalBattleSoundVolume">
+            <span><strong>Battle sound volume</strong><small>Scales impacts, explosions, deployment, and engine sounds. Set to 0 to mute.</small></span>
+            <span class="global-setting-value"><input id="globalBattleSoundVolume" type="number" min="${MIN_BATTLE_SOUND_VOLUME}" max="${MAX_BATTLE_SOUND_VOLUME}" step="0.1" /> ×</span>
+          </label>
+          <div id="globalSettingsError" class="small global-settings-error" aria-live="polite"></div>
+          <div class="row global-settings-actions">
+            <button id="btnResetGlobalSettings" type="button">Use Default (${DEFAULT_UNIT_MOVEMENT_SPEED_MULTIPLIER}×)</button>
+            <button id="btnCancelGlobalSettings" type="button">Cancel</button>
+            <button id="btnSaveGlobalSettings" class="button-primary" type="button">Save & Apply</button>
+          </div>
+        </section>
+      </div>
     </div>
   `;
 
-  root.querySelector<HTMLElement>(".app-shell")?.classList.toggle("arena-replay", replayMode);
+  const appShell = getElement<HTMLDivElement>(".app-shell");
+  appShell.classList.toggle("arena-replay", replayMode);
 
   const basePanel = getElement<HTMLDivElement>("#basePanel");
+  const leftPanel = getElement<HTMLElement>(".left-panel");
+  const leftPanelResizer = getElement<HTMLDivElement>("#leftPanelResizer");
   const mapPanel = getElement<HTMLDivElement>("#mapPanel");
   const battlePanel = getElement<HTMLDivElement>("#battlePanel");
   const testArenaPanel = getElement<HTMLDivElement>("#testArenaPanel");
   const leaderboardPanel = getElement<HTMLDivElement>("#leaderboardPanel");
   const leaderboardCenter = getElement<HTMLDivElement>("#leaderboardCenter");
+  const managementCenter = getElement<HTMLDivElement>("#managementCenter");
   const editorPanel = getElement<HTMLDivElement>("#editorPanel");
   const selectedInfo = getElement<HTMLDivElement>("#selectedInfo");
+  const contextInspectorTitle = getElement<HTMLHeadingElement>("#contextInspectorTitle");
   const weaponHud = getElement<HTMLDivElement>("#weaponHud");
   const logBox = getElement<HTMLDivElement>("#logBox");
   const debugResourcesChk = getElement<HTMLInputElement>("#debugResourcesChk");
   const debugVisualChk = getElement<HTMLInputElement>("#debugVisualChk");
   const debugTargetLineChk = getElement<HTMLInputElement>("#debugTargetLineChk");
-  const debugDisplayLayerChk = getElement<HTMLInputElement>("#debugDisplayLayerChk");
   const debugPartHpChk = getElement<HTMLInputElement>("#debugPartHpChk");
   const btnOpenPartDesigner = getElement<HTMLButtonElement>("#btnOpenPartDesigner");
-  const debugMenu = getElement<HTMLElement>("#debugMenu");
+  const debugMenu = getElement<HTMLDetailsElement>("#debugMenu");
+  const developerMenu = getElement<HTMLDetailsElement>("#developerMenu");
+  const btnOpenGlobalSettings = getElement<HTMLButtonElement>("#btnOpenGlobalSettings");
+  const globalSettingsOverlay = getElement<HTMLDivElement>("#globalSettingsOverlay");
+  const globalMovementSpeedInput = getElement<HTMLInputElement>("#globalMovementSpeedMultiplier");
+  const globalBattleSoundInput = getElement<HTMLInputElement>("#globalBattleSoundVolume");
+  const globalSettingsError = getElement<HTMLDivElement>("#globalSettingsError");
+  const btnResetGlobalSettings = getElement<HTMLButtonElement>("#btnResetGlobalSettings");
+  const btnCancelGlobalSettings = getElement<HTMLButtonElement>("#btnCancelGlobalSettings");
+  const btnSaveGlobalSettings = getElement<HTMLButtonElement>("#btnSaveGlobalSettings");
   const metaBar = getElement<HTMLDivElement>("#metaBar");
   const arenaReplayStats = getElement<HTMLDivElement>("#arenaReplayStats");
   const timeScale = getElement<HTMLInputElement>("#timeScale");
@@ -253,6 +323,75 @@ export function bootstrap(options: BootstrapOptions = {}): void {
   const canvas = getElement<HTMLCanvasElement>("#battleCanvas");
   const templateEditorCanvas = getElement<HTMLCanvasElement>("#templateEditorCanvas");
   const partEditorCanvas = getElement<HTMLCanvasElement>("#partEditorCanvas");
+
+  debugMenu.addEventListener("toggle", () => {
+    if (debugMenu.open) developerMenu.open = false;
+  });
+  developerMenu.addEventListener("toggle", () => {
+    if (developerMenu.open) debugMenu.open = false;
+  });
+
+  const SIDEBAR_SPLIT_STORAGE_KEY = "forge-command.sidebar-nav-height";
+  const GLOBAL_SETTINGS_STORAGE_KEY = "forge-command.global-settings.v1";
+  const TEST_ARENA_SETTINGS_STORAGE_KEY = "forge-command.test-arena-settings.v1";
+  interface StoredGlobalSettings {
+    movementSpeedMultiplier?: unknown;
+    battleSoundVolume?: unknown;
+  }
+  const loadGlobalSettings = (): { movementSpeedMultiplier: number; battleSoundVolume: number } => {
+    try {
+      const stored = JSON.parse(localStorage.getItem(GLOBAL_SETTINGS_STORAGE_KEY) ?? "null") as StoredGlobalSettings | null;
+      const movementSpeedMultiplier = typeof stored?.movementSpeedMultiplier === "number" && Number.isFinite(stored.movementSpeedMultiplier)
+        ? Math.max(MIN_UNIT_MOVEMENT_SPEED_MULTIPLIER, Math.min(MAX_UNIT_MOVEMENT_SPEED_MULTIPLIER, stored.movementSpeedMultiplier))
+        : DEFAULT_UNIT_MOVEMENT_SPEED_MULTIPLIER;
+      const battleSoundVolume = typeof stored?.battleSoundVolume === "number" && Number.isFinite(stored.battleSoundVolume)
+        ? Math.max(MIN_BATTLE_SOUND_VOLUME, Math.min(MAX_BATTLE_SOUND_VOLUME, stored.battleSoundVolume))
+        : DEFAULT_BATTLE_SOUND_VOLUME;
+      return { movementSpeedMultiplier, battleSoundVolume };
+    } catch {
+      // Ignore malformed/blocked storage and use the game default.
+    }
+    return {
+      movementSpeedMultiplier: DEFAULT_UNIT_MOVEMENT_SPEED_MULTIPLIER,
+      battleSoundVolume: DEFAULT_BATTLE_SOUND_VOLUME,
+    };
+  };
+  const initialGlobalSettings = loadGlobalSettings();
+  let globalMovementSpeedMultiplier = initialGlobalSettings.movementSpeedMultiplier;
+  let globalBattleSoundVolume = initialGlobalSettings.battleSoundVolume;
+  const setSidebarNavHeight = (height: number): number => {
+    const maxHeight = Math.max(150, leftPanel.clientHeight - 180);
+    const normalized = Math.max(128, Math.min(maxHeight, Math.round(height)));
+    leftPanel.style.setProperty("--sidebar-nav-height", `${normalized}px`);
+    return normalized;
+  };
+  const storedSidebarHeight = Number.parseInt(localStorage.getItem(SIDEBAR_SPLIT_STORAGE_KEY) ?? "202", 10);
+  setSidebarNavHeight(Number.isFinite(storedSidebarHeight) ? storedSidebarHeight : 202);
+  let sidebarResizePointerId: number | null = null;
+  leftPanelResizer.addEventListener("pointerdown", (event) => {
+    sidebarResizePointerId = event.pointerId;
+    leftPanelResizer.setPointerCapture(event.pointerId);
+    leftPanel.classList.add("resizing");
+    event.preventDefault();
+  });
+  leftPanelResizer.addEventListener("pointermove", (event) => {
+    if (sidebarResizePointerId !== event.pointerId) return;
+    const top = leftPanel.getBoundingClientRect().top;
+    setSidebarNavHeight(event.clientY - top);
+  });
+  const finishSidebarResize = (event: PointerEvent): void => {
+    if (sidebarResizePointerId !== event.pointerId) return;
+    sidebarResizePointerId = null;
+    leftPanel.classList.remove("resizing");
+    const height = Number.parseInt(getComputedStyle(leftPanel).getPropertyValue("--sidebar-nav-height"), 10);
+    if (Number.isFinite(height)) localStorage.setItem(SIDEBAR_SPLIT_STORAGE_KEY, `${height}`);
+  };
+  leftPanelResizer.addEventListener("pointerup", finishSidebarResize);
+  leftPanelResizer.addEventListener("pointercancel", finishSidebarResize);
+  leftPanelResizer.addEventListener("dblclick", () => {
+    const height = setSidebarNavHeight(202);
+    localStorage.setItem(SIDEBAR_SPLIT_STORAGE_KEY, `${height}`);
+  });
 
   // Keep battle simulation dimensions deterministic in all runtime modes.
   canvas.width = BATTLEFIELD_WIDTH;
@@ -302,7 +441,9 @@ export function bootstrap(options: BootstrapOptions = {}): void {
   };
 
   const mapNodes: MapNode[] = createMapNodes();
+  const campaign = new RealTimeCampaign();
   let screen: ScreenMode = "base";
+  let selectedBaseBuildSlotId: BaseBuildingSlot["id"] | null = null;
   const testArenaNode: MapNode = {
     id: "test-arena",
     name: "Test Arena",
@@ -310,19 +451,19 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     garrison: false,
     reward: 0,
     defense: 1.1,
-    testEnemyMinActive: 2,
+    testEnemyMinActive: 4,
     testEnemyInfiniteGas: true,
     testBaseHpOverride: 1000000000,
   };
-  let testArenaEnemyCount = 2;
-  let testArenaPlayerCount = 2;
+  let testArenaEnemyCount = 4;
+  let testArenaPlayerCount = 4;
+  let testArenaBaseHp = 1000000000;
   let testArenaBattlefieldWidth = BATTLEFIELD_WIDTH;
   let testArenaBattlefieldHeight = BATTLEFIELD_HEIGHT;
   let testArenaGroundHeight = Math.floor(BATTLEFIELD_HEIGHT * DEFAULT_GROUND_HEIGHT_RATIO);
   let testArenaEnemySpawnTemplateIds: number[] = templates.map((template) => template.id);
   let testArenaPlayerSpawnTemplateIds: number[] = templates.map((template) => template.id);
-  let testArenaEnemySpawnTemplateDropdownOpen = false;
-  let testArenaPlayerSpawnTemplateDropdownOpen = false;
+  let testArenaSpawnTemplateDropdownOpen = false;
   let testArenaAutoSpawnOnEnemySide = true;
   let testArenaAutoSpawnOnPlayerSide = true;
   let battleDeploySide: "player" | "enemy" = "player";
@@ -334,7 +475,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     | "component-config";
   type TestArenaAiModuleKind = "target" | "movement" | "shoot";
   type TestArenaSide = "player" | "enemy";
-  type TestArenaPanelSection = "unit" | "ai" | "ui";
+  type TestArenaPanelSection = "unit" | "manual" | "ai" | "ui";
   type TestArenaAiOption = {
     id: string;
     label: string;
@@ -367,6 +508,15 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     spec?: MatchAiSpec;
     mtimeMs: number;
   };
+  const createSkillTierSpec = (tier: "low" | "medium" | "high"): MatchAiSpec => ({
+    familyId: "composite",
+    params: {},
+    composite: {
+      target: { familyId: `skill-${tier}-target`, params: {} },
+      movement: { familyId: `skill-${tier}-movement`, params: {} },
+      shoot: { familyId: `skill-${tier}-shoot`, params: {} },
+    },
+  });
   let testArenaPlayerAiPreset: TestArenaAiPreset = "component-config";
   let testArenaEnemyAiPreset: TestArenaAiPreset = "component-config";
   let latestCompositeSpec: MatchAiSpec | null = null;
@@ -385,6 +535,9 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         },
       },
     },
+    { id: "builtin-skill-low-composite", label: "builtin: low skill", spec: createSkillTierSpec("low") },
+    { id: "builtin-skill-medium-composite", label: "builtin: medium skill", spec: createSkillTierSpec("medium") },
+    { id: "builtin-skill-high-composite", label: "builtin: high skill", spec: createSkillTierSpec("high") },
     {
       id: "builtin-dt-default-composite",
       label: "builtin: dt composite (default params)",
@@ -432,14 +585,23 @@ export function bootstrap(options: BootstrapOptions = {}): void {
   const defaultAiOptions: Record<TestArenaAiModuleKind, TestArenaAiOption[]> = {
     target: [
       { id: "baseline-target", label: "builtin: baseline-target", spec: { familyId: "baseline-target", params: {} } },
+      { id: "skill-low-target", label: "builtin: low target", spec: { familyId: "skill-low-target", params: {} } },
+      { id: "skill-medium-target", label: "builtin: medium target", spec: { familyId: "skill-medium-target", params: {} } },
+      { id: "skill-high-target", label: "builtin: high target", spec: { familyId: "skill-high-target", params: {} } },
       { id: "dt-target-default", label: "builtin: dt-target (default)", spec: { familyId: "dt-target", params: {} } },
     ],
     movement: [
       { id: "baseline-movement", label: "builtin: baseline-movement", spec: { familyId: "baseline-movement", params: {} } },
+      { id: "skill-low-movement", label: "builtin: low movement", spec: { familyId: "skill-low-movement", params: {} } },
+      { id: "skill-medium-movement", label: "builtin: medium movement", spec: { familyId: "skill-medium-movement", params: {} } },
+      { id: "skill-high-movement", label: "builtin: high movement", spec: { familyId: "skill-high-movement", params: {} } },
       { id: "dt-movement-default", label: "builtin: dt-movement (default)", spec: { familyId: "dt-movement", params: {} } },
     ],
     shoot: [
       { id: "baseline-shoot", label: "builtin: baseline-shoot", spec: { familyId: "baseline-shoot", params: {} } },
+      { id: "skill-low-shoot", label: "builtin: low shoot", spec: { familyId: "skill-low-shoot", params: {} } },
+      { id: "skill-medium-shoot", label: "builtin: medium shoot", spec: { familyId: "skill-medium-shoot", params: {} } },
+      { id: "skill-high-shoot", label: "builtin: high shoot", spec: { familyId: "skill-high-shoot", params: {} } },
       { id: "history-shoot", label: "builtin: history-shoot", spec: { familyId: "history-shoot", params: {} } },
       { id: "dt-shoot-default", label: "builtin: dt-shoot (default)", spec: { familyId: "dt-shoot", params: {} } },
       { id: "dt-shoot-atan-default", label: "builtin: dt-shoot-atan (default)", spec: { familyId: "dt-shoot-atan", params: {} } },
@@ -485,22 +647,112 @@ export function bootstrap(options: BootstrapOptions = {}): void {
   let testArenaLeaderboardManualVsRandom = "";
   let testArenaPanelSections: Record<TestArenaPanelSection, boolean> = {
     unit: true,
+    manual: false,
     ai: false,
     ui: false,
+  };
+  let testArenaManualSpawnSide: TestArenaSide = "player";
+  let testArenaManualSpawnTemplateId = templates[0]?.id ?? 0;
+  let testArenaHasStoredPlayerCraftSelection = false;
+  let testArenaHasStoredEnemyCraftSelection = false;
+  let testArenaTemplateStoreReady = false;
+
+  interface StoredTestArenaSettings {
+    playerCount?: unknown;
+    enemyCount?: unknown;
+    baseHp?: unknown;
+    battlefieldWidth?: unknown;
+    battlefieldHeight?: unknown;
+    groundHeight?: unknown;
+    playerSpawnTemplateIds?: unknown;
+    enemySpawnTemplateIds?: unknown;
+    autoSpawnOnPlayerSide?: unknown;
+    autoSpawnOnEnemySide?: unknown;
+    invinciblePlayer?: unknown;
+    compositeModelSelections?: unknown;
+    aiSelections?: unknown;
+    manualSpawnSide?: unknown;
+    manualSpawnTemplateId?: unknown;
+  }
+
+  const loadTestArenaSettings = (): void => {
+    try {
+      const stored = JSON.parse(localStorage.getItem(TEST_ARENA_SETTINGS_STORAGE_KEY) ?? "null") as StoredTestArenaSettings | null;
+      if (!stored || typeof stored !== "object") return;
+      const readFinite = (value: unknown, fallback: number): number => typeof value === "number" && Number.isFinite(value) ? value : fallback;
+      testArenaPlayerCount = Math.max(0, Math.min(40, Math.floor(readFinite(stored.playerCount, testArenaPlayerCount))));
+      testArenaEnemyCount = Math.max(0, Math.min(40, Math.floor(readFinite(stored.enemyCount, testArenaEnemyCount))));
+      testArenaBaseHp = Math.max(1, Math.min(1_000_000_000, Math.floor(readFinite(stored.baseHp, testArenaBaseHp))));
+      testArenaBattlefieldWidth = normalizeTestArenaBattlefieldWidth(readFinite(stored.battlefieldWidth, testArenaBattlefieldWidth));
+      testArenaBattlefieldHeight = normalizeTestArenaBattlefieldHeight(readFinite(stored.battlefieldHeight, testArenaBattlefieldHeight));
+      testArenaGroundHeight = normalizeTestArenaGroundHeight(readFinite(stored.groundHeight, testArenaGroundHeight));
+      if (Array.isArray(stored.playerSpawnTemplateIds)) {
+        testArenaPlayerSpawnTemplateIds = stored.playerSpawnTemplateIds.filter((id): id is number => Number.isInteger(id) && id > 0);
+        testArenaHasStoredPlayerCraftSelection = true;
+      }
+      if (Array.isArray(stored.enemySpawnTemplateIds)) {
+        testArenaEnemySpawnTemplateIds = stored.enemySpawnTemplateIds.filter((id): id is number => Number.isInteger(id) && id > 0);
+        testArenaHasStoredEnemyCraftSelection = true;
+      }
+      if (typeof stored.autoSpawnOnPlayerSide === "boolean") testArenaAutoSpawnOnPlayerSide = stored.autoSpawnOnPlayerSide;
+      if (typeof stored.autoSpawnOnEnemySide === "boolean") testArenaAutoSpawnOnEnemySide = stored.autoSpawnOnEnemySide;
+      if (typeof stored.invinciblePlayer === "boolean") testArenaInvinciblePlayer = stored.invinciblePlayer;
+      const compositeSelections = stored.compositeModelSelections as Partial<Record<TestArenaSide, unknown>> | null;
+      if (typeof compositeSelections?.player === "string") testArenaCompositeModelSelections.player = compositeSelections.player;
+      if (typeof compositeSelections?.enemy === "string") testArenaCompositeModelSelections.enemy = compositeSelections.enemy;
+      const aiSelections = stored.aiSelections as Partial<Record<TestArenaSide, Partial<Record<TestArenaAiModuleKind, unknown>>>> | null;
+      for (const side of ["player", "enemy"] as const) {
+        for (const kind of ["target", "movement", "shoot"] as const) {
+          const selection = aiSelections?.[side]?.[kind];
+          if (typeof selection === "string") testArenaAiSelections[side][kind] = selection;
+        }
+      }
+      if (stored.manualSpawnSide === "player" || stored.manualSpawnSide === "enemy") testArenaManualSpawnSide = stored.manualSpawnSide;
+      if (typeof stored.manualSpawnTemplateId === "number" && Number.isInteger(stored.manualSpawnTemplateId) && stored.manualSpawnTemplateId > 0) {
+        testArenaManualSpawnTemplateId = stored.manualSpawnTemplateId;
+      }
+      testArenaNode.testEnemyMinActive = testArenaEnemyCount;
+      testArenaNode.testBaseHpOverride = testArenaBaseHp;
+    } catch {
+      // Ignore malformed/blocked storage and retain Test Arena defaults.
+    }
+  };
+
+  const saveTestArenaSettings = (): void => {
+    try {
+      localStorage.setItem(TEST_ARENA_SETTINGS_STORAGE_KEY, JSON.stringify({
+        playerCount: testArenaPlayerCount,
+        enemyCount: testArenaEnemyCount,
+        baseHp: testArenaBaseHp,
+        battlefieldWidth: testArenaBattlefieldWidth,
+        battlefieldHeight: testArenaBattlefieldHeight,
+        groundHeight: testArenaGroundHeight,
+        playerSpawnTemplateIds: testArenaPlayerSpawnTemplateIds,
+        enemySpawnTemplateIds: testArenaEnemySpawnTemplateIds,
+        autoSpawnOnPlayerSide: testArenaAutoSpawnOnPlayerSide,
+        autoSpawnOnEnemySide: testArenaAutoSpawnOnEnemySide,
+        invinciblePlayer: testArenaInvinciblePlayer,
+        compositeModelSelections: testArenaCompositeModelSelections,
+        aiSelections: testArenaAiSelections,
+        manualSpawnSide: testArenaManualSpawnSide,
+        manualSpawnTemplateId: testArenaManualSpawnTemplateId,
+      }));
+    } catch {
+      // Storage can be unavailable in restricted browser contexts; settings still apply for this session.
+    }
   };
   const isTemplateEditorScreen = (): boolean => screen === "templateEditor";
   const isPartEditorScreen = (): boolean => screen === "partEditor";
   const isEditorScreen = (): boolean => isTemplateEditorScreen() || isPartEditorScreen();
   const isBattleScreen = (): boolean => screen === "battle" || screen === "testArena";
   let running = true;
-  let round = 1;
   let gas = replay?.spec.playerGas ?? 250;
   let commanderSkill = 1;
   let pendingOccupation: string | null = null;
   let debugUnlimitedResources = replayMode ? false : true;
   let debugVisual = replayMode ? false : true;
   let debugTargetLines = replayMode ? false : true;
-  let debugDisplayLayer = false;
+  const debugDisplayLayer = true;
   let debugPartHpOverlay = false;
   let debugServerEnabled = false;
   const EDITOR_GRID_MAX_COLS = 10;
@@ -524,7 +776,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     | "markSupport"
     | "markEmptyStructure"
     | "markEmptyFunctional";
-  type PartOpenFilter = "all" | "structure" | "control" | "engine" | "weapon" | "loader" | "ammo";
+  type PartOpenFilter = "all" | "structure" | "control" | "engine" | "weapon" | "loader";
   type EditorScreenMode = "templateEditor" | "partEditor";
   type PartDesignerSlot = {
     occupiesFunctionalSpace: boolean;
@@ -565,9 +817,14 @@ export function bootstrap(options: BootstrapOptions = {}): void {
   let editorHoverMouseX = 0;
   let editorHoverMouseY = 0;
   let editorHoverActive = false;
+  let editorStructureColor = MATERIALS.basic.color;
+  let editorStructureColorOnly = true;
   let battleViewOffsetX = 0;
   let battleViewOffsetY = 0;
   let battleViewScale = 1;
+  const MIN_BATTLE_VIEW_SCALE = 0.1;
+  const MAX_BATTLE_VIEW_SCALE = 2.4;
+  const DEFAULT_BATTLE_VERTICAL_PADDING = 16;
   let battleViewDragActive = false;
   let battleViewDragMoved = false;
   let battleViewDragStartClientX = 0;
@@ -575,6 +832,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
   let battleViewDragLastClientX = 0;
   let battleViewDragLastClientY = 0;
   let editorStructureSlots: Array<number | null> = new Array<number | null>(EDITOR_GRID_MAX_SIZE).fill(null);
+  let editorStructureColorSlots: Array<string | null> = new Array<string | null>(EDITOR_GRID_MAX_SIZE).fill(null);
   let editorFunctionalSlots: EditorFunctionalSlot[] = new Array<EditorFunctionalSlot>(EDITOR_GRID_MAX_SIZE).fill(null);
   let editorDisplaySlots: Array<DisplayAttachmentTemplate["kind"] | null> = new Array<DisplayAttachmentTemplate["kind"] | null>(EDITOR_GRID_MAX_SIZE).fill(null);
   let editorTemplateDialogOpen = false;
@@ -749,7 +1007,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     if (!isBattleScreen()) {
       return;
     }
-    const clampedScale = Math.max(0.45, Math.min(2.4, nextScale));
+    const clampedScale = Math.max(MIN_BATTLE_VIEW_SCALE, Math.min(MAX_BATTLE_VIEW_SCALE, nextScale));
     if (Math.abs(clampedScale - battleViewScale) < 0.0001) {
       return;
     }
@@ -793,13 +1051,13 @@ export function bootstrap(options: BootstrapOptions = {}): void {
   };
   const normalizeTestArenaBattlefieldWidth = (value: number): number => Math.max(640, Math.min(4096, Math.floor(value)));
   const normalizeTestArenaBattlefieldHeight = (value: number): number => Math.max(360, Math.min(2160, Math.floor(value)));
-  const normalizeTestArenaZoomPercent = (value: number): number => Math.max(45, Math.min(240, Math.round(value)));
+  const normalizeTestArenaZoomPercent = (value: number): number => Math.max(MIN_BATTLE_VIEW_SCALE * 100, Math.min(MAX_BATTLE_VIEW_SCALE * 100, Math.round(value)));
   const normalizeTestArenaGroundHeight = (value: number): number => Math.max(80, Math.min(Math.max(120, testArenaBattlefieldHeight - 40), Math.floor(value)));
   const normalizeTestArenaSpawnTemplateIds = (candidateIds: ReadonlyArray<number>): number[] => {
     const validIds = new Set<number>(templates.map((template) => template.id));
     const normalized: number[] = [];
     for (const id of candidateIds) {
-      if (!validIds.has(id)) {
+      if (!Number.isInteger(id) || id < 1 || (testArenaTemplateStoreReady && !validIds.has(id))) {
         continue;
       }
       if (normalized.includes(id)) {
@@ -827,6 +1085,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     testArenaPlayerSpawnTemplateIds = normalizeTestArenaSpawnTemplateIds(testArenaPlayerSpawnTemplateIds);
     return testArenaPlayerSpawnTemplateIds;
   };
+  loadTestArenaSettings();
   const syncTestArenaZoomInput = (): void => {
     const zoomInput = getOptionalElement<HTMLInputElement>("#testArenaZoomPercent");
     if (zoomInput) {
@@ -835,6 +1094,29 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         zoomInput.value = value;
       }
     }
+  };
+  const resetBattleViewToVerticalFit = (): void => {
+    if (!isBattleScreen()) {
+      return;
+    }
+    const viewportHeight = canvasViewport.clientHeight;
+    if (viewportHeight <= 0) {
+      return;
+    }
+    const { laneBounds } = battle.getBattlefieldInfo();
+    const displayYScale = getCanvasDisplayHeight() / Math.max(1, canvas.height);
+    const laneTop = laneBounds.airMinZ * displayYScale;
+    const laneBottom = laneBounds.groundMaxY * displayYScale;
+    const laneHeight = Math.max(1, laneBottom - laneTop);
+    const availableHeight = Math.max(1, viewportHeight - DEFAULT_BATTLE_VERTICAL_PADDING * 2);
+    battleViewScale = Math.max(
+      MIN_BATTLE_VIEW_SCALE,
+      Math.min(MAX_BATTLE_VIEW_SCALE, availableHeight / laneHeight),
+    );
+    const fittedHeight = laneHeight * battleViewScale;
+    battleViewOffsetY = (viewportHeight - fittedHeight) * 0.5 - laneTop * battleViewScale;
+    applyBattleViewTransform();
+    syncTestArenaZoomInput();
   };
   const getCommanderSkillForCap = (): number => (isUnlimitedResources() ? 999 : commanderSkill);
   const editorTooltip = document.createElement("div");
@@ -1242,6 +1524,10 @@ export function bootstrap(options: BootstrapOptions = {}): void {
           },
         },
     ];
+    for (const id of ["builtin-skill-high-composite", "builtin-skill-medium-composite", "builtin-skill-low-composite"]) {
+      const option = testArenaCompositeModelOptions.find((entry) => entry.id === id);
+      if (option) defaults.splice(2, 0, option);
+    }
     const merged: TestArenaCompositeModelOption[] = [...defaults];
     try {
       const res = await fetch("/__arena/composite/models", { method: "GET" });
@@ -1542,16 +1828,38 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         } else {
           addLog("Defeat in battle.", "bad");
         }
+        if (deploymentQueue.length > 0) {
+          const refund = deploymentQueue.reduce((sum, order) => sum + order.gasCost, 0);
+          if (!isUnlimitedResources()) gas += refund;
+          deploymentQueue.splice(0, deploymentQueue.length);
+          addLog(`Canceled en-route deliveries · ${refund} gas refunded`, "warn");
+        }
         renderPanels();
       },
     },
     templates,
     {
       ...(battleSessionOptions ?? {}),
+      movementSpeedMultiplier: globalMovementSpeedMultiplier,
       partCatalog: battleSessionOptions?.partCatalog
         ? mergePartCatalogs(parts, battleSessionOptions.partCatalog)
         : parts,
     },
+  );
+  // Phaser owns browser battle presentation; BattleSession remains the shared/headless simulation.
+  const phaserBattleRenderer = new PhaserBattleRenderer(
+    canvas,
+    battle,
+    templates,
+    () => {
+      const viewportWidth = Math.max(1, canvasViewport.clientWidth);
+      const worldPerDisplayPixel = canvas.width / Math.max(1, getCanvasDisplayWidth() * battleViewScale);
+      return {
+        centerX: (-battleViewOffsetX + viewportWidth * 0.5) * worldPerDisplayPixel,
+        worldWidth: viewportWidth * worldPerDisplayPixel,
+      };
+    },
+    () => globalBattleSoundVolume,
   );
   void fetchLatestCompositeSpec()
     .then(async () => {
@@ -1573,7 +1881,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       return {
         screen,
         running,
-        round,
+        campaignSeconds: campaign.elapsedSeconds,
         gas,
         commanderSkill,
         debugUnlimitedResources,
@@ -1588,6 +1896,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     const buildBattleRoot = (): Record<string, unknown> => {
       return {
         state: battle.getState(),
+        debug: battle.getDebugSnapshot(),
         selection: battle.getSelection(),
         displayEnabled: battle.isDisplayEnabled(),
         partHpOverlayEnabled: battle.isPartHpOverlayEnabled(),
@@ -1835,7 +2144,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     }
 
     setScreen("battle");
-    centerBattleViewYOnPlayerBase();
+    resetBattleViewToVerticalFit();
     renderPanels();
     addLog(`Arena replay started (seed=${spec.seed})`, "good");
 
@@ -2097,76 +2406,113 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     const mergedStore = mergeTemplates(defaultTemplates, userTemplates);
     if (mergedStore.length > 0) {
       templates.splice(0, templates.length, ...mergedStore);
-      return;
+    } else {
+      const merged = mergeTemplates(templates, mergeTemplates(defaultTemplates, userTemplates));
+      templates.splice(0, templates.length, ...merged);
     }
-    const merged = mergeTemplates(templates, mergeTemplates(defaultTemplates, userTemplates));
-    templates.splice(0, templates.length, ...merged);
+    testArenaTemplateStoreReady = true;
+    if (testArenaHasStoredPlayerCraftSelection) {
+      setTestArenaPlayerSpawnTemplateIds(testArenaPlayerSpawnTemplateIds);
+    } else {
+      testArenaPlayerSpawnTemplateIds = templates.map((template) => template.id);
+    }
+    if (testArenaHasStoredEnemyCraftSelection) {
+      setTestArenaEnemySpawnTemplateIds(testArenaEnemySpawnTemplateIds);
+    } else {
+      testArenaEnemySpawnTemplateIds = templates.map((template) => template.id);
+    }
+    if (testArenaTemplateStoreReady && !templates.some((template) => template.id === testArenaManualSpawnTemplateId)) {
+      testArenaManualSpawnTemplateId = templates[0]?.id ?? 0;
+    }
+    saveTestArenaSettings();
   };
 
-  type BuildKind = "refinery" | "expand" | "lab";
-  type BuildJob = { kind: BuildKind; remainingRounds: number };
-  const buildQueue: BuildJob[] = [];
-  const buildRounds: Record<BuildKind, number> = {
-    refinery: 1,
-    expand: 2,
-    lab: 2,
+  let activeGamepadIndex: number | null = null;
+  const applyGamepadDeadzone = (value: number, deadzone = 0.18): number => {
+    const magnitude = Math.abs(value);
+    if (!Number.isFinite(value) || magnitude <= deadzone) return 0;
+    return Math.sign(value) * Math.min(1, (magnitude - deadzone) / (1 - deadzone));
+  };
+  const pollGamepadInput = (): Partial<KeyState> => {
+    if (replayMode || typeof navigator.getGamepads !== "function") return {};
+    const pads = navigator.getGamepads();
+    const gamepad = (activeGamepadIndex === null ? null : pads[activeGamepadIndex])
+      ?? Array.from(pads).find((entry): entry is Gamepad => entry !== null && entry.connected)
+      ?? null;
+    if (!gamepad) {
+      if (activeGamepadIndex !== null) addLog("Controller disconnected", "warn");
+      activeGamepadIndex = null;
+      return {};
+    }
+    if (activeGamepadIndex !== gamepad.index) {
+      activeGamepadIndex = gamepad.index;
+      addLog(`Controller connected: ${gamepad.id}`, "good");
+    }
+    const rightTrigger = gamepad.buttons[7];
+    const rightBumper = gamepad.buttons[5];
+    return {
+      moveX: applyGamepadDeadzone(gamepad.axes[0] ?? 0),
+      moveY: applyGamepadDeadzone(gamepad.axes[1] ?? 0),
+      aimX: applyGamepadDeadzone(gamepad.axes[2] ?? 0),
+      aimY: applyGamepadDeadzone(gamepad.axes[3] ?? 0),
+      manualFire: (rightTrigger?.pressed ?? false)
+        || (rightTrigger?.value ?? 0) > 0.2
+        || (rightBumper?.pressed ?? false),
+    };
   };
 
-  const formatBuildJob = (job: BuildJob): string => {
-    const label = job.kind === "refinery" ? "Refinery" : job.kind === "expand" ? "Base Expansion" : "Research Lab";
-    const r = Math.max(0, Math.floor(job.remainingRounds));
-    return `${label} (${r} round${r === 1 ? "" : "s"})`;
+  type DeploymentOrder = {
+    templateId: number;
+    remainingSeconds: number;
+    totalSeconds: number;
+    gasCost: number;
+    sourceName: string;
+    autonomous: boolean;
+  };
+  const deploymentQueue: DeploymentOrder[] = [];
+  let autonomousSpawnCooldown = 0;
+  let defaultAutoTemplateIds: number[] = templates.slice(0, 3).map((template) => template.id);
+
+  const getTemplateLogisticsSpeed = (template: UnitTemplate): number => Math.max(
+    20,
+    ...template.attachments.map((attachment) => COMPONENTS[attachment.component].maxSpeed ?? 45),
+  );
+
+  const queueDeployment = (templateId: number, autonomous: boolean): boolean => {
+    const state = battle.getState();
+    if (!state.active || state.outcome || state.nodeId === testArenaNode.id) return false;
+    const template = templates.find((entry) => entry.id === templateId);
+    if (!template || !state.nodeId) return false;
+    const friendlyActive = state.units.filter((unit) => unit.side === "player" && unit.alive).length;
+    if (friendlyActive + deploymentQueue.length >= campaign.getDeliveryCapacity()) {
+      if (!autonomous) addLog("Delivery Center capacity reached", "warn");
+      return false;
+    }
+    const quote = quoteBattleLogistics(mapNodes, state.nodeId, getTemplateLogisticsSpeed(template), template.id);
+    const cost = Math.ceil(template.gasCost * quote.gasCostMultiplier);
+    if (!isUnlimitedResources() && gas < cost) {
+      if (!autonomous) addLog("Not enough gas for delivery", "warn");
+      return false;
+    }
+    if (!isUnlimitedResources()) gas -= cost;
+    deploymentQueue.push({ templateId, remainingSeconds: quote.travelSeconds, totalSeconds: quote.travelSeconds, gasCost: cost, sourceName: quote.sourceName, autonomous });
+    addLog(`${autonomous ? "AI ordered" : "Dispatched"} ${template.name} from ${quote.sourceName} · ETA ${Math.ceil(quote.travelSeconds)}s${quote.freeFromOutpost ? " · free outpost unit" : ` · ${cost} gas`}`, autonomous ? "warn" : "good");
+    return true;
   };
 
-  const endRound = (): void => {
-    if (!running) {
-      return;
-    }
-
-    gas = isUnlimitedResources() ? gas : applyStrategicEconomyTick(gas, base, mapNodes);
-
-    if (battle.getState().active && !battle.getState().outcome) {
-      suppressWarnLogs = true;
-      const noKeys: KeyState = { a: false, d: false, w: false, s: false, space: false };
-      const step = 1 / 60;
-      const maxSimSeconds = 240;
-      let t = 0;
-      while (battle.getState().active && !battle.getState().outcome && t < maxSimSeconds) {
-        battle.update(step, noKeys);
-        t += step;
-      }
-      suppressWarnLogs = false;
-
-      if (battle.getState().active && !battle.getState().outcome) {
-        const state = battle.getState();
-        const victory = state.enemyBase.hp <= state.playerBase.hp;
-        battle.forceEnd(victory, "Round deadline reached");
+  const completeResearch = (kind: ResearchKind): void => {
+    if (tech[kind]) return;
+    tech[kind] = true;
+    if (kind === "reinforced") upgradeTemplateMaterials("reinforced");
+    if (kind === "combined") upgradeTemplateMaterials("combined");
+    if (kind === "mediumWeapons") {
+      const tankTemplate = templates.find((template) => template.id === 2);
+      const weapon = tankTemplate?.attachments.find((attachment) => attachment.component === "heavyCannon");
+      if (weapon && tankTemplate) {
+        weapon.component = "explosiveShell";
+        tankTemplate.gasCost = computeTemplateGasCost(tankTemplate, parts);
       }
     }
-
-    for (const job of buildQueue) {
-      job.remainingRounds -= 1;
-    }
-    for (let i = buildQueue.length - 1; i >= 0; i -= 1) {
-      const job = buildQueue[i];
-      if (!job || job.remainingRounds > 0) {
-        continue;
-      }
-      if (job.kind === "refinery") {
-        base.refineries += 1;
-        addLog("Construction complete: Refinery", "good");
-      } else if (job.kind === "expand") {
-        base.areaLevel += 1;
-        addLog("Construction complete: Base expanded", "good");
-      } else {
-        base.labs += 1;
-        addLog("Construction complete: Research Lab", "good");
-      }
-      buildQueue.splice(i, 1);
-    }
-
-    round += 1;
-    renderPanels();
   };
 
   const updateMetaBar = (): void => {
@@ -2174,12 +2520,9 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     const capLabel = isUnlimitedResources() ? "INF" : `${armyCap(getCommanderSkillForCap())}`;
     const battleLabel = battle.getState().active && !battle.getState().outcome ? " | Battle: active" : "";
     if (!replayMode) {
-      const testArenaActive = battle.getState().active && battle.getState().nodeId === testArenaNode.id;
-      const showNextRound = !testArenaActive;
-      metaBar.innerHTML = `Round: ${round} | Gas: ${gasLabel} | Commander Skill: ${commanderSkill} | Army Cap: ${capLabel}${battleLabel}${showNextRound ? ` <button id="btnNextRound">Next Round</button>` : ""}`;
-      if (showNextRound) {
-        getOptionalElement<HTMLButtonElement>("#btnNextRound")?.addEventListener("click", () => endRound());
-      }
+      const minutes = Math.floor(campaign.elapsedSeconds / 60);
+      const seconds = Math.floor(campaign.elapsedSeconds % 60);
+      metaBar.innerHTML = `Live ${minutes}:${seconds.toString().padStart(2, "0")} | Gas: ${gasLabel} | Commander Skill: ${commanderSkill} | Delivery: ${campaign.getDeliveryCapacity()}${battleLabel} | Army Cap: ${capLabel}`;
     }
 
     if (!replayMode) {
@@ -2205,6 +2548,19 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       saveEditorViewForScreen(prev);
     }
     screen = next;
+    debugMenu.open = false;
+    developerMenu.open = false;
+    appShell.classList.toggle("editor-mode", next === "templateEditor" || next === "partEditor");
+    appShell.classList.toggle("scenario-mode", next === "testArena");
+    contextInspectorTitle.textContent = next === "templateEditor"
+      ? "Craft Inspector"
+      : next === "partEditor"
+        ? "Part Inspector"
+        : next === "base"
+          ? "Command Status"
+          : next === "map"
+            ? "Sector Intel"
+            : "Unit Inspector";
     if (isEditorScreenMode(next)) {
       if (next === "templateEditor" && !templateEditorViewVisited) {
         recenterEditorViewForScreen("templateEditor");
@@ -2232,11 +2588,13 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     if (!isEditorScreen()) {
       hideEditorTooltip();
     }
-    canvasViewport.classList.toggle("hidden", next === "leaderboard");
+    const isManagementScreen = next === "base" || next === "map";
+    managementCenter.classList.toggle("hidden", !isManagementScreen);
+    canvasViewport.classList.toggle("hidden", next === "leaderboard" || isManagementScreen);
     if (!battleViewDragActive) {
       canvasViewport.style.cursor = isBattleScreen() ? "grab" : "default";
     }
-    weaponHud.classList.toggle("hidden", next === "leaderboard");
+    weaponHud.classList.toggle("hidden", next === "leaderboard" || isManagementScreen);
     applyBattleViewTransform();
   };
 
@@ -2288,26 +2646,6 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     if (Math.abs(dx) > 0.01 || Math.abs(dy) > 0.01) {
       panBattleViewBy(dx, dy);
     }
-  };
-
-  const centerBattleViewYOnPlayerBase = (): void => {
-    if (!isBattleScreen()) {
-      return;
-    }
-    const viewportHeight = canvasViewport.clientHeight;
-    if (viewportHeight <= 0) {
-      return;
-    }
-    const state = battle.getState();
-    if (!state.active) {
-      return;
-    }
-    const baseCenterY = state.playerBase.y + state.playerBase.h * 0.5;
-    if (!Number.isFinite(baseCenterY)) {
-      return;
-    }
-    battleViewOffsetY = viewportHeight * 0.5 - toDisplayY(baseCenterY) * battleViewScale;
-    applyBattleViewTransform();
   };
 
   const makeUniqueTemplateId = (): number => {
@@ -2372,6 +2710,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     hp: number;
     recoverPerSecond: number;
     color: string;
+    alpha: number;
   } => {
     const part = resolveStructurePartById(partId);
     return {
@@ -2382,6 +2721,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       color: (typeof part?.properties?.materialColor === "string" && /^#[0-9a-fA-F]{6}$/.test(part.properties.materialColor))
         ? part.properties.materialColor
         : MATERIALS.basic.color,
+      alpha: Math.max(0, Math.min(1, part?.properties?.materialAlpha ?? part?.partProperties?.alpha ?? 1)),
     };
   };
 
@@ -2481,6 +2821,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         materialArmor: part.properties?.materialArmor ?? materialDefaults?.materialArmor,
         materialRecoverPerSecond: part.properties?.materialRecoverPerSecond ?? materialDefaults?.materialRecoverPerSecond,
         materialColor: part.properties?.materialColor ?? materialDefaults?.materialColor,
+        materialAlpha: part.properties?.materialAlpha ?? 1,
         hp: part.properties?.hp ?? materialDefaults?.hp,
         isEngine: part.properties?.isEngine ?? defaults.isEngine,
         isWeapon: part.properties?.isWeapon ?? defaults.isWeapon,
@@ -2574,7 +2915,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         }
         const selectedClass = item.value === editorSelection ? "selected" : "";
         return `<button class="editor-comp-card ${selectedClass}" data-comp-value="${item.value}" data-comp-detail="${item.detail}" data-comp-title="${item.title}" title="${item.title}">
-          <span class="editor-thumb">${item.thumb}</span>
+          <span class="editor-thumb ${editorLayer === "functional" ? "functional" : ""}">${item.thumb}</span>
           <span class="editor-comp-name">${item.title}</span>
         </button>`;
       }).join("");
@@ -2599,6 +2940,9 @@ export function bootstrap(options: BootstrapOptions = {}): void {
           </label>
         </div>
         <div class="small">Structure: ${editorDraft.structure.length} | Functional: ${functionalUsage} | Display: ${displayCount}</div>
+        ${editorLayer === "structure" ? `<div class="row"><label class="small">Armor color <input id="editorStructureColor" type="color" value="${editorStructureColor}" title="Tint newly placed or repainted structure blocks" /></label>
+        <label class="small"><input id="editorStructureColorOnly" type="checkbox" ${editorStructureColorOnly ? "checked" : ""} /> Color only</label></div>
+        <div class="small">With Color only enabled, click an existing block to tint it without changing its armor material or stats.</div>` : ""}
         <div class="small">Control Units: ${controlCount}</div>
         <div class="small">${selectedDirectionText}</div>
         <div class="small">Placement: ${editorPlaceByCenter ? "center-on-click" : "anchor-on-click"}</div>
@@ -2609,6 +2953,17 @@ export function bootstrap(options: BootstrapOptions = {}): void {
           <div class="editor-comp-grid">${paletteCards}</div>
         </div>
       `;
+      return;
+    }
+    if (screen === "base") {
+      const economy = getIncomeAndUpkeep(base, mapNodes);
+      selectedInfo.innerHTML = `<div class="inspector-stack"><div class="sidebar-metric"><span>Main base</span><strong>Operational</strong></div><div class="sidebar-metric"><span>Income</span><strong class="good">+${economy.income}</strong></div><div class="sidebar-metric"><span>Delivery cap</span><strong>${campaign.getDeliveryCapacity()}</strong></div><div class="sidebar-metric"><span>Projects</span><strong>${campaign.jobs.length}</strong></div></div>`;
+      return;
+    }
+    if (screen === "map") {
+      const playerNodes = mapNodes.filter((node) => node.owner === "player").length;
+      const hostileNodes = mapNodes.filter((node) => node.owner === "enemy").length;
+      selectedInfo.innerHTML = `<div class="inspector-stack"><div class="sidebar-metric"><span>Controlled sectors</span><strong class="good">${playerNodes}</strong></div><div class="sidebar-metric"><span>Hostile sectors</span><strong class="bad">${hostileNodes}</strong></div><div class="sidebar-metric"><span>Neutral sectors</span><strong class="warn">${mapNodes.length - playerNodes - hostileNodes}</strong></div><div class="small" style="margin-top:10px;">Select a map node to review defense and launch an operation.</div></div>`;
       return;
     }
     if (!isBattleScreen()) {
@@ -2628,10 +2983,11 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         return `#${index + 1}: destroyed`;
       }
       const weaponType = COMPONENTS[attachment.component].type;
+      const weaponName = parts.find((part) => part.id === attachment.partId)?.name ?? attachment.component;
       const mode = selected.weaponAutoFire[index] ? "auto" : "manual";
       const control = selected.weaponManualControl[index] !== false ? "ctrl" : "free";
       const selectedMark = index === selected.selectedWeaponIndex ? "*" : "";
-      return `${selectedMark}#${index + 1}: ${attachment.component} (${weaponType}, ${mode}, ${control})`;
+      return `${selectedMark}#${index + 1}: ${escapeHtml(weaponName)} (${weaponType}, ${mode}, ${control})`;
     }).join(" | ");
     const structureAlive = selected.structure.filter((cell) => !cell.destroyed).length;
     const functionalAlive = selected.attachments.filter((attachment) => attachment.alive).length;
@@ -2674,7 +3030,9 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       const chipClass = manualControl ? "weapon-chip controlled" : "weapon-chip";
       const auto = controlled.weaponAutoFire[index] ? "AUTO" : "MANUAL";
       const control = manualControl ? "CTRL" : "FREE";
-      const label = attachment ? attachment.component : "destroyed";
+      const label = attachment
+        ? escapeHtml(parts.find((part) => part.id === attachment.partId)?.name ?? attachment.component)
+        : "destroyed";
       const timer = controlled.weaponFireTimers[index] ?? 0;
       const cooldown = attachment ? (attachment.stats?.cooldown ?? COMPONENTS[attachment.component].cooldown ?? 0) : 0;
       const cooldownPct = cooldown > 0 ? Math.max(0, Math.min(100, ((cooldown - timer) / cooldown) * 100)) : 100;
@@ -2817,6 +3175,113 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       return "?.?";
     }
     return `${part.id}.${getPartNameInitials(part.name)}`;
+  };
+
+  const getFunctionalThumbGlyph = (part: PartDefinition): string => {
+    const glyphs: Partial<Record<ComponentId, string>> = {
+      control: "◇",
+      engineM: "M⚙",
+      engineS: "S⚙",
+      jetEngine: "»",
+      cannonLoader: "C≡",
+      missileLoader: "M≡",
+      rapidGun: part.id === 19 ? "╫" : "═",
+      heavyCannon: "▰",
+      explosiveShell: "✹",
+      trackingMissile: "➤",
+      precisionBeam: "◎",
+    };
+    return glyphs[part.baseComponent] ?? getPartNameInitials(part.name).slice(0, 2);
+  };
+
+  const drawFunctionalPartIcon = (
+    context: CanvasRenderingContext2D,
+    part: PartDefinition,
+    centerX: number,
+    centerY: number,
+    size: number,
+    facingQuarter: 0 | 1 | 2 | 3,
+  ): void => {
+    const component = part.baseComponent;
+    const radius = size * 0.42;
+    context.save();
+    context.translate(centerX, centerY);
+    context.rotate(facingQuarter * Math.PI / 2);
+    context.lineCap = "round";
+    context.lineJoin = "round";
+    context.lineWidth = Math.max(1.2, size * 0.09);
+    context.strokeStyle = "#fff0e8";
+    context.fillStyle = "#d88468";
+    if (component === "control") {
+      context.beginPath();
+      context.moveTo(0, -radius);
+      context.lineTo(radius, 0);
+      context.lineTo(0, radius);
+      context.lineTo(-radius, 0);
+      context.closePath();
+      context.fill();
+      context.stroke();
+      context.beginPath();
+      context.arc(0, 0, radius * 0.28, 0, Math.PI * 2);
+      context.stroke();
+    } else if (component === "engineM" || component === "engineS" || component === "jetEngine") {
+      context.fillStyle = component === "jetEngine" ? "#69bde8" : "#62c491";
+      context.fillRect(-radius, -radius * 0.65, radius * 1.45, radius * 1.3);
+      context.strokeRect(-radius, -radius * 0.65, radius * 1.45, radius * 1.3);
+      context.beginPath();
+      context.moveTo(radius * 0.45, -radius * 0.5);
+      context.lineTo(radius * 1.25, 0);
+      context.lineTo(radius * 0.45, radius * 0.5);
+      context.stroke();
+    } else if (component === "cannonLoader" || component === "missileLoader") {
+      context.fillStyle = "#d4a94f";
+      context.fillRect(-radius, -radius, radius * 2, radius * 2);
+      context.strokeRect(-radius, -radius, radius * 2, radius * 2);
+      for (const y of [-0.45, 0, 0.45]) {
+        context.beginPath();
+        context.moveTo(-radius * 0.65, radius * y);
+        context.lineTo(radius * 0.65, radius * y);
+        context.stroke();
+      }
+    } else if (component === "trackingMissile") {
+      context.fillStyle = "#ef9a69";
+      context.beginPath();
+      context.moveTo(radius, 0);
+      context.lineTo(-radius * 0.8, -radius * 0.55);
+      context.lineTo(-radius * 0.45, 0);
+      context.lineTo(-radius * 0.8, radius * 0.55);
+      context.closePath();
+      context.fill();
+      context.stroke();
+    } else if (component === "precisionBeam") {
+      context.fillStyle = "#79dcf5";
+      context.beginPath();
+      context.arc(0, 0, radius, 0, Math.PI * 2);
+      context.fill();
+      context.stroke();
+      context.beginPath();
+      context.arc(0, 0, radius * 0.42, 0, Math.PI * 2);
+      context.stroke();
+      context.beginPath();
+      context.moveTo(radius, 0);
+      context.lineTo(radius * 1.5, 0);
+      context.stroke();
+    } else {
+      context.fillStyle = component === "explosiveShell" ? "#ef7b4e" : "#d68f77";
+      context.beginPath();
+      context.arc(-radius * 0.35, 0, radius * 0.55, 0, Math.PI * 2);
+      context.fill();
+      context.stroke();
+      context.fillRect(0, -radius * 0.22, radius * 1.35, radius * 0.44);
+      context.strokeRect(0, -radius * 0.22, radius * 1.35, radius * 0.44);
+      if (component === "rapidGun") {
+        context.beginPath();
+        context.moveTo(0, -radius * 0.48);
+        context.lineTo(radius * 1.35, -radius * 0.48);
+        context.stroke();
+      }
+    }
+    context.restore();
   };
 
   const getEditorSlotFromCanvasPoint = (
@@ -3076,10 +3541,12 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     const nextOriginRow = Math.floor(clampedRows / 2);
 
     const oldStructure = editorStructureSlots.slice();
+    const oldStructureColors = editorStructureColorSlots.slice();
     const oldFunctional = editorFunctionalSlots.slice();
     const oldDisplay = editorDisplaySlots.slice();
 
     const nextStructure = new Array<number | null>(EDITOR_GRID_MAX_SIZE).fill(null);
+    const nextStructureColors = new Array<string | null>(EDITOR_GRID_MAX_SIZE).fill(null);
     const nextFunctional = new Array<EditorFunctionalSlot>(EDITOR_GRID_MAX_SIZE).fill(null);
     const nextDisplay = new Array<DisplayAttachmentTemplate["kind"] | null>(EDITOR_GRID_MAX_SIZE).fill(null);
 
@@ -3095,6 +3562,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         }
         const newSlot = nextRow * clampedCols + nextCol;
         nextStructure[newSlot] = oldStructure[oldSlot] ?? null;
+        nextStructureColors[newSlot] = oldStructureColors[oldSlot] ?? null;
         nextFunctional[newSlot] = oldFunctional[oldSlot] ?? null;
         nextDisplay[newSlot] = oldDisplay[oldSlot] ?? null;
       }
@@ -3103,6 +3571,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     editorGridCols = clampedCols;
     editorGridRows = clampedRows;
     editorStructureSlots = nextStructure;
+    editorStructureColorSlots = nextStructureColors;
     editorFunctionalSlots = nextFunctional;
     editorDisplaySlots = nextDisplay;
     recalcEditorDraftFromSlots();
@@ -3204,7 +3673,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
           title: part.name,
           subtitle: `${stats.type}/${part.baseComponent}`,
           detail: `Base ${part.baseComponent} | Boxes ${footprint.length} | StructSpace ${hasStructureSpace ? "yes" : "no"} | Damageable ${hasDamageableBox ? "yes" : "no"}${rotateHint}`,
-          thumb: String(part.id).slice(0, 2).toUpperCase(),
+          thumb: getFunctionalThumbGlyph(part),
         };
       });
     }
@@ -3240,7 +3709,14 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     editorDraft.structure = structure.map((entry, index) => {
       slotToCell.set(entry.slotIndex, index);
       const coord = slotToCoord(entry.slotIndex);
-      return { partId: entry.partId, x: coord.x, y: coord.y };
+      const defaultColor = getStructurePartStats(entry.partId).color;
+      const selectedColor = editorStructureColorSlots[entry.slotIndex];
+      return {
+        partId: entry.partId,
+        x: coord.x,
+        y: coord.y,
+        color: selectedColor && selectedColor.toLowerCase() !== defaultColor.toLowerCase() ? selectedColor : undefined,
+      };
     });
 
     editorDraft.attachments = editorFunctionalSlots
@@ -3456,6 +3932,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
 
   const loadTemplateIntoEditorSlots = (template: UnitTemplate): void => {
     editorStructureSlots = new Array<number | null>(EDITOR_GRID_MAX_SIZE).fill(null);
+    editorStructureColorSlots = new Array<string | null>(EDITOR_GRID_MAX_SIZE).fill(null);
     editorFunctionalSlots = new Array<EditorFunctionalSlot>(EDITOR_GRID_MAX_SIZE).fill(null);
     editorDisplaySlots = new Array<DisplayAttachmentTemplate["kind"] | null>(EDITOR_GRID_MAX_SIZE).fill(null);
 
@@ -3471,6 +3948,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         continue;
       }
       editorStructureSlots[slot] = template.structure[cellIndex]?.partId ?? getDefaultStructurePartId();
+      editorStructureColorSlots[slot] = template.structure[cellIndex]?.color ?? null;
       cellToSlot.set(cellIndex, slot);
     }
 
@@ -3556,6 +4034,12 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       const part = resolvePartDefinitionForAttachment({ partId: attachment.partId, component: attachment.component }, parts);
       totalMass += part?.stats?.mass ?? stats.mass;
       if (stats.type === "engine") {
+        const supportsTemplateType = editorDraft.type === "air"
+          ? (part?.partProperties?.powerAir ?? stats.propulsion?.platform === "air")
+          : (part?.partProperties?.powerGround ?? stats.propulsion?.platform === "ground");
+        if (!supportsTemplateType) {
+          continue;
+        }
         const enginePower = Math.max(0, part?.stats?.power ?? stats.power ?? 0);
         const engineSpeedCap = Math.max(1, part?.stats?.maxSpeed ?? stats.maxSpeed ?? 90);
         totalPower += enginePower;
@@ -3572,8 +4056,9 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     let achievableSpeed = 0;
     if (totalPower > 0) {
       const speedCap = Math.max(1, weightedSpeedCap / Math.max(1, capWeight));
-      const speedScale = editorDraft.type === "ground" ? 74 : 82;
-      const rawSpeed = (totalPower / Math.max(16, totalMass)) * speedScale;
+      const rawSpeed = editorDraft.type === "ground"
+        ? (totalPower / Math.max(16, totalMass)) * 74
+        : Math.max(0, (totalPower / Math.max(16, totalMass)) * AIR_THRUST_ACCEL_SCALE - AIR_HOLD_GRAVITY);
       achievableSpeed = Math.max(0, Math.min(speedCap, rawSpeed));
     }
 
@@ -3588,49 +4073,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         }
         const part = resolvePartDefinitionForAttachment({ partId: attachment.partId, component: attachment.component }, parts);
         const enginePower = Math.max(0, part?.stats?.power ?? stats.power ?? 0);
-        const baseAccel = (enginePower / mass) * AIR_THRUST_ACCEL_SCALE;
-        if (stats.propulsion.mode === "omni") {
-          liftAccel += baseAccel;
-          continue;
-        }
-        const rotateQuarter = (attachment.rotateQuarter ?? 0) as 0 | 1 | 2 | 3;
-        const facingQuarter = getDirectionalFacingQuarter(part, rotateQuarter);
-        const pushDir = rotateOffsetByQuarter(1, 0, facingQuarter);
-        const thrustX = -pushDir.x;
-        const thrustY = -pushDir.y;
-        const hasAngleLimit = part?.partProperties?.hasAngleLimit;
-        const cwAngle = part?.partProperties?.cwAngle;
-        const ccwAngle = part?.partProperties?.ccwAngle;
-        let limitEnabled = false;
-        let cwRad = 0;
-        let ccwRad = 0;
-        if (hasAngleLimit === true && Number.isFinite(cwAngle) && Number.isFinite(ccwAngle)) {
-          limitEnabled = true;
-          cwRad = Math.max(0, cwAngle ?? 0) * Math.PI / 180;
-          ccwRad = Math.max(0, ccwAngle ?? 0) * Math.PI / 180;
-        } else if (hasAngleLimit !== false) {
-          const legacyHalf = part?.partProperties?.thrustAngleDeg ?? stats.propulsion.thrustAngleDeg;
-          if (Number.isFinite(legacyHalf)) {
-            limitEnabled = true;
-            cwRad = Math.max(0, legacyHalf ?? 0) * Math.PI / 180;
-            ccwRad = Math.max(0, legacyHalf ?? 0) * Math.PI / 180;
-          }
-        }
-        if (!limitEnabled) {
-          liftAccel += baseAccel;
-          continue;
-        }
-        const thrustAngle = Math.atan2(thrustY, thrustX);
-        const upAngle = -Math.PI / 2;
-        const relative = Math.atan2(Math.sin(upAngle - thrustAngle), Math.cos(upAngle - thrustAngle));
-        if (relative > cwRad || relative < -ccwRad) {
-          continue;
-        }
-        const sideLimit = relative >= 0 ? cwRad : ccwRad;
-        const inConeScale = sideLimit > 1e-6
-          ? Math.max(0, Math.min(1, 1 - Math.abs(relative) / sideLimit))
-          : 1;
-        liftAccel += baseAccel * inConeScale;
+        liftAccel += (enginePower / mass) * AIR_THRUST_ACCEL_SCALE;
       }
     }
 
@@ -3853,16 +4296,26 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         const y = grid.y + row * grid.cell;
         const structurePartId = editorStructureSlots[slot];
         const structurePart = resolveStructurePartById(structurePartId);
-        const structureColor = structurePartId ? getStructurePartStats(structurePartId).color : "rgba(39, 56, 76, 0.42)";
+        const structureColor = structurePartId ? (editorStructureColorSlots[slot] ?? getStructurePartStats(structurePartId).color) : "rgba(39, 56, 76, 0.42)";
 
         context.fillStyle = structureColor;
-        context.globalAlpha = structurePartId ? 0.82 : 1;
+        context.globalAlpha = structurePartId ? getStructurePartStats(structurePartId).alpha : 1;
         context.fillRect(x + 2, y + 2, grid.cell - 4, grid.cell - 4);
         context.globalAlpha = 1;
         context.strokeStyle = structurePartId ? "rgba(224, 236, 251, 0.72)" : "rgba(121, 148, 180, 0.35)";
         context.lineWidth = 1;
         context.strokeRect(x + 1, y + 1, grid.cell - 2, grid.cell - 2);
         if (structurePart) {
+          context.strokeStyle = "rgba(255, 255, 255, 0.22)";
+          context.beginPath();
+          context.moveTo(x + grid.cell * 0.18, y + grid.cell * 0.22);
+          context.lineTo(x + grid.cell * 0.82, y + grid.cell * 0.22);
+          context.stroke();
+          context.fillStyle = "rgba(5, 12, 18, 0.42)";
+          context.beginPath();
+          context.arc(x + grid.cell * 0.18, y + grid.cell * 0.82, Math.max(1, grid.cell * 0.035), 0, Math.PI * 2);
+          context.arc(x + grid.cell * 0.82, y + grid.cell * 0.82, Math.max(1, grid.cell * 0.035), 0, Math.PI * 2);
+          context.fill();
           context.fillStyle = "#f3fbff";
           context.font = "8px Trebuchet MS";
           context.fillText(structurePart.name, x + 4, y + 10, Math.max(8, grid.cell - 8));
@@ -3870,13 +4323,18 @@ export function bootstrap(options: BootstrapOptions = {}): void {
 
         const functional = editorFunctionalSlots[slot];
         if (functional) {
-          context.fillStyle = "#f0b39f";
-          context.fillRect(x + 6, y + 6, 12, 12);
+          const part = resolvePartDefinitionForAttachment(
+            { partId: functional.partId, component: functional.component },
+            parts,
+          );
+          if (functional.isAnchor && part) {
+            const facingQuarter = getDirectionalFacingQuarter(part, functional.rotateQuarter);
+            drawFunctionalPartIcon(context, part, x + grid.cell * 0.5, y + grid.cell * 0.45, Math.min(22, grid.cell * 0.48), facingQuarter);
+          } else {
+            context.fillStyle = "#f0b39f";
+            context.fillRect(x + 6, y + 6, 12, 12);
+          }
           if (functional.isAnchor) {
-            const part = resolvePartDefinitionForAttachment(
-              { partId: functional.partId, component: functional.component },
-              parts,
-            );
             context.fillStyle = "#fff5ef";
             context.font = "9px Trebuchet MS";
             context.fillText(getFunctionalShortLabel(part), x + 4, y + grid.cell - 6, Math.max(12, grid.cell - 8));
@@ -3945,8 +4403,8 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         if (editorLayer === "structure") {
           const structurePart = typeof editorSelection === "number" ? resolveStructurePartById(editorSelection) : null;
           if (structurePart) {
-            context.globalAlpha = 0.5;
-            context.fillStyle = getStructurePartStats(structurePart.id).color;
+            context.globalAlpha = getStructurePartStats(structurePart.id).alpha * 0.5;
+            context.fillStyle = editorStructureColor;
             context.fillRect(slotX + 2, slotY + 2, grid.cell - 4, grid.cell - 4);
             context.globalAlpha = 1;
           }
@@ -3976,6 +4434,8 @@ export function bootstrap(options: BootstrapOptions = {}): void {
               const anchorRow = Math.floor(attempt.anchorSlot / editorGridCols);
               const anchorX = grid.x + anchorCol * grid.cell;
               const anchorY = grid.y + anchorRow * grid.cell;
+              const facingQuarter = getDirectionalFacingQuarter(part, rotateQuarter);
+              drawFunctionalPartIcon(context, part, anchorX + grid.cell * 0.5, anchorY + grid.cell * 0.45, Math.min(22, grid.cell * 0.48), facingQuarter);
               context.fillStyle = "#fff5ef";
               context.font = "9px Trebuchet MS";
               context.fillText(getFunctionalShortLabel(part), anchorX + 4, anchorY + grid.cell - 6, Math.max(12, grid.cell - 8));
@@ -3991,7 +4451,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     const speedText = `Achievable speed: ${combatPreview.achievableSpeed.toFixed(1)}`;
     const liftText = combatPreview.liftAccel === null
       ? "Lift: n/a (ground unit)"
-      : `Lift: ${combatPreview.liftAccel.toFixed(1)} / ${AIR_HOLD_GRAVITY.toFixed(1)} ${combatPreview.liftAccel >= AIR_HOLD_GRAVITY ? "(hold)" : "(insufficient)"}`;
+      : `Air thrust: ${combatPreview.liftAccel.toFixed(1)} - gravity ${AIR_HOLD_GRAVITY.toFixed(1)} ${combatPreview.liftAccel > AIR_HOLD_GRAVITY ? "(flight)" : "(insufficient)"}`;
     const panelX = 16;
     const panelY = drawCanvas.height - 70;
     context.fillStyle = "rgba(19, 30, 44, 0.94)";
@@ -4109,6 +4569,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       const hadStructure = editorStructureSlots[slot] !== null;
       if (hadStructure) {
         editorStructureSlots[slot] = null;
+        editorStructureColorSlots[slot] = null;
         editorDisplaySlots[slot] = null;
         recalcEditorDraftFromSlots();
         return;
@@ -4122,6 +4583,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         const hadStructure = editorStructureSlots[slot] !== null;
         clearFunctionalGroupAtSlot(slot);
         editorStructureSlots[slot] = null;
+        editorStructureColorSlots[slot] = null;
         editorDisplaySlots[slot] = null;
         if (!hadStructure) {
           addLog(`No structure cell at row ${row + 1}, col ${col + 1}`, "warn");
@@ -4129,7 +4591,10 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       } else {
         const structurePart = typeof editorSelection === "number" ? resolveStructurePartById(editorSelection) : null;
         if (structurePart) {
-          editorStructureSlots[slot] = structurePart.id;
+          if (!editorStructureColorOnly || editorStructureSlots[slot] === null) {
+            editorStructureSlots[slot] = structurePart.id;
+          }
+          editorStructureColorSlots[slot] = editorStructureColor;
         }
       }
       recalcEditorDraftFromSlots();
@@ -4206,50 +4671,125 @@ export function bootstrap(options: BootstrapOptions = {}): void {
   const renderPanels = (): void => {
     updateMetaBar();
 
-    const buildQueueText = buildQueue.length > 0
-      ? buildQueue.map((job) => `<span class="tag">${formatBuildJob(job)}</span>`).join(" ")
-      : "None";
+    const economy = getIncomeAndUpkeep(base, mapNodes);
+    const liveIncome = campaign.getBuildingCount("refinery") * 6
+      + mapNodes.filter((node) => node.owner === "player").reduce((sum, node) => sum + (node.gasYieldPerMinute ?? node.resourceYieldPerMinute ?? 0), 0);
+    const ownedNodes = mapNodes.filter((node) => node.owner === "player").length;
+    const garrisonCount = mapNodes.filter((node) => node.garrison).length;
+    const activeTechCount = Object.values(tech).filter(Boolean).length;
+    const canSpend = (amount: number): boolean => isUnlimitedResources() || gas >= amount;
+    const buildQueueCards = campaign.jobs.length > 0
+      ? campaign.jobs.map((job) => {
+          const progress = Math.max(4, Math.min(100, ((job.durationSeconds - job.remainingSeconds) / Math.max(1, job.durationSeconds)) * 100));
+          const label = job.type === "building" ? BUILDING_CATALOG[job.target as BuildingKind].name : RESEARCH_CATALOG[job.target as ResearchKind].name;
+          return `<div class="queue-item"><div><strong>${label}</strong><span>${Math.ceil(job.remainingSeconds)}s</span></div><div class="progress-track"><i style="width:${progress}%"></i></div></div>`;
+        }).join("")
+      : `<div class="empty-state compact"><span class="empty-state-icon">+</span><div><strong>Construction queue clear</strong><small>Select a facility to begin an upgrade.</small></div></div>`;
 
     basePanel.innerHTML = `
-      <h3>Base</h3>
-      <div class="small">Area Lv.${base.areaLevel} | Refineries: ${base.refineries} | Workshops: ${base.workshops} | Labs: ${base.labs}</div>
-      <div class="small">Construction queue: ${buildQueueText}</div>
-      <div class="row">
-        <button id="btnBuildRefinery">Build Refinery (90 gas, ${buildRounds.refinery} round)</button>
-        <button id="btnExpandBase">Expand Base (120 gas, ${buildRounds.expand} rounds)</button>
-        <button id="btnBuildLab">Build Lab (110 gas, ${buildRounds.lab} rounds)</button>
-      </div>
-      <div class="small">Tech unlocks: ${Object.entries(tech).filter((entry) => entry[1]).map((entry) => `<span class="tag">${entry[0]}</span>`).join("") || "None"}</div>
-      <div class="row" style="margin-top:8px;">
-        <button id="btnUnlockReinforced">Unlock Reinforced (130 gas)</button>
-        <button id="btnUnlockCombined">Unlock Combined Box (180 gas)</button>
-        <button id="btnUnlockMediumWeapon">Unlock Explosive Cannon (170 gas)</button>
-      </div>
+      <div class="panel-heading"><div><span class="eyebrow">Command overview</span><h2>Home Base</h2></div><span class="health-pill good"><i></i> Operational</span></div>
+      <div class="sidebar-metric"><span>Gas income / min</span><strong class="good">+${liveIncome}</strong></div>
+      <div class="sidebar-metric"><span>Territory secured</span><strong>${ownedNodes}/${mapNodes.length}</strong></div>
+      <div class="sidebar-metric"><span>Research online</span><strong>${activeTechCount}/5</strong></div>
+      <div class="section-divider"></div>
+      <div class="section-label">Construction queue</div>
+      <div class="queue-list">${buildQueueCards}</div>
     `;
 
     const isTestArenaActive = battle.getState().active && battle.getState().nodeId === testArenaNode.id;
     mapPanel.innerHTML = `
-      <h3>Map</h3>
-      <div class="small">Choose where to fight from your base.</div>
-      ${battle.getState().active && !battle.getState().outcome && !isTestArenaActive ? `<div class="small warn">Battle resolves when you press Next Round.</div>` : ""}
-      ${mapNodes
-        .map((node) => {
-          const ownerClass = node.owner === "player" ? "good" : node.owner === "enemy" ? "bad" : "warn";
-          return `<div class="node-card">
-            <div><strong>${node.name}</strong> <span class="${ownerClass}">(${node.owner})</span></div>
-            <div class="small">Defense: ${node.defense.toFixed(2)} | Reward: ${node.reward} gas ${node.garrison ? "| Garrisoned" : ""}</div>
-            <div class="row"><button data-attack="${node.id}" class="nodeAttack">Launch Battle</button></div>
-          </div>`;
-        })
-        .join("")}
-      ${pendingOccupation ? `<div class="row"><button id="btnSettle">Station Garrison (upkeep 4 gas/round)</button></div>` : ""}
+      <div class="panel-heading"><div><span class="eyebrow">Strategic network</span><h2>Territory</h2></div><span class="health-pill"><i></i> ${ownedNodes} secured</span></div>
+      <div class="map-legend"><span><i class="owner-player"></i> Player</span><span><i class="owner-neutral"></i> Neutral</span><span><i class="owner-enemy"></i> Enemy</span></div>
+      <div class="sidebar-metric"><span>Garrison upkeep</span><strong>${economy.upkeep}</strong></div>
+      <div class="sidebar-metric"><span>Active garrisons</span><strong>${garrisonCount}</strong></div>
+      ${battle.getState().active && !battle.getState().outcome && !isTestArenaActive ? `<div class="notice warn"><strong>Battle live</strong><span>Combat and AI logistics continue while you manage the map.</span></div>` : ""}
+      ${pendingOccupation ? `<div class="notice good"><strong>Sector captured</strong><span>Secure it before advancing.</span><button id="btnSettle">Station garrison · 4 upkeep</button></div>` : ""}
     `;
+
+    if (screen === "base") {
+      const researchCard = (key: keyof TechState, title: string, description: string, cost: number, buttonId: string): string => {
+        const unlocked = tech[key];
+        const lockedByLab = campaign.getBuildingCount("research-lab") < 1;
+        const inProgress = campaign.jobs.some((job) => job.type === "research" && job.target === key);
+        const disabled = unlocked || inProgress || lockedByLab || !canSpend(cost);
+        const seconds = RESEARCH_CATALOG[key as ResearchKind]?.durationSeconds ?? 0;
+        const action = unlocked ? "Researched" : inProgress ? "Researching…" : lockedByLab ? "Lab required" : !canSpend(cost) ? "Insufficient gas" : `Research · ${cost} gas · ${seconds}s`;
+        return `<article class="tech-card ${unlocked ? "unlocked" : ""}"><div class="tech-glyph">${unlocked ? "✓" : "◇"}</div><div><h3>${title}</h3><p>${description}</p></div><button id="${buttonId}" ${disabled ? "disabled" : ""}>${action}</button></article>`;
+      };
+      const availableBuildSlots = campaign.slots.filter((slot) => !slot.building && !campaign.jobs.some((job) => job.slotId === slot.id));
+      if (!availableBuildSlots.some((slot) => slot.id === selectedBaseBuildSlotId)) {
+        selectedBaseBuildSlotId = availableBuildSlots[0]?.id ?? null;
+      }
+      const selectedBuildSlot = availableBuildSlots.find((slot) => slot.id === selectedBaseBuildSlotId) ?? null;
+      const selectedBuildOptions = selectedBuildSlot
+        ? (Object.keys(BUILDING_CATALOG) as BuildingKind[]).filter((kind) => BUILDING_CATALOG[kind].size === selectedBuildSlot.size)
+        : [];
+      managementCenter.innerHTML = `
+        <section class="base-primary-workspace" aria-label="Main Base compound">
+          <div class="base-compound">
+            <header class="base-scene-overlay">
+              <div><span class="eyebrow">Main Base</span><strong>Command Compound</strong><small>Operational · construction continues during battle</small></div>
+              <div class="base-overlay-metrics">
+                <span><small>Gas</small><b>${isUnlimitedResources() ? "∞" : Math.floor(gas)}</b><i>+${liveIncome}/min</i></span>
+                <span><small>Facilities</small><b>${campaign.slots.filter((slot) => slot.building).length}/4</b></span>
+                <span><small>Delivery</small><b>${campaign.getDeliveryCapacity()}</b></span>
+                <span><small>Projects</small><b>${campaign.jobs.length}</b></span>
+              </div>
+              <button class="button-quiet" data-nav="templateEditor">Craft designer</button>
+            </header>
+            <div class="base-command-core"><span>HQ</span><strong>Command Core</strong><small>Gas deposit online</small></div>
+            ${campaign.slots.map((slot) => {
+              const building = slot.building ? BUILDING_CATALOG[slot.building] : null;
+              const pending = campaign.jobs.find((job) => job.slotId === slot.id);
+              const isSelected = !building && !pending && selectedBaseBuildSlotId === slot.id;
+              return `<article class="base-building-spot slot-${slot.id} spot-${slot.size} ${building ? "occupied" : ""} ${pending ? "building" : ""} ${isSelected ? "selected" : ""}"><span class="spot-size">${slot.size}</span>${building ? `<div class="building-graphic building-${slot.building}"><i aria-hidden="true"></i><div class="building-caption"><b>${building.name}</b><small>${building.description}</small></div></div>` : pending ? `<div class="building-under-construction"><i></i><b>Under construction</b><small>${Math.ceil(pending.remainingSeconds)}s remaining</small></div>` : `<button class="empty-building-spot" data-select-build-slot="${slot.id}" aria-pressed="${isSelected}"><span class="empty-pad-mark">+</span><b>Open ${slot.size} spot</b><small>${isSelected ? "Choose a building below" : "Select to build"}</small></button>`}</article>`;
+            }).join("")}
+          </div>
+          <div class="base-build-dock">
+            <div class="build-dock-heading"><span class="eyebrow">Construction</span><strong>${selectedBuildSlot ? `${selectedBuildSlot.size} building spot` : "All building spots assigned"}</strong><small>${selectedBuildSlot ? `Selected pad: ${selectedBuildSlot.id.replaceAll("-", " ")}` : "No empty pad is available."}</small></div>
+            <div class="build-dock-options">${selectedBuildOptions.length > 0 ? selectedBuildOptions.map((kind) => {
+              const item = BUILDING_CATALOG[kind];
+              return `<button class="build-option building-${kind}" data-build-kind="${kind}" data-build-slot="${selectedBuildSlot?.id ?? ""}" ${!canSpend(item.gasCost) ? "disabled" : ""}><i aria-hidden="true"></i><span><b>${item.name}</b><small>${item.description}</small><em>${item.gasCost} gas · ${item.buildSeconds}s</em></span></button>`;
+            }).join("") : `<div class="build-dock-empty">Select an open pad in the compound to see compatible buildings.</div>`}</div>
+          </div>
+        </section>
+        <section class="workspace-section"><div class="section-heading"><div><span class="eyebrow">Technology</span><h2>Research matrix</h2></div><span class="section-note">Requires an operational research lab</span></div>
+          <div class="tech-grid">
+            ${researchCard("reinforced", "Reinforced structures", "Increase frontline durability with denser structural blocks.", 130, "btnUnlockReinforced")}
+            ${researchCard("combined", "Combined composite", "Hybrid material package balancing recovery and armor.", 180, "btnUnlockCombined")}
+            ${researchCard("mediumWeapons", "Explosive cannon", "Adds area denial and blast damage to heavy platforms.", 170, "btnUnlockMediumWeapon")}
+          </div>
+        </section>`;
+    } else if (screen === "map") {
+      const routeKeys = new Set<string>();
+      const routeMarkup = mapNodes.flatMap((node) => (node.links ?? []).map((linkedId) => {
+        const linked = mapNodes.find((entry) => entry.id === linkedId);
+        if (!linked || node.x === undefined || node.y === undefined || linked.x === undefined || linked.y === undefined) return "";
+        const key = [node.id, linked.id].sort().join(":");
+        if (routeKeys.has(key)) return "";
+        routeKeys.add(key);
+        return `<line x1="${node.x * 10}" y1="${node.y * 5.2}" x2="${linked.x * 10}" y2="${linked.y * 5.2}" />`;
+      })).join("");
+      const nodeMarkup = mapNodes.map((node, index) => {
+        const ownerLabel = node.owner.charAt(0).toUpperCase() + node.owner.slice(1);
+        const kindLabel = (node.kind ?? "battlefield").replace("-", " ");
+        const reachable = node.owner === "player" || node.id === "mine" || node.id === "oil"
+          || (node.links ?? []).some((linkedId) => mapNodes.some((entry) => entry.id === linkedId && entry.owner === "player"));
+        const benefit = node.kind === "oil" ? `+${node.gasYieldPerMinute ?? 0} gas/min` : node.kind === "resource" ? `+${node.resourceYieldPerMinute ?? 0} resources/min` : node.kind === "remote-base" ? "Forward logistics source" : node.kind === "outpost" ? "Free local craft support" : `${node.reward} gas reward`;
+        return `<article class="campaign-node kind-${node.kind ?? "battlefield"} node-${node.id} owner-${node.owner} ${reachable ? "" : "route-locked"}" style="left:${node.x ?? 50}%;top:${node.y ?? 50}%"><span class="node-index">${String(index + 1).padStart(2, "0")}</span><button data-attack="${node.id}" class="nodeAttack map-node-marker" ${reachable ? "" : "disabled"}><i class="node-emblem" aria-hidden="true"></i><span><strong>${escapeHtml(node.name)}</strong><small>${ownerLabel} · ${kindLabel}</small></span></button><div class="node-tooltip"><strong>${escapeHtml(node.name)}</strong><span>${node.distanceFromHome ?? 0} km · Defense ${node.defense.toFixed(2)}</span><span>${benefit}</span><b>${node.owner === "player" ? "Run defense exercise" : reachable ? "Launch operation" : "Route locked"}</b></div></article>`;
+      }).join("");
+      managementCenter.innerHTML = `
+        <div class="workspace-header"><div><span class="eyebrow">Campaign / Operations</span><h1>Branching Theater</h1><p>Capture fields for income, outposts for free local support, and remote bases to shorten delivery routes.</p></div><div class="workspace-actions"><span class="map-readout">${ownedNodes}/${mapNodes.length} sectors controlled</span></div></div>
+        <div class="campaign-map branching-map"><div class="map-vignette"></div><svg class="map-routes" viewBox="0 0 1000 520" preserveAspectRatio="none" aria-hidden="true">${routeMarkup}</svg><div class="home-node"><i></i><span><strong>Main Base</strong><small>Only buildable base</small></span></div>${nodeMarkup}</div>
+        <div class="map-footer"><div><span class="eyebrow">Live economy</span><strong>+${liveIncome} gas/resources per minute</strong></div><div><span class="eyebrow">Remote-base doctrine</span><strong>Captured relay bases reduce reinforcement time and distance cost</strong></div></div>`;
+    }
 
     battlePanel.innerHTML = `
       <h3>Battle Ops</h3>
-      <div class="small">Call reinforcements using global gas. Active cap from commander skill.</div>
-      <div class="small">Turn-based: battle ends at end of round (press Next Round to resolve).</div>
-      <div class="row">${templates.map((template) => `<button data-deploy="${template.id}">${template.name} (${template.gasCost} gas)</button>`).join("")}</div>
+      <div class="small">Reinforcements travel in real time. Faster craft and closer controlled bases arrive sooner.</div>
+      <div class="small">Delivery capacity: ${campaign.getDeliveryCapacity()} · ${deploymentQueue.length} en route. Off-screen AI uses selected default craft.</div>
+      <div class="deployment-roster">${templates.map((template) => `<label><input class="autoCraftToggle" type="checkbox" data-template-id="${template.id}" ${defaultAutoTemplateIds.includes(template.id) ? "checked" : ""} /> AI</label><button data-deploy="${template.id}">${template.name}</button>`).join("")}</div>
+      <div class="queue-list">${deploymentQueue.map((order) => { const template = templates.find((entry) => entry.id === order.templateId); const progress = 100 * (1 - order.remainingSeconds / Math.max(1, order.totalSeconds)); return `<div class="queue-item"><div><strong>${escapeHtml(template?.name ?? "Craft")}</strong><span>${Math.ceil(order.remainingSeconds)}s · ${escapeHtml(order.sourceName)}</span></div><div class="progress-track"><i style="width:${progress}%"></i></div></div>`; }).join("") || `<div class="small">No craft en route.</div>`}</div>
       <div class="row">
         <span class="small">Spawn side:</span>
         <button id="btnDeploySidePlayer" ${battleDeploySide === "player" ? "class=\"active\"" : ""}>Player Spawn</button>
@@ -4259,30 +4799,33 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       ${battle.getState().outcome ? `<div class="row"><button id="btnBackToMap">Return to Map</button></div>` : ""}
     `;
 
-    const enemySpawnTemplateIds = getTestArenaEnemySpawnTemplateIds();
-    const enemySpawnTemplateIdSet = new Set<number>(enemySpawnTemplateIds);
-    const enemySpawnTemplateOptions = templates
-      .map((template) => `
-        <label class="small test-arena-spawn-option">
-          <input class="testArenaEnemySpawnTemplateToggle" type="checkbox" data-template-id="${template.id}" ${enemySpawnTemplateIdSet.has(template.id) ? "checked" : ""} />
-          <span>${escapeHtml(template.name)}</span>
-        </label>
-      `)
-      .join("");
     const playerSpawnTemplateIds = getTestArenaPlayerSpawnTemplateIds();
     const playerSpawnTemplateIdSet = new Set<number>(playerSpawnTemplateIds);
-    const playerSpawnTemplateOptions = templates
+    const enemySpawnTemplateIds = getTestArenaEnemySpawnTemplateIds();
+    const enemySpawnTemplateIdSet = new Set<number>(enemySpawnTemplateIds);
+    const spawnTemplateOptions = templates
       .map((template) => `
-        <label class="small test-arena-spawn-option">
+        <span class="small test-arena-craft-name">${escapeHtml(template.name)}</span>
+        <label class="small test-arena-spawn-option" title="Auto-spawn ${escapeHtml(template.name)} for Player">
           <input class="testArenaPlayerSpawnTemplateToggle" type="checkbox" data-template-id="${template.id}" ${playerSpawnTemplateIdSet.has(template.id) ? "checked" : ""} />
-          <span>${escapeHtml(template.name)}</span>
+          <span>Player</span>
+        </label>
+        <label class="small test-arena-spawn-option" title="Auto-spawn ${escapeHtml(template.name)} for Enemy">
+          <input class="testArenaEnemySpawnTemplateToggle" type="checkbox" data-template-id="${template.id}" ${enemySpawnTemplateIdSet.has(template.id) ? "checked" : ""} />
+          <span>Enemy</span>
         </label>
       `)
       .join("");
     const enemySpawnSummary = enemySpawnTemplateIds.length <= 0 ? "None" : `${enemySpawnTemplateIds.length} selected`;
     const playerSpawnSummary = playerSpawnTemplateIds.length <= 0 ? "None" : `${playerSpawnTemplateIds.length} selected`;
-    const enemySpawnDropdownOpenAttr = testArenaEnemySpawnTemplateDropdownOpen ? "open" : "";
-    const playerSpawnDropdownOpenAttr = testArenaPlayerSpawnTemplateDropdownOpen ? "open" : "";
+    const spawnDropdownOpenAttr = testArenaSpawnTemplateDropdownOpen ? "open" : "";
+    const manualSectionOpenAttr = testArenaPanelSections.manual ? "open" : "";
+    if (testArenaTemplateStoreReady && !templates.some((template) => template.id === testArenaManualSpawnTemplateId)) {
+      testArenaManualSpawnTemplateId = templates[0]?.id ?? 0;
+    }
+    const manualSpawnTemplateOptions = templates
+      .map((template) => `<option value="${template.id}" ${template.id === testArenaManualSpawnTemplateId ? "selected" : ""}>${escapeHtml(template.name)}</option>`)
+      .join("");
     const renderCompositeModelOptions = (side: TestArenaSide): string => {
       const selectedId = testArenaCompositeModelSelections[side];
       return testArenaCompositeModelOptions
@@ -4311,11 +4854,10 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     const aiSectionOpenAttr = testArenaPanelSections.ai ? "open" : "";
     const uiSectionOpenAttr = testArenaPanelSections.ui ? "open" : "";
     testArenaPanel.innerHTML = `
-      <h3>Test Arena</h3>
-      <div class="small">Debug arena for spawn pressure and survivability. Starts a battle without campaign rewards.</div>
-      <div class="small">Not turn-based: Next Round is disabled while in Test Arena.</div>
+      <div class="panel-heading"><div><span class="eyebrow">Scenario laboratory</span><h2>Test Arena</h2></div><span class="health-pill ${isTestArenaActive ? "good" : ""}"><i></i>${isTestArenaActive ? " Running" : " Ready"}</span></div>
+      <div class="developer-intro">Configure reproducible spawn pressure, AI policy, survivability, and battlefield geometry without campaign rewards.</div>
       <div class="row">
-        <button id="btnStartTestArena">${isTestArenaActive ? "Restart Test Arena" : "Start Test Arena"}</button>
+        <button id="btnStartTestArena" class="button-primary">${isTestArenaActive ? "Restart Test Arena" : "Start Test Arena"}</button>
         ${isTestArenaActive ? `<button id="btnEndTestArena">End Test Arena</button>` : ""}
       </div>
       <details id="testArenaSectionUnit" class="test-arena-section" ${unitSectionOpenAttr}>
@@ -4326,16 +4868,11 @@ export function bootstrap(options: BootstrapOptions = {}): void {
             <div class="small"><strong>Enemy</strong></div>
             <input id="testArenaPlayerCount" type="number" min="0" max="40" step="1" value="${playerCountLabel}" />
             <input id="testArenaEnemyCount" type="number" min="0" max="40" step="1" value="${enemyCountLabel}" />
-            <details id="testArenaPlayerSpawnTemplateDropdown" class="test-arena-spawn-dropdown" ${playerSpawnDropdownOpenAttr}>
-              <summary class="small">${playerSpawnSummary}</summary>
-              <div class="test-arena-spawn-options">
-                ${playerSpawnTemplateOptions}
-              </div>
-            </details>
-            <details id="testArenaEnemySpawnTemplateDropdown" class="test-arena-spawn-dropdown" ${enemySpawnDropdownOpenAttr}>
-              <summary class="small">${enemySpawnSummary}</summary>
-              <div class="test-arena-spawn-options">
-                ${enemySpawnTemplateOptions}
+            <details id="testArenaSpawnTemplateDropdown" class="test-arena-spawn-dropdown test-arena-spawn-dropdown-shared" ${spawnDropdownOpenAttr}>
+              <summary class="small">Craft types · Player ${playerSpawnSummary} · Enemy ${enemySpawnSummary}</summary>
+              <div class="test-arena-spawn-options test-arena-spawn-options-shared">
+                <strong class="small">Craft</strong><strong class="small">Player</strong><strong class="small">Enemy</strong>
+                ${spawnTemplateOptions}
               </div>
             </details>
             <label class="small"><input id="testArenaAutoSpawnOnPlayerSide" type="checkbox" ${testArenaAutoSpawnOnPlayerSide ? "checked" : ""} /> Auto spawn</label>
@@ -4346,6 +4883,21 @@ export function bootstrap(options: BootstrapOptions = {}): void {
           </div>
           <label class="small"><input id="testArenaInvinciblePlayer" type="checkbox" ${testArenaInvinciblePlayer ? "checked" : ""} /> Player controlled invincible</label>
           <div class="small">Invincible player still collides and can be targeted, but takes no damage.</div>
+        </div>
+      </details>
+      <details id="testArenaSectionManual" class="test-arena-section" ${manualSectionOpenAttr}>
+        <summary><strong>Manual Spawn</strong></summary>
+        <div class="test-arena-section-body">
+          <div class="small">Spawn exactly one selected craft immediately on either side of a running Test Arena.</div>
+          <label class="small">Craft <select id="testArenaManualSpawnTemplate">${manualSpawnTemplateOptions}</select></label>
+          <label class="small">Side
+            <select id="testArenaManualSpawnSide">
+              <option value="player" ${testArenaManualSpawnSide === "player" ? "selected" : ""}>Player</option>
+              <option value="enemy" ${testArenaManualSpawnSide === "enemy" ? "selected" : ""}>Enemy</option>
+            </select>
+          </label>
+          <button id="btnTestArenaManualSpawn" class="button-primary" ${isTestArenaActive && testArenaManualSpawnTemplateId > 0 ? "" : "disabled"}>Spawn one craft</button>
+          ${isTestArenaActive ? "" : `<div class="small warn">Start Test Arena to enable manual spawning.</div>`}
         </div>
       </details>
       <details id="testArenaSectionAi" class="test-arena-section" ${aiSectionOpenAttr}>
@@ -4385,6 +4937,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         <summary><strong>UI Configuration</strong></summary>
         <div class="test-arena-section-body">
           <div class="small">Battlefield W/H and ground height update simulation size. Zoom changes display scale only.</div>
+          <div class="row"><label class="small">Both base HP <input id="testArenaBaseHp" type="number" min="1" max="1000000000" step="100" value="${testArenaBaseHp}" /></label></div>
           <div class="test-arena-ui-grid">
             <span class="small">Width</span>
             <span class="small">Height</span>
@@ -4392,7 +4945,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
             <span class="small">Ground H</span>
             <input id="testArenaBattlefieldWidth" type="number" min="640" max="4096" step="10" value="${testArenaBattlefieldWidth}" />
             <input id="testArenaBattlefieldHeight" type="number" min="360" max="2160" step="10" value="${testArenaBattlefieldHeight}" />
-            <input id="testArenaZoomPercent" type="number" min="45" max="240" step="1" value="${zoomPercentLabel}" />
+            <input id="testArenaZoomPercent" type="number" min="10" max="240" step="1" value="${zoomPercentLabel}" />
             <input id="testArenaGroundHeight" type="number" min="80" max="${Math.max(120, testArenaBattlefieldHeight - 40)}" step="10" value="${testArenaGroundHeight}" />
           </div>
         </div>
@@ -4441,8 +4994,8 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       .map((entry) => `<option value="${escapeHtml(entry.runId)}" ${entry.runId === testArenaLeaderboardManualVsRandom ? "selected" : ""}>${escapeHtml(entry.runId)}</option>`)
       .join("");
     leaderboardPanel.innerHTML = `
-      <h3>Leaderboard Options</h3>
-      <div class="small">Configure and run Elo competitions between AI models.</div>
+      <div class="panel-heading"><div><span class="eyebrow">AI evaluation</span><h2>Leaderboard</h2></div></div>
+      <div class="developer-intro">Configure and run reproducible Elo competitions between AI models.</div>
       <div class="leaderboard-actions">
         <label class="small">Mode
           <select id="leaderboardCompeteMode">
@@ -4531,8 +5084,8 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         ${airTemplateRows || `<div class="small">No air template available.</div>`}
       `;
       editorPanel.innerHTML = `
-        <h3>Template Editor</h3>
-        <div class="small">Choose a layer, pick a part card on the right panel, then click the ${editorGridCols}x${editorGridRows} grid on canvas. Right-drag to move view and wheel to zoom. Origin is (0,0), negative coordinates supported.</div>
+        <div class="panel-heading"><div><span class="eyebrow">Object authoring</span><h2>Craft Designer</h2></div><span class="health-pill"><i></i>${editorDraft.type}</span></div>
+        <div class="developer-intro">Build a craft by layering structure, functional systems, and display treatments on the ${editorGridCols}×${editorGridRows} workspace.</div>
         <div class="row">
           <button id="btnOpenTemplateWindow">Open</button>
           <span class="small">Current object: ${editorDraft.name}</span>
@@ -4598,7 +5151,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       if (parts.some((part) => part.layer === "structure")) {
         partOpenFilterOptions.push({ value: "structure", label: "Structure" });
       }
-      const functionalTypeOrder: Array<Exclude<PartOpenFilter, "all" | "structure">> = ["control", "engine", "weapon", "loader", "ammo"];
+      const functionalTypeOrder: Array<Exclude<PartOpenFilter, "all" | "structure">> = ["control", "engine", "weapon", "loader"];
       for (const type of functionalTypeOrder) {
         if (parts.some((part) => part.layer === "functional" && COMPONENTS[part.baseComponent].type === type)) {
           partOpenFilterOptions.push({ value: type, label: type });
@@ -4652,35 +5205,31 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         trackingTurnRateDegPerSec: baseStats.tracking?.turnRateDegPerSec !== undefined ? String(baseStats.tracking.turnRateDegPerSec) : "none",
         loaderLoadMultiplier: baseStats.loader?.loadMultiplier !== undefined ? String(baseStats.loader.loadMultiplier) : "none",
         loaderMinLoadTime: baseStats.loader?.minLoadTime !== undefined ? String(baseStats.loader.minLoadTime) : "none",
-        loaderStoreCapacity: baseStats.loader?.storeCapacity !== undefined ? String(baseStats.loader.storeCapacity) : "none",
+        weaponMaxLoadedAmmo: String(baseStats.maxLoadedAmmo ?? 1),
         loaderMinBurstInterval: baseStats.loader?.minBurstInterval !== undefined ? String(baseStats.loader.minBurstInterval) : "none",
-        cwAngle: baseStats.type === "engine"
-          ? String(baseStats.propulsion?.thrustAngleDeg ?? 30)
-          : (baseStats.shootAngleDeg !== undefined ? String(baseStats.shootAngleDeg * 0.5) : "none"),
-        ccwAngle: baseStats.type === "engine"
-          ? String(baseStats.propulsion?.thrustAngleDeg ?? 30)
-          : (baseStats.shootAngleDeg !== undefined ? String(baseStats.shootAngleDeg * 0.5) : "none"),
+        cwAngle: baseStats.shootAngleDeg !== undefined ? String(baseStats.shootAngleDeg * 0.5) : "none",
+        ccwAngle: baseStats.shootAngleDeg !== undefined ? String(baseStats.shootAngleDeg * 0.5) : "none",
       };
 
       const partProps = partDesignerDraft.properties ?? {};
       const partRuntimeProps = partDesignerDraft.partProperties ?? getPartPropertiesDefaultsByType(resolvedPartType, resolvedPartCategory);
-      const partTypeOptions: PartType[] = ["structure", "control", "engine", "weapon", "loader", "ammo"];
+      const partTypeOptions: PartType[] = ["structure", "control", "engine", "weapon", "loader"];
       const partCategoryOptions: PartCategory[] = resolvedPartType === "engine"
-        ? ["vehicle", "jet", "propeller"]
+        ? ["vehicle", "jet"]
         : resolvedPartType === "weapon"
           ? ["bullet", "missile", "beam"]
           : [];
       const propIsEngine = resolvedPartType === "engine";
       const propIsWeapon = resolvedPartType === "weapon";
       const propIsLoader = resolvedPartType === "loader";
-      const showAngleLimitControls = propIsEngine || propIsWeapon;
+      const showAngleLimitControls = propIsWeapon;
       const hasAngleLimitChecked = partRuntimeProps.hasAngleLimit === true;
       const weaponSupportsExplosive = partRuntimeProps.explodeOnHit === true || baseStats.explosive !== undefined;
       const weaponSupportsTracking = partRuntimeProps.tracking === true || resolvedPartCategory === "missile";
       const loaderSupportsPlaceholder = baseStats.loader?.supports?.join(", ") ?? "none";
       editorPanel.innerHTML = `
-        <h3>Part Designer</h3>
-        <div class="small">Left panel edits part-level metadata and runtime values. Right panel edits single-box properties for the currently selected cell.</div>
+        <div class="panel-heading"><div><span class="eyebrow">Component authoring</span><h2>Part Designer</h2></div><span class="health-pill"><i></i>${resolvedPartType}</span></div>
+        <div class="developer-intro">Define reusable geometry, structure support rules, and runtime behavior for a single component.</div>
         <div class="row">
           <button id="btnOpenPartWindow">Open</button>
           <span class="small">Current part: ${partDesignerDraft.name}</span>
@@ -4717,7 +5266,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
             </select>
           </label>` : ""}
         </div>
-        <div class="row">
+        ${propIsWeapon ? `<div class="row">
           <label class="small"><input id="partDirectional" type="checkbox" ${partDesignerDraft.directional ? "checked" : ""} /> Directional</label>
           <label class="small">Direction
             <select id="partDirection">
@@ -4727,7 +5276,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
               <option value="left" ${(partDesignerDraft.direction ?? getPartDirectionDefault(partDesignerDraft.baseComponent)) === "left" ? "selected" : ""}>left</option>
             </select>
           </label>
-        </div>
+        </div>` : ""}
         <div><strong>Part Properties</strong></div>
         <div class="row">
           <label class="small" style="flex:1;">Tags (comma separated) <input id="partTags" value="${(partDesignerDraft.tags ?? []).join(", ")}" /></label>
@@ -4740,6 +5289,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
           <label class="small">Armor <input id="partMaterialArmor" type="number" step="0.01" value="${partRuntimeProps.armor ?? ""}" /></label>
           <label class="small">Recover/s <input id="partMaterialRecoverPerSecond" type="number" step="0.05" value="${partRuntimeProps.recover ?? ""}" /></label>
           <label class="small">Color <input id="partMaterialColor" value="${partRuntimeProps.color ?? ""}" placeholder="#95a4b8" /></label>
+          <label class="small">Transparency <input id="partMaterialAlpha" type="number" min="0" max="1" step="0.05" value="${partRuntimeProps.alpha ?? 1}" /></label>
         </div>
         <div class="row">
           <label class="small">Mass <input id="partStructureMass" type="number" step="0.1" value="${partRuntimeProps.mass ?? ""}" /></label>
@@ -4783,7 +5333,9 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         </div>
         <div class="row">
           <label class="small">Spread <input id="partSpread" type="number" step="0.1" value="${partRuntimeProps.spreadAngleDeg ?? ""}" placeholder="${runtimePlaceholders.spreadDeg}" /></label>
+          <label class="small">Max Loaded Ammo <input id="partWeaponMaxLoadedAmmo" type="number" step="1" min="1" value="${partRuntimeProps.maxCapacity ?? ""}" placeholder="${runtimePlaceholders.weaponMaxLoadedAmmo}" /></label>
           <label class="small">Computing Use <input id="partWeaponComputingConsumption" type="number" step="1" min="0" value="${partRuntimeProps.computingConsumption ?? 1}" /></label>
+          <label class="small">Fire Sound Volume <input id="partFireSoundVolume" type="number" step="0.05" min="0" max="2" value="${partRuntimeProps.fireSoundVolume ?? 1}" /> ×</label>
           ${weaponSupportsTracking ? `<label class="small">Tracking Turn Rate <input id="partTrackingTurnRate" type="number" step="1" value="${partRuntimeProps.trackingTurnRate ?? ""}" placeholder="${runtimePlaceholders.trackingTurnRateDegPerSec}" /></label>` : ""}
         </div>
         <div class="row">
@@ -4801,7 +5353,6 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         </div>
         <div class="row">
           <label class="small">Min Load Time <input id="partLoaderMinLoadTime" type="number" step="0.05" value="${partRuntimeProps.minLoadTime ?? ""}" placeholder="${runtimePlaceholders.loaderMinLoadTime}" /></label>
-          <label class="small">Store Capacity <input id="partLoaderStoreCapacity" type="number" step="1" value="${partRuntimeProps.maxCapacity ?? ""}" placeholder="${runtimePlaceholders.loaderStoreCapacity}" /></label>
           <label class="small">Min Burst Interval <input id="partLoaderMinBurstInterval" type="number" step="0.05" value="${partRuntimeProps.minBurstInterval ?? ""}" placeholder="${runtimePlaceholders.loaderMinBurstInterval}" /></label>
         </div>` : ""}
         ${!isStructureLayerMode ? `<div class="row">
@@ -4857,7 +5408,11 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     testArenaBattlefieldHeight = height;
     battle.setBattlefieldSize(width, height);
     testArenaGroundHeight = battle.setGroundHeight(normalizeTestArenaGroundHeight(testArenaGroundHeight));
-    applyBattleViewTransform();
+    if (isBattleScreen()) {
+      resetBattleViewToVerticalFit();
+    } else {
+      applyBattleViewTransform();
+    }
   };
 
   const applyBattlefieldDefaults = (): void => {
@@ -4876,7 +5431,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       adjustBattleViewScaleAtClientPoint(scale, centerX, centerY);
       return;
     }
-    battleViewScale = Math.max(0.45, Math.min(2.4, scale));
+    battleViewScale = Math.max(MIN_BATTLE_VIEW_SCALE, Math.min(MAX_BATTLE_VIEW_SCALE, scale));
     applyBattleViewTransform();
     syncTestArenaZoomInput();
   };
@@ -4905,77 +5460,87 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     const enemyModel = findCompositeModelOptionById(testArenaCompositeModelSelections.enemy)?.label ?? testArenaCompositeModelSelections.enemy;
     addLog(`Test Arena started. P model=${playerModel} | E model=${enemyModel}.`);
     setScreen("testArena");
-    centerBattleViewYOnPlayerBase();
+    resetBattleViewToVerticalFit();
     renderPanels();
   };
 
   const bindPanelActions = (): void => {
-    getOptionalElement<HTMLButtonElement>("#btnBuildRefinery")?.addEventListener("click", () => {
-      if (!spendGas(90)) {
-        return;
-      }
-      buildQueue.push({ kind: "refinery", remainingRounds: buildRounds.refinery });
-      addLog(`Construction started: Refinery (${buildRounds.refinery} round${buildRounds.refinery === 1 ? "" : "s"})`, "good");
-      renderPanels();
+    document.querySelectorAll<HTMLButtonElement>("button[data-select-build-slot]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const slotId = button.getAttribute("data-select-build-slot") as BaseBuildingSlot["id"] | null;
+        if (!slotId) return;
+        selectedBaseBuildSlotId = slotId;
+        renderPanels();
+      });
     });
 
-    getOptionalElement<HTMLButtonElement>("#btnExpandBase")?.addEventListener("click", () => {
-      if (!spendGas(120)) {
-        return;
-      }
-      buildQueue.push({ kind: "expand", remainingRounds: buildRounds.expand });
-      addLog(`Construction started: Base Expansion (${buildRounds.expand} rounds)`, "good");
-      renderPanels();
-    });
-
-    getOptionalElement<HTMLButtonElement>("#btnBuildLab")?.addEventListener("click", () => {
-      if (!spendGas(110)) {
-        return;
-      }
-      buildQueue.push({ kind: "lab", remainingRounds: buildRounds.lab });
-      addLog(`Construction started: Research Lab (${buildRounds.lab} rounds)`, "good");
-      renderPanels();
+    document.querySelectorAll<HTMLButtonElement>("button[data-build-kind][data-build-slot]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const kind = button.getAttribute("data-build-kind") as BuildingKind | null;
+        const slotId = button.getAttribute("data-build-slot") as BaseBuildingSlot["id"] | null;
+        if (!kind || !slotId) return;
+        const definition = BUILDING_CATALOG[kind];
+        if (!definition || !spendGas(definition.gasCost)) return;
+        const result = campaign.queueBuilding(kind, slotId, true);
+        if (!result.ok) {
+          if (!isUnlimitedResources()) gas += definition.gasCost;
+          addLog(result.reason ?? "Construction could not start.", "warn");
+        } else {
+          addLog(`Construction started: ${definition.name} (${definition.buildSeconds}s)`, "good");
+        }
+        renderPanels();
+      });
     });
 
     getOptionalElement<HTMLButtonElement>("#btnUnlockReinforced")?.addEventListener("click", () => {
-      if (tech.reinforced || base.labs < 1 || !spendGas(130)) {
-        return;
-      }
-      tech.reinforced = true;
-      upgradeTemplateMaterials("reinforced");
-      addLog("Unlocked Reinforced structure boxes", "good");
+      if (tech.reinforced) return;
+      const definition = RESEARCH_CATALOG.reinforced;
+      if (!spendGas(definition.gasCost)) return;
+      const result = campaign.queueResearch("reinforced");
+      if (!result.ok) { if (!isUnlimitedResources()) gas += definition.gasCost; addLog(result.reason ?? "Research could not start.", "warn"); }
+      else addLog(`Research started: ${definition.name} (${definition.durationSeconds}s)`, "good");
       renderPanels();
     });
 
     getOptionalElement<HTMLButtonElement>("#btnUnlockCombined")?.addEventListener("click", () => {
-      if (tech.combined || base.labs < 1 || !spendGas(180)) {
-        return;
-      }
-      tech.combined = true;
-      upgradeTemplateMaterials("combined");
-      addLog("Unlocked Combined box material", "good");
+      if (tech.combined) return;
+      const definition = RESEARCH_CATALOG.combined;
+      if (!spendGas(definition.gasCost)) return;
+      const result = campaign.queueResearch("combined");
+      if (!result.ok) { if (!isUnlimitedResources()) gas += definition.gasCost; addLog(result.reason ?? "Research could not start.", "warn"); }
+      else addLog(`Research started: ${definition.name} (${definition.durationSeconds}s)`, "good");
       renderPanels();
     });
 
     getOptionalElement<HTMLButtonElement>("#btnUnlockMediumWeapon")?.addEventListener("click", () => {
-      if (tech.mediumWeapons || base.labs < 1 || !spendGas(170)) {
-        return;
-      }
-      tech.mediumWeapons = true;
-      const tankTemplate = templates.find((template) => template.id === 2);
-      const weapon = tankTemplate?.attachments.find((attachment) => attachment.component === "heavyCannon");
-      if (weapon && tankTemplate) {
-        weapon.component = "explosiveShell";
-        tankTemplate.gasCost = computeTemplateGasCost(tankTemplate, parts);
-      }
-      addLog("Unlocked explosive cannon option", "good");
+      if (tech.mediumWeapons) return;
+      const definition = RESEARCH_CATALOG.mediumWeapons;
+      if (!spendGas(definition.gasCost)) return;
+      const result = campaign.queueResearch("mediumWeapons");
+      if (!result.ok) { if (!isUnlimitedResources()) gas += definition.gasCost; addLog(result.reason ?? "Research could not start.", "warn"); }
+      else addLog(`Research started: ${definition.name} (${definition.durationSeconds}s)`, "good");
       renderPanels();
+    });
+
+    document.querySelectorAll<HTMLButtonElement>("button[data-nav]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const destination = button.getAttribute("data-nav");
+        if (destination === "templateEditor") {
+          setScreen("templateEditor");
+        } else if (destination === "partEditor") {
+          setScreen("partEditor");
+        }
+        renderPanels();
+      });
     });
 
     document.querySelectorAll<HTMLButtonElement>("button.nodeAttack").forEach((button) => {
       button.addEventListener("click", () => {
         if (battle.getState().active && !battle.getState().outcome) {
-          battle.resetToMapMode();
+          addLog("An operation is already live. Return to Battle to command it.", "warn");
+          setScreen("battle");
+          renderPanels();
+          return;
         }
         const nodeId = button.getAttribute("data-attack");
         if (!nodeId) {
@@ -4994,7 +5559,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         battle.start(node);
         addLog(`Battle started at ${node.name}`);
         setScreen("battle");
-        centerBattleViewYOnPlayerBase();
+        resetBattleViewToVerticalFit();
         renderPanels();
       });
     });
@@ -5032,7 +5597,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
             spawned ? "good" : "bad",
           );
         } else {
-          battle.deployUnit(templateId);
+          queueDeployment(templateId, false);
         }
         renderPanels();
       });
@@ -5048,7 +5613,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     });
 
     getOptionalElement<HTMLButtonElement>("#btnBackToMap")?.addEventListener("click", () => {
-      battle.resetToMapMode();
+      if (battle.getState().outcome) battle.resetToMapMode();
       setScreen("map");
       renderPanels();
     });
@@ -5161,20 +5726,14 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       });
     };
     bindTestArenaSectionToggle("#testArenaSectionUnit", "unit");
+    bindTestArenaSectionToggle("#testArenaSectionManual", "manual");
     bindTestArenaSectionToggle("#testArenaSectionAi", "ai");
     bindTestArenaSectionToggle("#testArenaSectionUi", "ui");
-    const enemySpawnTemplateDropdown = getOptionalElement<HTMLDetailsElement>("#testArenaEnemySpawnTemplateDropdown");
-    if (enemySpawnTemplateDropdown) {
-      testArenaEnemySpawnTemplateDropdownOpen = enemySpawnTemplateDropdown.open;
-      enemySpawnTemplateDropdown.addEventListener("toggle", () => {
-        testArenaEnemySpawnTemplateDropdownOpen = enemySpawnTemplateDropdown.open;
-      });
-    }
-    const playerSpawnTemplateDropdown = getOptionalElement<HTMLDetailsElement>("#testArenaPlayerSpawnTemplateDropdown");
-    if (playerSpawnTemplateDropdown) {
-      testArenaPlayerSpawnTemplateDropdownOpen = playerSpawnTemplateDropdown.open;
-      playerSpawnTemplateDropdown.addEventListener("toggle", () => {
-        testArenaPlayerSpawnTemplateDropdownOpen = playerSpawnTemplateDropdown.open;
+    const spawnTemplateDropdown = getOptionalElement<HTMLDetailsElement>("#testArenaSpawnTemplateDropdown");
+    if (spawnTemplateDropdown) {
+      testArenaSpawnTemplateDropdownOpen = spawnTemplateDropdown.open;
+      spawnTemplateDropdown.addEventListener("toggle", () => {
+        testArenaSpawnTemplateDropdownOpen = spawnTemplateDropdown.open;
       });
     }
     const bindCommitOnEnterOrBlur = (input: HTMLInputElement | null, onCommit: () => void): void => {
@@ -5202,6 +5761,8 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         return;
       }
       testArenaEnemyCount = Math.max(0, Math.min(40, value));
+      testArenaNode.testEnemyMinActive = testArenaEnemyCount;
+      saveTestArenaSettings();
       if (battle.getState().active && battle.getState().nodeId === testArenaNode.id) {
         const updated = battle.setEnemyActiveCount(testArenaAutoSpawnOnEnemySide ? testArenaEnemyCount : 0);
         addLog(`Test Arena enemy count set to ${testArenaAutoSpawnOnEnemySide ? updated : 0}.`, "good");
@@ -5221,6 +5782,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         return;
       }
       testArenaPlayerCount = Math.max(0, Math.min(40, value));
+      saveTestArenaSettings();
       const applied = battle.setPlayerAutoSpawnTargetCount(testArenaPlayerCount);
       if (battle.getState().active && battle.getState().nodeId === testArenaNode.id) {
         addLog(`Test Arena player count set to ${applied}.`, "good");
@@ -5231,6 +5793,27 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     };
     bindCommitOnEnterOrBlur(getOptionalElement<HTMLInputElement>("#testArenaPlayerCount"), commitTestArenaPlayerCount);
 
+    const commitTestArenaBaseHp = (): void => {
+      const raw = getOptionalElement<HTMLInputElement>("#testArenaBaseHp")?.value ?? "";
+      const value = Number.parseInt(raw, 10);
+      if (!Number.isFinite(value)) {
+        addLog("Base HP must be a number.", "warn");
+        renderPanels();
+        return;
+      }
+      testArenaBaseHp = Math.max(1, Math.min(1_000_000_000, value));
+      testArenaNode.testBaseHpOverride = testArenaBaseHp;
+      saveTestArenaSettings();
+      if (battle.getState().active && battle.getState().nodeId === testArenaNode.id) {
+        battle.setBaseHp("both", testArenaBaseHp, true);
+        addLog(`Test Arena bases refilled to ${testArenaBaseHp} HP.`, "good");
+      } else {
+        addLog(`Test Arena base HP queued: ${testArenaBaseHp}.`, "warn");
+      }
+      renderPanels();
+    };
+    bindCommitOnEnterOrBlur(getOptionalElement<HTMLInputElement>("#testArenaBaseHp"), commitTestArenaBaseHp);
+
     const commitTestArenaBattlefieldWidth = (): void => {
       const raw = getOptionalElement<HTMLInputElement>("#testArenaBattlefieldWidth")?.value ?? "";
       const value = Number.parseInt(raw, 10);
@@ -5240,6 +5823,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         return;
       }
       testArenaBattlefieldWidth = normalizeTestArenaBattlefieldWidth(value);
+      saveTestArenaSettings();
       if (battle.getState().active && battle.getState().nodeId !== testArenaNode.id) {
         addLog(`Test Arena battlefield width queued: ${testArenaBattlefieldWidth}.`, "warn");
       } else {
@@ -5259,6 +5843,8 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         return;
       }
       testArenaBattlefieldHeight = normalizeTestArenaBattlefieldHeight(value);
+      testArenaGroundHeight = normalizeTestArenaGroundHeight(testArenaGroundHeight);
+      saveTestArenaSettings();
       if (battle.getState().active && battle.getState().nodeId !== testArenaNode.id) {
         addLog(`Test Arena battlefield height queued: ${testArenaBattlefieldHeight}.`, "warn");
       } else {
@@ -5292,6 +5878,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         return;
       }
       testArenaGroundHeight = normalizeTestArenaGroundHeight(value);
+      saveTestArenaSettings();
       if (battle.getState().active && battle.getState().nodeId !== testArenaNode.id) {
         addLog(`Test Arena ground height queued: ${testArenaGroundHeight}.`, "warn");
       } else {
@@ -5317,6 +5904,8 @@ export function bootstrap(options: BootstrapOptions = {}): void {
           nextSelection.delete(templateId);
         }
         const selected = setTestArenaEnemySpawnTemplateIds(Array.from(nextSelection));
+        testArenaHasStoredEnemyCraftSelection = true;
+        saveTestArenaSettings();
         battle.setEnemySpawnTemplateFilter(selected.length > 0 ? selected : null);
         addLog(`Enemy auto-spawn templates: ${selected.length} selected.`, selected.length > 0 ? "good" : "warn");
         renderPanels();
@@ -5338,14 +5927,58 @@ export function bootstrap(options: BootstrapOptions = {}): void {
           nextSelection.delete(templateId);
         }
         const selected = setTestArenaPlayerSpawnTemplateIds(Array.from(nextSelection));
+        testArenaHasStoredPlayerCraftSelection = true;
+        saveTestArenaSettings();
         battle.setPlayerSpawnTemplateFilter(selected.length > 0 ? selected : null);
         addLog(`Player auto-spawn templates: ${selected.length} selected.`, selected.length > 0 ? "good" : "warn");
         renderPanels();
       });
     });
 
+    getOptionalElement<HTMLSelectElement>("#testArenaManualSpawnTemplate")?.addEventListener("change", (event) => {
+      const templateId = Number.parseInt((event.currentTarget as HTMLSelectElement).value, 10);
+      if (Number.isInteger(templateId) && templates.some((template) => template.id === templateId)) {
+        testArenaManualSpawnTemplateId = templateId;
+        saveTestArenaSettings();
+      }
+    });
+
+    getOptionalElement<HTMLSelectElement>("#testArenaManualSpawnSide")?.addEventListener("change", (event) => {
+      const side = (event.currentTarget as HTMLSelectElement).value;
+      if (side === "player" || side === "enemy") {
+        testArenaManualSpawnSide = side;
+        saveTestArenaSettings();
+      }
+    });
+
+    getOptionalElement<HTMLButtonElement>("#btnTestArenaManualSpawn")?.addEventListener("click", () => {
+      const state = battle.getState();
+      if (!state.active || state.outcome || state.nodeId !== testArenaNode.id) {
+        addLog("Start Test Arena before manually spawning a craft.", "warn");
+        renderPanels();
+        return;
+      }
+      const template = templates.find((entry) => entry.id === testArenaManualSpawnTemplateId);
+      const spawned = template
+        ? battle.arenaDeploy(testArenaManualSpawnSide, template.id, {
+          chargeGas: false,
+          deploymentGasCost: 0,
+          ignoreCap: true,
+          ignoreLowGasThreshold: true,
+        })
+        : false;
+      addLog(
+        spawned
+          ? `Manually spawned one ${template?.name ?? "craft"} for ${testArenaManualSpawnSide}.`
+          : `Could not manually spawn ${template?.name ?? "the selected craft"}.`,
+        spawned ? "good" : "bad",
+      );
+      renderPanels();
+    });
+
     getOptionalElement<HTMLInputElement>("#testArenaAutoSpawnOnPlayerSide")?.addEventListener("change", (event) => {
       testArenaAutoSpawnOnPlayerSide = (event.currentTarget as HTMLInputElement).checked;
+      saveTestArenaSettings();
       battle.setPlayerAutoSpawnEnabled(testArenaAutoSpawnOnPlayerSide);
       addLog(
         testArenaAutoSpawnOnPlayerSide
@@ -5358,6 +5991,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
 
     getOptionalElement<HTMLInputElement>("#testArenaAutoSpawnOnEnemySide")?.addEventListener("change", (event) => {
       testArenaAutoSpawnOnEnemySide = (event.currentTarget as HTMLInputElement).checked;
+      saveTestArenaSettings();
       if (battle.getState().active && battle.getState().nodeId === testArenaNode.id) {
         const updated = battle.setEnemyActiveCount(testArenaAutoSpawnOnEnemySide ? testArenaEnemyCount : 0);
         addLog(
@@ -5391,6 +6025,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
 
     getOptionalElement<HTMLInputElement>("#testArenaInvinciblePlayer")?.addEventListener("change", (event) => {
       testArenaInvinciblePlayer = (event.currentTarget as HTMLInputElement).checked;
+      saveTestArenaSettings();
       battle.setControlledUnitInvincible(testArenaInvinciblePlayer);
       addLog(`Controlled unit invincibility ${testArenaInvinciblePlayer ? "ON" : "OFF"}.`, "warn");
       renderPanels();
@@ -5408,6 +6043,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
           return;
         }
         testArenaAiSelections[side][kind] = nextId;
+        saveTestArenaSettings();
         await refreshTestArenaComponentGrid();
         if (battle.getState().active && battle.getState().nodeId === testArenaNode.id) {
           applyTestArenaAiControllers();
@@ -5433,6 +6069,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
           return;
         }
         testArenaCompositeModelSelections[side] = nextId;
+        saveTestArenaSettings();
         if (battle.getState().active && battle.getState().nodeId === testArenaNode.id) {
           applyTestArenaAiControllers();
         }
@@ -5592,6 +6229,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     });
     getOptionalElement<HTMLButtonElement>("#btnClearGrid")?.addEventListener("click", () => {
       editorStructureSlots = new Array<number | null>(EDITOR_GRID_MAX_SIZE).fill(null);
+      editorStructureColorSlots = new Array<string | null>(EDITOR_GRID_MAX_SIZE).fill(null);
       editorFunctionalSlots = new Array<EditorFunctionalSlot>(EDITOR_GRID_MAX_SIZE).fill(null);
       editorDisplaySlots = new Array<DisplayAttachmentTemplate["kind"] | null>(EDITOR_GRID_MAX_SIZE).fill(null);
       recalcEditorDraftFromSlots();
@@ -5811,7 +6449,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
 
     getOptionalElement<HTMLSelectElement>("#partTypeSelect")?.addEventListener("change", (event) => {
       const value = (event.currentTarget as HTMLSelectElement).value;
-      if (value !== "structure" && value !== "control" && value !== "engine" && value !== "weapon" && value !== "loader" && value !== "ammo") {
+      if (value !== "structure" && value !== "control" && value !== "engine" && value !== "weapon" && value !== "loader") {
         return;
       }
       partDesignerDraft.partType = value as PartType;
@@ -5839,7 +6477,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
 
     getOptionalElement<HTMLSelectElement>("#partCategoryTypeSelect")?.addEventListener("change", (event) => {
       const value = (event.currentTarget as HTMLSelectElement).value;
-      if (value !== "vehicle" && value !== "jet" && value !== "propeller" && value !== "bullet" && value !== "missile" && value !== "beam") {
+      if (value !== "vehicle" && value !== "jet" && value !== "bullet" && value !== "missile" && value !== "beam") {
         return;
       }
       partDesignerDraft.partCategory = value as PartCategory;
@@ -5908,7 +6546,6 @@ export function bootstrap(options: BootstrapOptions = {}): void {
           loaderLoadMultiplier: undefined,
           loaderFastOperation: undefined,
           loaderMinLoadTime: undefined,
-          loaderStoreCapacity: undefined,
           loaderMinBurstInterval: undefined,
         };
         const material = MATERIALS.basic;
@@ -5917,6 +6554,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
           materialArmor: partDesignerDraft.properties?.materialArmor ?? material.armor,
           materialRecoverPerSecond: partDesignerDraft.properties?.materialRecoverPerSecond ?? material.recoverPerSecond,
           materialColor: partDesignerDraft.properties?.materialColor ?? material.color,
+          materialAlpha: partDesignerDraft.properties?.materialAlpha ?? 1,
           hp: partDesignerDraft.properties?.hp ?? material.hp,
         };
         partDesignerDraft.stats = {
@@ -5971,6 +6609,16 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         };
       }
       renderPanels();
+    });
+
+    document.querySelectorAll<HTMLInputElement>("input.autoCraftToggle").forEach((input) => {
+      input.addEventListener("change", () => {
+        const templateId = Number.parseInt(input.getAttribute("data-template-id") ?? "", 10);
+        if (!Number.isInteger(templateId)) return;
+        if (input.checked && !defaultAutoTemplateIds.includes(templateId)) defaultAutoTemplateIds.push(templateId);
+        if (!input.checked) defaultAutoTemplateIds = defaultAutoTemplateIds.filter((id) => id !== templateId);
+        addLog(`Off-screen AI roster: ${defaultAutoTemplateIds.length} craft selected`, "good");
+      });
     });
     getOptionalElement<HTMLInputElement>("#partHasAngleLimit")?.addEventListener("change", (event) => {
       const checked = (event.currentTarget as HTMLInputElement).checked;
@@ -6078,6 +6726,13 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       };
       updateSelectedInfo();
     });
+    getOptionalElement<HTMLInputElement>("#partMaterialAlpha")?.addEventListener("input", (event) => {
+      const numeric = Number((event.currentTarget as HTMLInputElement).value);
+      const alpha = Number.isFinite(numeric) ? Math.max(0, Math.min(1, numeric)) : 1;
+      partDesignerDraft.properties = { ...(partDesignerDraft.properties ?? {}), materialAlpha: alpha };
+      partDesignerDraft.partProperties = { ...(partDesignerDraft.partProperties ?? {}), alpha };
+      updateSelectedInfo();
+    });
     getOptionalElement<HTMLInputElement>("#partStructureMass")?.addEventListener("input", (event) => {
       const raw = (event.currentTarget as HTMLInputElement).value.trim();
       const numeric = raw.length > 0 ? Number(raw) : Number.NaN;
@@ -6122,6 +6777,16 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       partDesignerDraft.partProperties = {
         ...(partDesignerDraft.partProperties ?? {}),
         computingConsumption: next,
+      };
+      updateSelectedInfo();
+    });
+    getOptionalElement<HTMLInputElement>("#partFireSoundVolume")?.addEventListener("input", (event) => {
+      const raw = (event.currentTarget as HTMLInputElement).value.trim();
+      const numeric = raw.length > 0 ? Number(raw) : Number.NaN;
+      const next = Number.isFinite(numeric) ? Math.max(0, Math.min(2, numeric)) : undefined;
+      partDesignerDraft.partProperties = {
+        ...(partDesignerDraft.partProperties ?? {}),
+        fireSoundVolume: next,
       };
       updateSelectedInfo();
     });
@@ -6187,7 +6852,6 @@ export function bootstrap(options: BootstrapOptions = {}): void {
           loaderLoadMultiplier: undefined,
           loaderFastOperation: undefined,
           loaderMinLoadTime: undefined,
-          loaderStoreCapacity: undefined,
           loaderMinBurstInterval: undefined,
         };
       }
@@ -6343,9 +7007,16 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     bindRuntimeInput("#partControlImpairFactor", "controlImpairFactor");
     bindRuntimeInput("#partControlDuration", "controlDuration");
     bindRuntimeInput("#partLoaderMinLoadTime", "loaderMinLoadTime", "minLoadTime");
-    bindRuntimeInput("#partLoaderStoreCapacity", "loaderStoreCapacity", "maxCapacity");
     bindRuntimeInput("#partLoaderMinBurstInterval", "loaderMinBurstInterval", "minBurstInterval");
     bindRuntimeInput("#partGasCost", "gasCost", "gasCost");
+    getOptionalElement<HTMLInputElement>("#partWeaponMaxLoadedAmmo")?.addEventListener("input", (event) => {
+      const raw = (event.currentTarget as HTMLInputElement).value.trim();
+      const numeric = raw.length > 0 ? Number(raw) : Number.NaN;
+      partDesignerDraft.partProperties = {
+        ...(partDesignerDraft.partProperties ?? {}),
+        maxCapacity: Number.isFinite(numeric) ? Math.max(1, Math.floor(numeric)) : undefined,
+      };
+    });
     getOptionalElement<HTMLInputElement>("#partCwAngle")?.addEventListener("input", (event) => {
       const raw = (event.currentTarget as HTMLInputElement).value.trim();
       const numeric = raw.length > 0 ? Number(raw) : Number.NaN;
@@ -6431,9 +7102,9 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     });
   };
 
-  tabs.base.addEventListener("click", () => setScreen("base"));
-  tabs.map.addEventListener("click", () => setScreen("map"));
-  tabs.battle.addEventListener("click", () => setScreen("battle"));
+  tabs.base.addEventListener("click", () => { setScreen("base"); renderPanels(); });
+  tabs.map.addEventListener("click", () => { setScreen("map"); renderPanels(); });
+  tabs.battle.addEventListener("click", () => { setScreen("battle"); renderPanels(); });
   tabs.testArena.addEventListener("click", () => {
     setScreen("testArena");
     renderPanels();
@@ -6460,6 +7131,71 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       loadPartIntoDesignerSlots(selected);
     }
     renderPanels();
+  });
+
+  const closeGlobalSettings = (): void => {
+    globalSettingsOverlay.classList.add("hidden");
+    globalSettingsError.textContent = "";
+  };
+  const openGlobalSettings = (): void => {
+    developerMenu.open = false;
+    globalMovementSpeedInput.value = `${globalMovementSpeedMultiplier}`;
+    globalBattleSoundInput.value = `${globalBattleSoundVolume}`;
+    globalSettingsError.textContent = "";
+    globalSettingsOverlay.classList.remove("hidden");
+    globalMovementSpeedInput.focus();
+    globalMovementSpeedInput.select();
+  };
+  const saveGlobalSettings = (): void => {
+    const requestedMovementSpeed = Number(globalMovementSpeedInput.value);
+    if (!Number.isFinite(requestedMovementSpeed)
+      || requestedMovementSpeed < MIN_UNIT_MOVEMENT_SPEED_MULTIPLIER
+      || requestedMovementSpeed > MAX_UNIT_MOVEMENT_SPEED_MULTIPLIER) {
+      globalSettingsError.textContent = `Enter a movement multiplier from ${MIN_UNIT_MOVEMENT_SPEED_MULTIPLIER}× to ${MAX_UNIT_MOVEMENT_SPEED_MULTIPLIER}×.`;
+      globalMovementSpeedInput.focus();
+      return;
+    }
+    const requestedSoundVolume = Number(globalBattleSoundInput.value);
+    if (!Number.isFinite(requestedSoundVolume)
+      || requestedSoundVolume < MIN_BATTLE_SOUND_VOLUME
+      || requestedSoundVolume > MAX_BATTLE_SOUND_VOLUME) {
+      globalSettingsError.textContent = `Enter a battle sound volume from ${MIN_BATTLE_SOUND_VOLUME}× to ${MAX_BATTLE_SOUND_VOLUME}×.`;
+      globalBattleSoundInput.focus();
+      return;
+    }
+    globalMovementSpeedMultiplier = battle.setMovementSpeedMultiplier(requestedMovementSpeed);
+    globalBattleSoundVolume = requestedSoundVolume;
+    try {
+      localStorage.setItem(GLOBAL_SETTINGS_STORAGE_KEY, JSON.stringify({
+        movementSpeedMultiplier: globalMovementSpeedMultiplier,
+        battleSoundVolume: globalBattleSoundVolume,
+      }));
+    } catch {
+      globalSettingsError.textContent = "The setting is active, but browser storage could not save it.";
+      addLog(`Global settings applied, but could not be persisted.`, "warn");
+      return;
+    }
+    closeGlobalSettings();
+    addLog(`Global settings saved: movement ${globalMovementSpeedMultiplier.toFixed(1)}×, sound ${globalBattleSoundVolume.toFixed(1)}×.`, "good");
+  };
+  btnOpenGlobalSettings.addEventListener("click", openGlobalSettings);
+  btnCancelGlobalSettings.addEventListener("click", closeGlobalSettings);
+  btnResetGlobalSettings.addEventListener("click", () => {
+    globalMovementSpeedInput.value = `${DEFAULT_UNIT_MOVEMENT_SPEED_MULTIPLIER}`;
+    globalBattleSoundInput.value = `${DEFAULT_BATTLE_SOUND_VOLUME}`;
+    globalSettingsError.textContent = "";
+  });
+  btnSaveGlobalSettings.addEventListener("click", saveGlobalSettings);
+  globalSettingsOverlay.addEventListener("click", (event) => {
+    if (event.target === globalSettingsOverlay) closeGlobalSettings();
+  });
+  globalMovementSpeedInput.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") saveGlobalSettings();
+    if (event.key === "Escape") closeGlobalSettings();
+  });
+  globalBattleSoundInput.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") saveGlobalSettings();
+    if (event.key === "Escape") closeGlobalSettings();
   });
 
   selectedInfo.addEventListener("click", (event) => {
@@ -6573,6 +7309,17 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     if (!isTemplateEditorScreen()) {
       return;
     }
+    if (target instanceof HTMLInputElement && target.id === "editorStructureColor") {
+      if (/^#[0-9a-fA-F]{6}$/.test(target.value)) {
+        editorStructureColor = target.value;
+        drawEditorCanvas();
+      }
+      return;
+    }
+    if (target instanceof HTMLInputElement && target.id === "editorStructureColorOnly") {
+      editorStructureColorOnly = target.checked;
+      return;
+    }
     if (!(target instanceof HTMLSelectElement)) {
       return;
     }
@@ -6653,6 +7400,9 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     } else {
       const numeric = Number.parseInt(value, 10);
       editorSelection = Number.isInteger(numeric) ? numeric : value;
+      if (editorLayer === "structure" && typeof editorSelection === "number") {
+        editorStructureColor = getStructurePartStats(editorSelection).color;
+      }
     }
     hideEditorTooltip();
     ensureEditorSelectionForLayer();
@@ -6674,18 +7424,16 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       debugUnlimitedResources = false;
       debugVisual = false;
       debugTargetLines = false;
-      debugDisplayLayer = false;
       debugPartHpOverlay = false;
       battle.setDebugDrawEnabled(false);
       battle.setDebugTargetLineEnabled(false);
-      battle.setDisplayLayerEnabled(false);
+      battle.setDisplayLayerEnabled(true);
       battle.setDebugPartHpEnabled(false);
       return;
     }
     debugUnlimitedResources = debugResourcesChk.checked;
     debugVisual = debugVisualChk.checked;
     debugTargetLines = debugTargetLineChk.checked;
-    debugDisplayLayer = debugDisplayLayerChk.checked;
     debugPartHpOverlay = debugPartHpChk.checked;
     syncDebugServerState();
     battle.setDebugDrawEnabled(isDebugVisual());
@@ -6693,7 +7441,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     battle.setDisplayLayerEnabled(debugDisplayLayer);
     battle.setDebugPartHpEnabled(debugPartHpOverlay);
     addLog(
-      `Debug options: resources=${debugUnlimitedResources ? "on" : "off"}, visual=${debugVisual ? "on" : "off"}, targetLines=${debugTargetLines ? "on" : "off"}, display=${debugDisplayLayer ? "on" : "off"}, partHp=${debugPartHpOverlay ? "on" : "off"}`,
+      `Debug options: resources=${debugUnlimitedResources ? "on" : "off"}, visual=${debugVisual ? "on" : "off"}, targetLines=${debugTargetLines ? "on" : "off"}, paint=always-on, partHp=${debugPartHpOverlay ? "on" : "off"}`,
       "warn",
     );
     renderPanels();
@@ -6702,7 +7450,6 @@ export function bootstrap(options: BootstrapOptions = {}): void {
   debugResourcesChk.addEventListener("change", applyDebugFlags);
   debugVisualChk.addEventListener("change", applyDebugFlags);
   debugTargetLineChk.addEventListener("change", applyDebugFlags);
-  debugDisplayLayerChk.addEventListener("change", applyDebugFlags);
   debugPartHpChk.addEventListener("change", applyDebugFlags);
   btnOpenPartDesigner.addEventListener("click", () => {
     setScreen("partEditor");
@@ -6717,8 +7464,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
   debugResourcesChk.checked = replayMode ? false : true;
   debugVisualChk.checked = replayMode ? false : true;
   debugTargetLineChk.checked = replayMode ? false : true;
-  debugDisplayLayerChk.checked = false;
-  debugPartHpChk.checked = true;
+  debugPartHpChk.checked = false;
   applyDebugFlags();
 
   window.addEventListener("keydown", (event) => {
@@ -6990,6 +7736,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     });
 
   let panelBucket = -1;
+  let strategicPanelBucket = -1;
   let loopUpdateBusy = false;
   const testArenaLastBlockedByUnit = new Map<string, { reason: string; atMs: number }>();
 
@@ -7024,12 +7771,67 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     if (!running) {
       return;
     }
-    if (!(isBattleScreen() && battle.getState().active)) {
-      return;
+    if (!replayMode) {
+      const strategic = campaign.update(dt, mapNodes);
+      if (!isUnlimitedResources()) gas += strategic.gasIncome;
+      for (const job of strategic.completed) {
+        if (job.type === "building") {
+          const kind = job.target as BuildingKind;
+          addLog(`Construction complete: ${BUILDING_CATALOG[kind].name}`, "good");
+        } else {
+          const kind = job.target as ResearchKind;
+          completeResearch(kind);
+          addLog(`Research complete: ${RESEARCH_CATALOG[kind].name}`, "good");
+        }
+      }
+      base.refineries = campaign.getBuildingCount("refinery");
+      base.workshops = campaign.getBuildingCount("workshop");
+      base.labs = campaign.getBuildingCount("research-lab");
+      base.areaLevel = 1;
     }
-    battle.update(dt, keys);
-    logTestArenaFireBlockedReasons();
-    followSelectedUnitWithCamera();
+
+    const state = battle.getState();
+    const isCampaignBattle = state.active && state.nodeId !== testArenaNode.id;
+    if (isCampaignBattle) {
+      for (let i = deploymentQueue.length - 1; i >= 0; i -= 1) {
+        const order = deploymentQueue[i];
+        if (!order) continue;
+        order.remainingSeconds -= dt;
+        if (order.remainingSeconds > 0) continue;
+        const spawned = battle.arenaDeploy("player", order.templateId, { chargeGas: false, deploymentGasCost: order.gasCost, ignoreCap: true });
+        if (spawned) {
+          const template = templates.find((entry) => entry.id === order.templateId);
+          addLog(`${template?.name ?? "Craft"} arrived from ${order.sourceName}`, "good");
+          deploymentQueue.splice(i, 1);
+        } else {
+          order.remainingSeconds = 1;
+        }
+      }
+
+      autonomousSpawnCooldown = Math.max(0, autonomousSpawnCooldown - dt);
+      if (screen !== "battle" && autonomousSpawnCooldown <= 0 && defaultAutoTemplateIds.length > 0) {
+        const activeFriendly = state.units.filter((unit) => unit.side === "player" && unit.alive).length;
+        if (activeFriendly + deploymentQueue.length < campaign.getDeliveryCapacity()) {
+          const affordable = defaultAutoTemplateIds.filter((id) => {
+            const template = templates.find((entry) => entry.id === id);
+            if (!template || !state.nodeId) return false;
+            const quote = quoteBattleLogistics(mapNodes, state.nodeId, getTemplateLogisticsSpeed(template), id);
+            return isUnlimitedResources() || gas >= Math.ceil(template.gasCost * quote.gasCostMultiplier);
+          });
+          const chosen = affordable[Math.floor(Math.random() * affordable.length)];
+          if (chosen !== undefined && queueDeployment(chosen, true)) autonomousSpawnCooldown = 4;
+        }
+      }
+    }
+
+    const shouldUpdateBattle = state.active && (state.nodeId !== testArenaNode.id || isBattleScreen());
+    if (shouldUpdateBattle) {
+      const noKeys: KeyState = { a: false, d: false, w: false, s: false, space: false };
+      const battleInput: KeyState = isBattleScreen() ? { ...keys, ...pollGamepadInput() } : noKeys;
+      battle.update(dt, battleInput);
+      logTestArenaFireBlockedReasons();
+      if (isBattleScreen()) followSelectedUnitWithCamera();
+    }
   };
 
   const loop = new GameLoop(
@@ -7046,7 +7848,8 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       if (isEditorScreen()) {
         drawEditorCanvas();
       } else {
-        battle.draw(now);
+        // Phaser renders the battle on its own scene clock. Editors remain Canvas-based tools.
+        void phaserBattleRenderer;
       }
       const nextBucket = Math.floor(now * 4);
       if (nextBucket !== panelBucket) {
@@ -7059,6 +7862,11 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         }
         updateSelectedInfo();
         updateWeaponHud();
+      }
+      const nextStrategicBucket = Math.floor(now);
+      if (nextStrategicBucket !== strategicPanelBucket && (screen === "base" || screen === "map" || screen === "battle")) {
+        strategicPanelBucket = nextStrategicBucket;
+        renderPanels();
       }
     },
   );

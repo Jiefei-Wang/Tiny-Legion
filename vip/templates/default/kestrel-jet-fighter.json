@@ -1,10 +1,15 @@
 {
-  "id": 3,
-  "name": "Skylance Jet",
+  "id": 5,
+  "name": "Kestrel Jet Fighter",
   "type": "air",
   "structure": [
     {
-      "partId": 11,
+      "partId": 10,
+      "x": -2,
+      "y": 0
+    },
+    {
+      "partId": 10,
       "x": -1,
       "y": 0
     },
@@ -14,8 +19,13 @@
       "y": 0
     },
     {
-      "partId": 11,
+      "partId": 10,
       "x": 1,
+      "y": 0
+    },
+    {
+      "partId": 10,
+      "x": 2,
       "y": 0
     },
     {
@@ -26,35 +36,27 @@
   ],
   "attachments": [
     {
-      "component": "jetEngine",
-      "partId": 9,
+      "component": "control",
+      "partId": 3,
       "cell": 0,
-      "x": -1,
+      "x": -2,
       "y": 0,
       "rotateQuarter": 0
     },
     {
-      "component": "control",
-      "partId": 3,
-      "cell": 1,
+      "component": "jetEngine",
+      "partId": 9,
+      "cell": 5,
       "x": 0,
-      "y": 0,
+      "y": 1,
       "rotateQuarter": 0
     },
     {
       "component": "rapidGun",
-      "partId": 20,
-      "cell": 2,
-      "x": 1,
+      "partId": 21,
+      "cell": 4,
+      "x": 2,
       "y": 0,
-      "rotateQuarter": 0
-    },
-    {
-      "component": "jetEngine",
-      "partId": 9,
-      "cell": 3,
-      "x": 0,
-      "y": 1,
       "rotateQuarter": 0
     }
   ],
@@ -62,24 +64,36 @@
     {
       "kind": "panel",
       "cell": 0,
+      "x": -2,
+      "y": 0
+    },
+    {
+      "kind": "stripe",
+      "cell": 1,
       "x": -1,
       "y": 0
     },
     {
       "kind": "glass",
-      "cell": 1,
-      "x": 0,
-      "y": 0
-    },
-    {
-      "kind": "panel",
       "cell": 2,
-      "x": 1,
+      "x": 0,
       "y": 0
     },
     {
       "kind": "stripe",
       "cell": 3,
+      "x": 1,
+      "y": 0
+    },
+    {
+      "kind": "panel",
+      "cell": 4,
+      "x": 2,
+      "y": 0
+    },
+    {
+      "kind": "panel",
+      "cell": 5,
       "x": 0,
       "y": 1
     }

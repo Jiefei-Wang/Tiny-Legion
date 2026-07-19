@@ -1,0 +1,164 @@
+{
+  "id": 2,
+  "name": "Bastion Line Tank",
+  "type": "ground",
+  "structure": [
+    {
+      "partId": 15,
+      "x": -2,
+      "y": -1
+    },
+    {
+      "partId": 15,
+      "x": -1,
+      "y": -1
+    },
+    {
+      "partId": 13,
+      "x": 0,
+      "y": -1
+    },
+    {
+      "partId": 15,
+      "x": 1,
+      "y": -1
+    },
+    {
+      "partId": 15,
+      "x": 2,
+      "y": -1
+    },
+    {
+      "partId": 11,
+      "x": -2,
+      "y": 0
+    },
+    {
+      "partId": 11,
+      "x": -1,
+      "y": 0
+    },
+    {
+      "partId": 13,
+      "x": 0,
+      "y": 0
+    },
+    {
+      "partId": 11,
+      "x": 1,
+      "y": 0
+    },
+    {
+      "partId": 11,
+      "x": 2,
+      "y": 0
+    },
+    {
+      "partId": 14,
+      "x": 0,
+      "y": 1
+    }
+  ],
+  "attachments": [
+    {
+      "component": "engineM",
+      "partId": 5,
+      "cell": 5,
+      "x": -2,
+      "y": 0,
+      "rotateQuarter": 0
+    },
+    {
+      "component": "control",
+      "partId": 3,
+      "cell": 6,
+      "x": -1,
+      "y": 0,
+      "rotateQuarter": 0
+    },
+    {
+      "component": "cannonLoader",
+      "partId": 2,
+      "cell": 7,
+      "x": 0,
+      "y": 0,
+      "rotateQuarter": 0
+    },
+    {
+      "component": "rapidGun",
+      "partId": 8,
+      "cell": 8,
+      "x": 1,
+      "y": 0,
+      "rotateQuarter": 0
+    }
+  ],
+  "display": [
+    {
+      "kind": "stripe",
+      "cell": 0,
+      "x": -2,
+      "y": -1
+    },
+    {
+      "kind": "panel",
+      "cell": 1,
+      "x": -1,
+      "y": -1
+    },
+    {
+      "kind": "glass",
+      "cell": 2,
+      "x": 0,
+      "y": -1
+    },
+    {
+      "kind": "panel",
+      "cell": 3,
+      "x": 1,
+      "y": -1
+    },
+    {
+      "kind": "stripe",
+      "cell": 4,
+      "x": 2,
+      "y": -1
+    },
+    {
+      "kind": "panel",
+      "cell": 5,
+      "x": -2,
+      "y": 0
+    },
+    {
+      "kind": "panel",
+      "cell": 6,
+      "x": -1,
+      "y": 0
+    },
+    {
+      "kind": "stripe",
+      "cell": 7,
+      "x": 0,
+      "y": 0
+    },
+    {
+      "kind": "panel",
+      "cell": 8,
+      "x": 1,
+      "y": 0
+    },
+    {
+      "kind": "panel",
+      "cell": 9,
+      "x": 2,
+      "y": 0
+    },
+    {
+      "kind": "stripe",
+      "cell": 10,
+      "x": 0,
+      "y": 1
+    }
+  ]
+}

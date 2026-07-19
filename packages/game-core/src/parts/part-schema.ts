@@ -9,7 +9,7 @@ export { validatePartDefinitionDetailed, validatePartDefinition } from "./part-v
 
 function resolvePartTypeFromComponent(component: ComponentId): PartType {
   const stats = COMPONENTS[component];
-  if (stats.type === "control" || stats.type === "engine" || stats.type === "weapon" || stats.type === "loader" || stats.type === "ammo") {
+  if (stats.type === "control" || stats.type === "engine" || stats.type === "weapon" || stats.type === "loader") {
     return stats.type;
   }
   return "weapon";
@@ -21,9 +21,6 @@ function resolvePartCategoryFromComponent(component: ComponentId): PartCategory 
   }
   if (component === "jetEngine") {
     return "jet";
-  }
-  if (component === "propeller") {
-    return "propeller";
   }
   if (component === "rapidGun" || component === "heavyCannon" || component === "explosiveShell") {
     return "bullet";
@@ -43,7 +40,6 @@ function mapPartTypeAndCategoryToComponent(partType: PartType, partCategory?: Pa
   }
   if (partType === "engine") {
     if (partCategory === "jet") return "jetEngine";
-    if (partCategory === "propeller") return "propeller";
     return "engineS";
   }
   if (partType === "weapon") {
@@ -55,7 +51,7 @@ function mapPartTypeAndCategoryToComponent(partType: PartType, partCategory?: Pa
   if (partType === "loader") {
     return "cannonLoader";
   }
-  return "ammo";
+  return "cannonLoader";
 }
 
 
@@ -176,7 +172,6 @@ function normalizeOffsets(value: unknown): Array<{ x: number; y: number }> {
 }
 
 const DEFAULT_PART_ID_BY_COMPONENT: Record<ComponentId, number> = {
-  ammo: 1,
   cannonLoader: 2,
   control: 3,
   engineM: 5,
@@ -186,7 +181,6 @@ const DEFAULT_PART_ID_BY_COMPONENT: Record<ComponentId, number> = {
   jetEngine: 9,
   missileLoader: 16,
   precisionBeam: 17,
-  propeller: 18,
   rapidGun: 19,
   trackingMissile: 20,
 };
@@ -220,7 +214,7 @@ function readOptionalPartDirection(value: unknown): PartDirection | undefined {
 }
 
 function readOptionalPartType(value: unknown): PartType | undefined {
-  if (value === "structure" || value === "control" || value === "engine" || value === "weapon" || value === "loader" || value === "ammo") {
+  if (value === "structure" || value === "control" || value === "engine" || value === "weapon" || value === "loader") {
     return value;
   }
   return undefined;
@@ -230,7 +224,6 @@ function readOptionalPartCategory(value: unknown): PartCategory | undefined {
   if (
     value === "vehicle"
     || value === "jet"
-    || value === "propeller"
     || value === "bullet"
     || value === "missile"
     || value === "beam"
@@ -249,9 +242,7 @@ function readLegacyHalfShootAngle(value: unknown): number | undefined {
 }
 
 function getDefaultPartDirection(baseComponent: ComponentId): PartDirection {
-  if (baseComponent === "propeller") {
-    return "down";
-  }
+  void baseComponent;
   return "right";
 }
 
@@ -379,6 +370,7 @@ function createImplicitStructureMaterialPartDefinition(materialId: MaterialId): 
       armor: material.armor,
       recover: material.recoverPerSecond,
       color: material.color,
+      alpha: 1,
     },
     properties: {
       category: "structure",
@@ -387,6 +379,7 @@ function createImplicitStructureMaterialPartDefinition(materialId: MaterialId): 
       materialArmor: material.armor,
       materialRecoverPerSecond: material.recoverPerSecond,
       materialColor: material.color,
+      materialAlpha: 1,
       hp: material.hp,
       isEngine: false,
       isWeapon: false,
@@ -462,16 +455,9 @@ export function createImplicitPartDefinition(component: ComponentId): PartDefini
       powerAir: stats.type === "engine" ? stats.propulsion?.platform === "air" : undefined,
       directional: stats.directional,
       defaultDirection: getDefaultPartDirection(component),
-      hasAngleLimit: stats.type === "engine"
-        ? stats.propulsion?.mode === "directional"
-        : (stats.type === "weapon" ? stats.directional === true : undefined),
-      cwAngle: stats.type === "engine"
-        ? (stats.propulsion?.mode === "directional" ? (stats.propulsion?.thrustAngleDeg ?? 30) : undefined)
-        : (stats.type === "weapon" && stats.shootAngleDeg !== undefined ? stats.shootAngleDeg * 0.5 : undefined),
-      ccwAngle: stats.type === "engine"
-        ? (stats.propulsion?.mode === "directional" ? (stats.propulsion?.thrustAngleDeg ?? 30) : undefined)
-        : (stats.type === "weapon" && stats.shootAngleDeg !== undefined ? stats.shootAngleDeg * 0.5 : undefined),
-      thrustAngleDeg: stats.type === "engine" ? (stats.propulsion?.thrustAngleDeg ?? 30) : undefined,
+      hasAngleLimit: stats.type === "weapon" ? stats.directional === true : undefined,
+      cwAngle: stats.type === "weapon" && stats.shootAngleDeg !== undefined ? stats.shootAngleDeg * 0.5 : undefined,
+      ccwAngle: stats.type === "weapon" && stats.shootAngleDeg !== undefined ? stats.shootAngleDeg * 0.5 : undefined,
       bulletType: stats.type === "weapon"
         ? ((stats.weaponClass === "tracking")
             ? "missile"
@@ -480,6 +466,7 @@ export function createImplicitPartDefinition(component: ComponentId): PartDefini
       damage: stats.damage,
       range: stats.range,
       cooldown: stats.cooldown,
+      fireSoundVolume: stats.type === "weapon" ? 1 : undefined,
       recoil: stats.recoil,
       hitImpulse: stats.hitImpulse,
       penetration: stats.penetration,
@@ -496,7 +483,7 @@ export function createImplicitPartDefinition(component: ComponentId): PartDefini
       loadMultiplier: stats.loader?.loadMultiplier,
       minLoadTime: stats.loader?.minLoadTime,
       minBurstInterval: stats.loader?.minBurstInterval,
-      maxCapacity: stats.type === "ammo" ? 1 : stats.loader?.storeCapacity,
+      maxCapacity: stats.type === "weapon" ? stats.maxLoadedAmmo : undefined,
       computing: stats.type === "control" ? 1 : undefined,
       computingConsumption: stats.type === "weapon" ? 1 : undefined,
     },
@@ -662,6 +649,7 @@ export function clonePartDefinition(part: PartDefinition): PartDefinition {
           armor: part.partProperties.armor,
           recover: part.partProperties.recover,
           color: part.partProperties.color,
+          alpha: part.partProperties.alpha,
           computing: part.partProperties.computing,
           computingConsumption: part.partProperties.computingConsumption,
           power: part.partProperties.power,
@@ -673,11 +661,11 @@ export function clonePartDefinition(part: PartDefinition): PartDefinition {
           hasAngleLimit: part.partProperties.hasAngleLimit,
           cwAngle: part.partProperties.cwAngle,
           ccwAngle: part.partProperties.ccwAngle,
-          thrustAngleDeg: part.partProperties.thrustAngleDeg,
           bulletType: part.partProperties.bulletType,
           damage: part.partProperties.damage,
           range: part.partProperties.range,
           cooldown: part.partProperties.cooldown,
+          fireSoundVolume: part.partProperties.fireSoundVolume,
           recoil: part.partProperties.recoil,
           hitImpulse: part.partProperties.hitImpulse,
           penetration: part.partProperties.penetration,
@@ -726,7 +714,6 @@ export function clonePartDefinition(part: PartDefinition): PartDefinition {
           loaderLoadMultiplier: part.stats.loaderLoadMultiplier,
           loaderFastOperation: part.stats.loaderFastOperation,
           loaderMinLoadTime: part.stats.loaderMinLoadTime,
-          loaderStoreCapacity: part.stats.loaderStoreCapacity,
           loaderMinBurstInterval: part.stats.loaderMinBurstInterval,
         }
       : undefined,
@@ -738,6 +725,7 @@ export function clonePartDefinition(part: PartDefinition): PartDefinition {
           materialArmor: part.properties.materialArmor,
           materialRecoverPerSecond: part.properties.materialRecoverPerSecond,
           materialColor: part.properties.materialColor,
+          materialAlpha: part.properties.materialAlpha,
           hp: part.properties.hp,
           isEngine: part.properties.isEngine,
           isWeapon: part.properties.isWeapon,
@@ -906,11 +894,10 @@ export function parsePartDefinition(input: unknown): PartDefinition | null {
   const hasAngleLimitRaw = readOptionalBoolean(partPropertiesRecord.hasAngleLimit);
   const cwAngleRaw = readOptionalNumber(partPropertiesRecord.cwAngle);
   const ccwAngleRaw = readOptionalNumber(partPropertiesRecord.ccwAngle);
-  const legacyThrustAngle = readOptionalNumber(partPropertiesRecord.thrustAngleDeg);
   const legacyShootHalfAngle = readLegacyHalfShootAngle(partPropertiesRecord.shootAngleDeg);
-  const hasLegacyLimit = legacyThrustAngle !== undefined || legacyShootHalfAngle !== undefined;
+  const hasLegacyLimit = legacyShootHalfAngle !== undefined;
   const hasAngleLimit = hasAngleLimitRaw ?? (hasLegacyLimit ? true : undefined);
-  const fallbackLegacyHalfAngle = legacyShootHalfAngle ?? legacyThrustAngle;
+  const fallbackLegacyHalfAngle = legacyShootHalfAngle;
   const cwAngle = cwAngleRaw ?? (hasAngleLimit === true ? fallbackLegacyHalfAngle : undefined);
   const ccwAngle = ccwAngleRaw ?? (hasAngleLimit === true ? fallbackLegacyHalfAngle : undefined);
   const partProperties: PartPropertySet = {
@@ -921,6 +908,7 @@ export function parsePartDefinition(input: unknown): PartDefinition | null {
     armor: readOptionalNumber(partPropertiesRecord.armor),
     recover: readOptionalNumber(partPropertiesRecord.recover),
     color: readOptionalString(partPropertiesRecord.color),
+    alpha: readOptionalNumber(partPropertiesRecord.alpha),
     computing: readOptionalNumber(partPropertiesRecord.computing),
     computingConsumption: readOptionalNumber(partPropertiesRecord.computingConsumption ?? partPropertiesRecord.computingCost),
     power: readOptionalNumber(partPropertiesRecord.power),
@@ -932,13 +920,13 @@ export function parsePartDefinition(input: unknown): PartDefinition | null {
     hasAngleLimit,
     cwAngle,
     ccwAngle,
-    thrustAngleDeg: readOptionalNumber(partPropertiesRecord.thrustAngleDeg),
     bulletType: (partPropertiesRecord.bulletType === "bullet" || partPropertiesRecord.bulletType === "missile" || partPropertiesRecord.bulletType === "laser")
       ? partPropertiesRecord.bulletType
       : undefined,
     damage: readOptionalNumber(partPropertiesRecord.damage),
     range: readOptionalNumber(partPropertiesRecord.range),
     cooldown: readOptionalNumber(partPropertiesRecord.cooldown),
+    fireSoundVolume: readOptionalNumber(partPropertiesRecord.fireSoundVolume),
     recoil: readOptionalNumber(partPropertiesRecord.recoil),
     hitImpulse: readOptionalNumber(partPropertiesRecord.hitImpulse),
     penetration: readOptionalNumber(partPropertiesRecord.penetration),
@@ -1046,7 +1034,6 @@ export function parsePartDefinition(input: unknown): PartDefinition | null {
       loaderLoadMultiplier: readOptionalNumber(runtimeRecord.loaderLoadMultiplier ?? runtimeLoaderRecord.loadMultiplier ?? partProperties.loadMultiplier),
       loaderFastOperation: readOptionalBoolean(runtimeRecord.loaderFastOperation ?? runtimeLoaderRecord.fastOperation),
       loaderMinLoadTime: readOptionalNumber(runtimeRecord.loaderMinLoadTime ?? runtimeLoaderRecord.minLoadTime ?? partProperties.minLoadTime),
-      loaderStoreCapacity: readOptionalNumber(runtimeRecord.loaderStoreCapacity ?? runtimeLoaderRecord.storeCapacity ?? partProperties.maxCapacity),
       loaderMinBurstInterval: readOptionalNumber(runtimeRecord.loaderMinBurstInterval ?? runtimeLoaderRecord.minBurstInterval ?? partProperties.minBurstInterval),
     },
     partProperties: Object.values(partProperties).some((value) => value !== undefined)
@@ -1075,6 +1062,7 @@ export function parsePartDefinition(input: unknown): PartDefinition | null {
           ?? partProperties.recover,
       ),
       materialColor: readOptionalString(propertiesRecord.materialColor ?? propertiesRecord.material_color ?? partProperties.color),
+      materialAlpha: readOptionalNumber(propertiesRecord.materialAlpha ?? propertiesRecord.material_alpha ?? partProperties.alpha),
       hp: readOptionalNumber(propertiesRecord.hp ?? data.hp ?? partProperties.hp),
       isEngine: readOptionalBoolean(propertiesRecord.isEngine ?? propertiesRecord.is_engine ?? data.isEngine ?? data.is_engine ?? (normalizedPartType === "engine")),
       isWeapon: readOptionalBoolean(propertiesRecord.isWeapon ?? propertiesRecord.is_weapon ?? data.isWeapon ?? data.is_weapon ?? (normalizedPartType === "weapon")),

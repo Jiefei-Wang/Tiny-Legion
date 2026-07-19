@@ -3,6 +3,7 @@ import { runReplay } from "./replay/run-replay.ts";
 import { loadArenaDefaults } from "./config/arena-config.ts";
 import { openReplayUiFromFile } from "./replay/open-replay-ui.ts";
 import { runCompositeTraining } from "./train/run-composite-training.ts";
+import { evaluateAiTiers } from "./eval/evaluate-ai-tiers.ts";
 
 type Args = Record<string, string | boolean>;
 
@@ -150,6 +151,10 @@ async function main(): Promise<void> {
     await openReplayUiFromFile(replayPath);
     return;
   }
+  if (cmd === "eval-tiers") {
+    await evaluateAiTiers(asNumber(args.seeds, 10));
+    return;
+  }
   // eslint-disable-next-line no-console
   console.log(
     [
@@ -158,6 +163,7 @@ async function main(): Promise<void> {
       "Commands:",
       "  match --seed 123 --out match.json",
       "  match --playerComposite player.json --enemyComposite enemy.json --seed 123 --out match.json",
+      "  eval-tiers --seeds 10",
       "  train-composite --scope all --generations 20 --population 24 --phaseSeeds 16 --nUnits 4",
       "  train-composite --scope shoot --shootSource new --movementSource baseline --targetSource baseline",
       "  train-composite --scope shoot --shootSource new --shootFamily dt-shoot-atan",

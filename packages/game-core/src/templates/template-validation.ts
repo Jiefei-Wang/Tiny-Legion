@@ -8,7 +8,7 @@ import {
   rotateOffsetByQuarter,
   resolvePartDefinitionForAttachment,
 } from "../parts/part-schema.ts";
-import type { DisplayAttachmentTemplate, PartDefinition, PartDirection, UnitTemplate, UnitType } from "../types.ts";
+import type { DisplayAttachmentTemplate, PartDefinition, UnitTemplate, UnitType } from "../types.ts";
 
 export type TemplateValidationResult = {
   errors: string[];
@@ -33,33 +33,6 @@ function isUnitType(value: unknown): value is UnitType {
 
 function isDisplayKind(value: unknown): value is DisplayAttachmentTemplate["kind"] {
   return value === "panel" || value === "stripe" || value === "glass";
-}
-
-function getPropellerDirection(rotateQuarter: number): { x: number; y: number } {
-  const q = ((rotateQuarter % 4) + 4) % 4;
-  if (q === 0) {
-    return { x: 1, y: 0 };
-  }
-  if (q === 1) {
-    return { x: 0, y: 1 };
-  }
-  if (q === 2) {
-    return { x: -1, y: 0 };
-  }
-  return { x: 0, y: -1 };
-}
-
-function getDirectionQuarter(direction: PartDirection | undefined): 0 | 1 | 2 | 3 {
-  if (direction === "down") {
-    return 1;
-  }
-  if (direction === "left") {
-    return 2;
-  }
-  if (direction === "up") {
-    return 3;
-  }
-  return 0;
 }
 
 function unique(items: string[]): string[] {
@@ -90,30 +63,7 @@ function engineSupportsGround(part: PartDefinition | null, component: keyof type
   return COMPONENTS[component].propulsion?.platform === "ground";
 }
 
-function resolveEngineDirectionalLimit(part: PartDefinition | null, component: keyof typeof COMPONENTS): { enabled: boolean; cwRad: number; ccwRad: number } {
-  const stats = COMPONENTS[component];
-  const hasAngleLimit = part?.partProperties?.hasAngleLimit;
-  if (hasAngleLimit === false) {
-    return { enabled: false, cwRad: 0, ccwRad: 0 };
-  }
-  const cw = part?.partProperties?.cwAngle;
-  const ccw = part?.partProperties?.ccwAngle;
-  if (hasAngleLimit === true && Number.isFinite(cw) && Number.isFinite(ccw)) {
-    return {
-      enabled: true,
-      cwRad: Math.max(0, cw ?? 0) * Math.PI / 180,
-      ccwRad: Math.max(0, ccw ?? 0) * Math.PI / 180,
-    };
-  }
-  const legacyHalf = part?.partProperties?.thrustAngleDeg ?? stats.propulsion?.thrustAngleDeg;
-  if (!Number.isFinite(legacyHalf)) {
-    return { enabled: false, cwRad: 0, ccwRad: 0 };
-  }
-  const halfRad = Math.max(0, legacyHalf ?? 0) * Math.PI / 180;
-  return { enabled: true, cwRad: halfRad, ccwRad: halfRad };
-}
-
-function computeAirLiftAccel(template: UnitTemplate, partCatalog: ReadonlyArray<PartDefinition>): number {
+function computeAirThrustSpeed(template: UnitTemplate, partCatalog: ReadonlyArray<PartDefinition>): number {
   let mass = 0;
   for (const cell of template.structure) {
     const part = resolvePartDefinitionForAttachment({ partId: cell.partId }, partCatalog);
@@ -133,7 +83,7 @@ function computeAirLiftAccel(template: UnitTemplate, partCatalog: ReadonlyArray<
   }
   mass = Math.max(16, mass);
 
-  let liftAccel = 0;
+  let thrustSpeed = 0;
   for (const attachment of template.attachments) {
     const part = resolvePartDefinitionForAttachment({ partId: attachment.partId, component: attachment.component }, partCatalog);
     const component = part?.baseComponent ?? attachment.component;
@@ -144,49 +94,10 @@ function computeAirLiftAccel(template: UnitTemplate, partCatalog: ReadonlyArray<
     if (stats.type !== "engine" || !engineSupportsAir(part, component)) {
       continue;
     }
-    const propulsion = stats.propulsion;
-    if (!propulsion) {
-      continue;
-    }
     const power = Math.max(0, part?.stats?.power ?? stats.power ?? 0);
-    const baseAccel = (power / mass) * AIR_THRUST_ACCEL_SCALE;
-    if (propulsion.mode === "omni") {
-      liftAccel += baseAccel;
-      continue;
-    }
-    const rotateQuarterRaw = attachment.rotateQuarter ?? 0;
-    const rotateQuarter = normalizePartAttachmentRotate(part ?? {
-      id: -1,
-      name: component,
-      layer: "functional",
-      baseComponent: component,
-      anchor: { x: 0, y: 0 },
-      boxes: [{ x: 0, y: 0 }],
-      directional: stats.directional === true,
-    }, rotateQuarterRaw);
-    const facingQuarter = ((getDirectionQuarter(part?.direction ?? "right") + rotateQuarter) % 4 + 4) % 4;
-    const propDir = getPropellerDirection(facingQuarter);
-    // Propeller facing represents push/airflow direction; lift/thrust is opposite.
-    const thrustX = -propDir.x;
-    const thrustY = -propDir.y;
-    const thrustAngle = Math.atan2(thrustY, thrustX);
-    const upAngle = -Math.PI / 2;
-    const relative = Math.atan2(Math.sin(upAngle - thrustAngle), Math.cos(upAngle - thrustAngle));
-    const angleLimit = resolveEngineDirectionalLimit(part, component);
-    if (angleLimit.enabled) {
-      if (relative > angleLimit.cwRad || relative < -angleLimit.ccwRad) {
-        continue;
-      }
-      const sideLimit = relative >= 0 ? angleLimit.cwRad : angleLimit.ccwRad;
-      const inConeScale = sideLimit > 1e-6
-        ? Math.max(0, Math.min(1, 1 - Math.abs(relative) / sideLimit))
-        : 1;
-      liftAccel += baseAccel * inConeScale;
-      continue;
-    }
-    liftAccel += baseAccel;
+    thrustSpeed += (power / mass) * AIR_THRUST_ACCEL_SCALE;
   }
-  return liftAccel;
+  return thrustSpeed;
 }
 
 export function validateTemplateDetailed(
@@ -378,11 +289,11 @@ export function validateTemplateDetailed(
 
   if (template.type === "air") {
     if (airEngineCount < 1) {
-      errors.push("air unit requires at least one jet engine or propeller");
+      errors.push("air unit requires at least one jet engine");
     } else {
-      const liftAccel = computeAirLiftAccel(template, partCatalog);
-      if (liftAccel < AIR_HOLD_GRAVITY) {
-        errors.push(`air thrust cannot hold altitude (lift=${liftAccel.toFixed(1)} < gravity=${AIR_HOLD_GRAVITY.toFixed(1)})`);
+      const thrustSpeed = computeAirThrustSpeed(template, partCatalog);
+      if (thrustSpeed <= AIR_HOLD_GRAVITY) {
+        errors.push(`air thrust cannot overcome gravity (thrust=${thrustSpeed.toFixed(1)} <= gravity=${AIR_HOLD_GRAVITY.toFixed(1)})`);
       }
     }
     if (groundEngineCount > 0) {

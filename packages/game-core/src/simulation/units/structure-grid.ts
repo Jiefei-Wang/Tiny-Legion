@@ -34,7 +34,9 @@ export function destroyCell(unit: UnitInstance, cellId: number): void {
 function destroyDisconnectedFromControl(unit: UnitInstance): void {
   const controlAttachments = unit.attachments.filter((attachment) => attachment.alive && attachment.component === "control");
   if (controlAttachments.length <= 0) {
-    unit.alive = false;
+    unit.vx = 0;
+    unit.vy = 0;
+    unit.vibrate = 0;
     return;
   }
 
@@ -42,7 +44,9 @@ function destroyDisconnectedFromControl(unit: UnitInstance): void {
     .map((attachment) => unit.structure.find((cell) => cell.id === attachment.cell && !cell.destroyed) ?? null)
     .filter((cell): cell is StructureCell => cell !== null);
   if (controlCells.length <= 0) {
-    unit.alive = false;
+    unit.vx = 0;
+    unit.vy = 0;
+    unit.vibrate = 0;
     return;
   }
 

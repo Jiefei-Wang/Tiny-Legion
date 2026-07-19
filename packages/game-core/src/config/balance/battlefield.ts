@@ -11,6 +11,16 @@ export const BATTLEFIELD_WIDTH = 2000;
 export const BATTLEFIELD_HEIGHT = 1000;
 
 /**
+ * Global multiplier applied to commanded unit movement.
+ * This changes unit translation speed without changing lift, gravity, recoil, or projectile physics.
+ */
+export const DEFAULT_UNIT_MOVEMENT_SPEED_MULTIPLIER = 2;
+
+/** Supported customization range for the global unit movement speed multiplier. */
+export const MIN_UNIT_MOVEMENT_SPEED_MULTIPLIER = 0.1;
+export const MAX_UNIT_MOVEMENT_SPEED_MULTIPLIER = 10;
+
+/**
  * Default ground-lane height ratio of total battlefield height.
  * Example: with height=1000, ground lane uses 400 units.
  */
@@ -35,12 +45,6 @@ export const AIR_GROUND_GAP_RATIO = 30 / 1000;
 export const AIR_TARGET_Z_TOLERANCE_RATIO = 22 / 1000;
 
 /**
- * Minimum effective aircraft max speed required to sustain lift.
- * Aircraft below this threshold enter air-drop/crash behavior.
- */
-export const AIR_MIN_LIFT_SPEED = 100;
-
-/**
  * Effective gravity budget aircraft must offset to hold altitude.
  * Higher values require more directed thrust to avoid descent.
  */
@@ -58,8 +62,7 @@ export const AIR_DROP_GRAVITY = 210;
 export const AIR_DROP_SPEED_CAP = 260;
 
 /**
- * Scale factor converting directed air thrust into acceleration.
- * Shared by jet/propeller directional movement calculations.
+ * Scale factor converting air-engine power-to-mass into pre-gravity thrust speed.
  */
 export const AIR_THRUST_ACCEL_SCALE = 70;
 
@@ -85,6 +88,19 @@ export const IMPULSE_DAMAGE_STRESS_FACTOR = 2.2;
  * Larger values reduce multi-part penetration depth.
  */
 export const PENETRATION_ARMOR_SCALER = 2;
+
+/** Minimum and maximum world-space size of one rendered/collidable structure cell. */
+export const MIN_STRUCTURE_CELL_SIZE = 18;
+export const MAX_STRUCTURE_CELL_SIZE = 28;
+
+/**
+ * Returns the canonical world-space size for a unit's structure cells.
+ * Rendering, projectile collision, targeting, and weapon geometry must use this
+ * helper so the visible armor panels and their hitboxes stay aligned.
+ */
+export function getStructureCellSize(unitRadius: number): number {
+  return Math.max(MIN_STRUCTURE_CELL_SIZE, Math.min(MAX_STRUCTURE_CELL_SIZE, unitRadius * 0.82));
+}
 
 /**
  * Master switch for runtime unit-vs-unit soft separation.

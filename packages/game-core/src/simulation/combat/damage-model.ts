@@ -1,8 +1,15 @@
-import { COMPONENTS } from "../../config/balance/weapons.ts";
 import { canOperate } from "../units/control-unit-rules.ts";
 import { aliveStructureCells, destroyCell } from "../units/structure-grid.ts";
-import { clamp, impulseToDeltaV } from "../physics/impulse-model.ts";
+import { impulseToDeltaV } from "../physics/impulse-model.ts";
 import type { UnitInstance } from "../../types.ts";
+
+export interface DamageApplicationResult {
+  incomingDamage: number;
+  armorDeducted: number;
+  deliveredDamage: number;
+  structureDamage: number;
+  functionalDamage: number;
+}
 
 export function applyHitToUnit(
   unit: UnitInstance,
@@ -10,14 +17,16 @@ export function applyHitToUnit(
   incomingImpulse: number,
   impactSide: number,
   impactedCellId: number | null = null,
-): void {
+  ignoreArmor = false,
+): DamageApplicationResult {
+  const noDamage = (): DamageApplicationResult => ({ incomingDamage, armorDeducted: 0, deliveredDamage: 0, structureDamage: 0, functionalDamage: 0 });
   if (!canOperate(unit)) {
-    return;
+    return noDamage();
   }
   const cells = aliveStructureCells(unit.structure);
   if (cells.length === 0) {
     unit.alive = false;
-    return;
+    return noDamage();
   }
 
   const ordered = cells.slice().sort((a, b) => {
@@ -32,50 +41,34 @@ export function applyHitToUnit(
   const targetCell = impactedCellId !== null
     ? ordered.find((cell) => cell.id === impactedCellId) ?? (impactSide >= 0 ? ordered[ordered.length - 1] : ordered[0])
     : (impactSide >= 0 ? ordered[ordered.length - 1] : ordered[0]);
-  const damageAfterArmor = incomingDamage - Math.max(0, targetCell.armor);
-  const effectiveDamage = damageAfterArmor <= 0 ? 1 : damageAfterArmor;
-  targetCell.strain += effectiveDamage;
-
+  const armorDeducted = ignoreArmor
+    ? 0
+    : Math.min(Math.max(0, incomingDamage), Math.max(0, targetCell.armor));
+  const damageAfterArmor = incomingDamage - armorDeducted;
+  const effectiveDamage = ignoreArmor ? Math.max(0, incomingDamage) : (damageAfterArmor <= 0 ? 1 : damageAfterArmor);
   const deltaV = impulseToDeltaV(incomingImpulse, unit.mass);
   unit.vx += impactSide * deltaV;
   unit.vibrate = Math.min(1.7, unit.vibrate + deltaV * 1.6);
+
+  const structureDamage = effectiveDamage;
+  targetCell.strain += structureDamage;
 
   if (targetCell.strain >= targetCell.breakThreshold) {
     destroyCell(unit, targetCell.id);
   }
 
-  const localAttachments = unit.attachments.filter((attachment) => {
-    if (!attachment.alive) {
-      return false;
-    }
-    if (attachment.occupiedOffsets && attachment.occupiedOffsets.length > 0) {
-      return attachment.occupiedOffsets.some((offset) => {
-        if (!(offset.takesDamage ?? offset.takesFunctionalDamage)) {
-          return false;
-        }
-        return attachment.x + offset.x === targetCell.x && attachment.y + offset.y === targetCell.y;
-      });
-    }
-    return attachment.cell === targetCell.id;
-  });
-  if (localAttachments.length > 0) {
-    const attachmentStressChance = Math.min(0.75, effectiveDamage / 180);
-    if (Math.random() < attachmentStressChance) {
-      const localIndex = Math.floor(Math.random() * localAttachments.length);
-      const pick = localAttachments[localIndex];
-      if (pick) {
-        const hpMul = pick.stats?.hpMul ?? COMPONENTS[pick.component].hpMul;
-        const fragility = clamp(1 / Math.max(0.35, hpMul), 1, 2.4);
-        if (Math.random() < Math.min(0.98, attachmentStressChance * fragility)) {
-          pick.alive = false;
-        }
-      }
-    }
-  }
-
   if (!canOperate(unit)) {
-    unit.alive = false;
+    unit.vx = 0;
+    unit.vy = 0;
+    unit.vibrate = 0;
   }
+  return {
+    incomingDamage,
+    armorDeducted,
+    deliveredDamage: effectiveDamage,
+    structureDamage,
+    functionalDamage: 0,
+  };
 }
 
 export function applyStructureRecovery(unit: UnitInstance, dt: number): void {

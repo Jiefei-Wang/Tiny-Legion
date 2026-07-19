@@ -46,7 +46,9 @@
     "requireEmptyFunctionalOffsets": []
   },
   "partProperties": {
-    "computingConsumption": 1
+    "computingConsumption": 1,
+    "fireSoundVolume": 1,
+    "maxCapacity": 1
   },
   "properties": {
     "category": "weapon",

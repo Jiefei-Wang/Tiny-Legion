@@ -1,11 +1,12 @@
 {
-  "id": 1,
-  "name": "Ammo Rack",
+  "id": 21,
+  "name": "Cycler Twin Gun",
   "layer": "functional",
-  "partType": "ammo",
-  "baseComponent": "ammo",
-  "directional": false,
-  "direction": "up",
+  "partType": "weapon",
+  "partCategory": "bullet",
+  "baseComponent": "rapidGun",
+  "directional": true,
+  "direction": "right",
   "anchor": {
     "x": 0,
     "y": 0
@@ -20,7 +21,7 @@
       "takeDamage": true,
       "attachPoint": false,
       "anchorPoint": true,
-      "firePoint": false
+      "firePoint": true
     }
   ],
   "boxes": [
@@ -32,7 +33,7 @@
       "needsStructureBehind": true,
       "isAttachPoint": false,
       "isAnchorPoint": true,
-      "isShootingPoint": false,
+      "isShootingPoint": true,
       "takesDamage": true,
       "takesFunctionalDamage": true
     }
@@ -44,18 +45,35 @@
     "requireEmptyStructureOffsets": [],
     "requireEmptyFunctionalOffsets": []
   },
+  "stats": {
+    "recoil": 4,
+    "damage": 11,
+    "range": 420,
+    "cooldown": 0.11,
+    "shootAngleDeg": 360,
+    "projectileSpeed": 650,
+    "projectileGravity": 20,
+    "spreadDeg": 1.8
+  },
+  "partProperties": {
+    "computingConsumption": 1,
+    "fireSoundVolume": 0.2,
+    "explodeOnHit": false,
+    "maxCapacity": 1
+  },
   "properties": {
-    "category": "functional",
-    "subcategory": "ammo",
+    "category": "weapon",
+    "subcategory": "close-range-twin-cycler",
+    "materialAlpha": 1,
     "isEngine": false,
-    "isWeapon": false,
+    "isWeapon": true,
     "isLoader": false,
     "isArmor": false,
     "hasCoreTuning": false
   },
   "tags": [
     "default",
-    "support",
-    "volatile"
+    "weapon",
+    "rapid-fire"
   ]
 }

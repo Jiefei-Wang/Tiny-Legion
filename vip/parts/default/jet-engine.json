@@ -6,7 +6,7 @@
   "partCategory": "jet",
   "baseComponent": "jetEngine",
   "directional": false,
-  "direction": "up",
+  "direction": "right",
   "anchor": {
     "x": 0,
     "y": 0
@@ -46,7 +46,7 @@
     "requireEmptyFunctionalOffsets": []
   },
   "stats": {
-    "power": 100,
+    "power": 150,
     "maxSpeed": 300
   },
   "properties": {

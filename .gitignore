@@ -21,3 +21,4 @@ arena/.dist/
 arena/modules
 .DS_Store
 **__pycache__
+.playwright-mcp/*

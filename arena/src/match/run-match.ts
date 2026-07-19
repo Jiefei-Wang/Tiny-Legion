@@ -10,6 +10,8 @@ import {
   BATTLE_SALVAGE_REFUND_FACTOR,
 } from "../../../packages/game-core/src/config/balance/battlefield.ts";
 import { makeCompositeAiController } from "../ai/composite-controller.ts";
+import { structureIntegrity } from "../../../packages/game-core/src/simulation/units/structure-grid.ts";
+import { canOperate } from "../../../packages/game-core/src/simulation/units/control-unit-rules.ts";
 
 type GameBattleHooks = {
   addLog: (text: string, tone?: any) => void;
@@ -32,7 +34,7 @@ function createMockCanvas(width: number, height: number): any {
 function computeOnFieldGasValue(units: any[], side: "player" | "enemy", refundFactor: number): number {
   let sum = 0;
   for (const unit of units) {
-    if (!unit || !unit.alive || unit.side !== side) {
+    if (!unit || !unit.alive || !canOperate(unit) || unit.side !== side) {
       continue;
     }
     const cost = typeof unit.deploymentGasCost === "number" ? unit.deploymentGasCost : 0;
@@ -66,7 +68,7 @@ function matchesTemplatePattern(templateId: string, pattern: string): boolean {
 }
 
 function aliveCount(units: any[], side: "player" | "enemy"): number {
-  return units.filter((unit: any) => unit.alive && unit.side === side).length;
+  return units.filter((unit: any) => unit.alive && canOperate(unit) && unit.side === side).length;
 }
 
 export async function runMatch(spec: MatchSpec): Promise<MatchResult> {
@@ -230,8 +232,8 @@ export async function runMatch(spec: MatchSpec): Promise<MatchResult> {
       return;
     }
     const s = battle.getState();
-    const alivePlayer = s.units.filter((u: any) => u.alive && u.side === "player").length;
-    const aliveEnemy = s.units.filter((u: any) => u.alive && u.side === "enemy").length;
+    const alivePlayer = s.units.filter((u: any) => u.alive && canOperate(u) && u.side === "player").length;
+    const aliveEnemy = s.units.filter((u: any) => u.alive && canOperate(u) && u.side === "enemy").length;
     let playerCapRemaining = Math.max(0, spawnMaxActive - alivePlayer);
     let enemyCapRemaining = Math.max(0, Math.min(s.enemyCap, spawnMaxActive) - aliveEnemy);
 
@@ -324,10 +326,19 @@ export async function runMatch(spec: MatchSpec): Promise<MatchResult> {
     } else {
       const alivePlayer = aliveCount(state1.units, "player");
       const aliveEnemy = aliveCount(state1.units, "enemy");
-      if (alivePlayer === aliveEnemy) {
-        battle.forceEnd(false, "Arena deadline reached (no-base tie)");
-      } else {
+      if (alivePlayer !== aliveEnemy) {
         battle.forceEnd(alivePlayer > aliveEnemy, "Arena deadline reached (no-base)");
+      } else {
+        const integrityFor = (side: "player" | "enemy"): number => state1.units
+          .filter((unit) => unit.alive && canOperate(unit) && unit.side === side)
+          .reduce((total, unit) => total + structureIntegrity(unit), 0);
+        const playerIntegrity = integrityFor("player");
+        const enemyIntegrity = integrityFor("enemy");
+        if (Math.abs(playerIntegrity - enemyIntegrity) <= 1e-6) {
+          battle.forceEnd(false, "Arena deadline reached (no-base tie)");
+        } else {
+          battle.forceEnd(playerIntegrity > enemyIntegrity, "Arena deadline reached (no-base integrity)");
+        }
       }
     }
   }

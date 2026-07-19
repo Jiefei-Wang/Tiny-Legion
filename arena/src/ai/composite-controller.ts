@@ -11,6 +11,12 @@ import {
   createBaselineTargetAi,
 } from "../../../packages/game-core/src/ai/composite/baseline-modules.ts";
 import {
+  createSkillTierMovementAi,
+  createSkillTierShootAi,
+  createSkillTierTargetAi,
+  type AiSkillTier,
+} from "../../../packages/game-core/src/ai/composite/skill-tier-modules.ts";
+import {
   createCompositeAiController,
   type BattleAiController,
   type MovementAiModule,
@@ -18,6 +24,7 @@ import {
   type TargetAiModule,
 } from "../../../packages/game-core/src/ai/composite/composite-ai.ts";
 import { clamp } from "../../../packages/game-core/src/simulation/physics/impulse-model.ts";
+import { canOperate } from "../../../packages/game-core/src/simulation/units/control-unit-rules.ts";
 import type { Params, ParamSchema } from "./ai-schema.ts";
 import type { MatchAiSpec } from "../match/match-types.ts";
 
@@ -143,7 +150,7 @@ function createDecisionTreeTargetAi(params: Params): TargetAiModule {
       const baseCenterY = base.y + base.h * 0.5;
 
       const rankedTargets = input.state.units
-        .filter((u) => u.alive && u.side !== input.unit.side)
+        .filter((u) => u.alive && canOperate(u) && u.side !== input.unit.side)
         .map((enemy) => {
           const dx = enemy.x - input.unit.x;
           const dy = enemy.y - input.unit.y;
@@ -435,17 +442,27 @@ void createDecisionTreeShootAi;
 void createDecisionTreeShootAtanAi;
 
 function createTargetModule(spec: CompositeModuleSpec): TargetAiModule {
-  void spec;
+  const familyId = spec.familyId.trim().toLowerCase();
+  const tier = parseSkillTier(familyId, "target");
+  if (tier) return createSkillTierTargetAi(tier);
+  if (familyId === "dt-target") return createDecisionTreeTargetAi(spec.params);
   return createBaselineTargetAi();
 }
 
 function createMovementModule(spec: CompositeModuleSpec): MovementAiModule {
-  void spec;
+  const familyId = spec.familyId.trim().toLowerCase();
+  const tier = parseSkillTier(familyId, "movement");
+  if (tier) return createSkillTierMovementAi(tier);
+  if (familyId === "dt-movement") return createDecisionTreeMovementAi(spec.params);
   return createBaselineMovementAi();
 }
 
 function createShootModule(spec: CompositeModuleSpec): ShootAiModule {
   const familyId = spec.familyId.trim().toLowerCase();
+  const tier = parseSkillTier(familyId, "shoot");
+  if (tier) return createSkillTierShootAi(tier);
+  if (familyId === "dt-shoot") return createDecisionTreeShootAi(spec.params);
+  if (familyId === "dt-shoot-atan") return createDecisionTreeShootAtanAi(spec.params);
   if (familyId === "history-shoot" || familyId === "history-weighted-shoot") {
     const recencyPower = pickNumber(spec.params, "history.recencyPower", 1.0);
     return createHistoryWeightedShootAi(recencyPower);
@@ -461,11 +478,26 @@ function createShootModule(spec: CompositeModuleSpec): ShootAiModule {
   return createBaselineShootAi();
 }
 
+function parseSkillTier(familyId: string, kind: ModuleKind): AiSkillTier | null {
+  for (const tier of ["low", "medium", "high"] as const) {
+    if (familyId === `skill-${tier}-${kind}` || familyId === `${tier}-${kind}`) return tier;
+  }
+  return null;
+}
+
 export function baselineCompositeConfig(): CompositeConfig {
   return {
     target: { familyId: "baseline-target", params: {} },
     movement: { familyId: "baseline-movement", params: {} },
     shoot: { familyId: "baseline-shoot", params: {} },
+  };
+}
+
+export function skillTierCompositeConfig(tier: AiSkillTier): CompositeConfig {
+  return {
+    target: { familyId: `skill-${tier}-target`, params: {} },
+    movement: { familyId: `skill-${tier}-movement`, params: {} },
+    shoot: { familyId: `skill-${tier}-shoot`, params: {} },
   };
 }
 

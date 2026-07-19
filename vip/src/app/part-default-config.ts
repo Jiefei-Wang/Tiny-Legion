@@ -3,15 +3,13 @@ import { MATERIALS } from "../config/balance/materials.ts";
 import type { ComponentId, MaterialId, PartCategory, PartDefinition, PartDirection, PartPropertySet, PartType } from "../types.ts";
 
 export function getPartDirectionDefault(baseComponent: ComponentId): PartDirection {
-  if (baseComponent === "propeller") {
-    return "down";
-  }
+  void baseComponent;
   return "right";
 }
 
 export function getPartTypeFromComponent(baseComponent: ComponentId): PartType {
   const type = COMPONENTS[baseComponent].type;
-  return type === "control" || type === "engine" || type === "weapon" || type === "loader" || type === "ammo"
+  return type === "control" || type === "engine" || type === "weapon" || type === "loader"
     ? type
     : "weapon";
 }
@@ -19,7 +17,6 @@ export function getPartTypeFromComponent(baseComponent: ComponentId): PartType {
 export function getPartCategoryFromComponent(baseComponent: ComponentId): PartCategory | undefined {
   if (baseComponent === "engineS" || baseComponent === "engineM") return "vehicle";
   if (baseComponent === "jetEngine") return "jet";
-  if (baseComponent === "propeller") return "propeller";
   if (baseComponent === "rapidGun" || baseComponent === "heavyCannon" || baseComponent === "explosiveShell") return "bullet";
   if (baseComponent === "trackingMissile") return "missile";
   if (baseComponent === "precisionBeam") return "beam";
@@ -30,7 +27,6 @@ export function getComponentFromPartTypeAndCategory(partType: PartType, partCate
   if (partType === "structure" || partType === "control") return "control";
   if (partType === "engine") {
     if (partCategory === "jet") return "jetEngine";
-    if (partCategory === "propeller") return "propeller";
     return "engineS";
   }
   if (partType === "weapon") {
@@ -40,7 +36,7 @@ export function getComponentFromPartTypeAndCategory(partType: PartType, partCate
     return "rapidGun";
   }
   if (partType === "loader") return "cannonLoader";
-  return "ammo";
+  return "cannonLoader";
 }
 
 export function getPartPropertyDefaults(baseComponent: ComponentId): NonNullable<PartDefinition["properties"]> {
@@ -78,21 +74,15 @@ export function getPartPropertiesDefaultsByType(partType: PartType, partCategory
     return { gasCost: 10, mass: 2, tag: "control", computing: 1 };
   }
   if (partType === "engine") {
-    const directional = partCategory === "propeller";
     return {
       gasCost: 10,
       mass: 10,
       tag: "engine",
       power: 200,
       maxSpeed: 100,
-      powerGround: partCategory !== "jet" && partCategory !== "propeller",
-      powerAir: partCategory === "jet" || partCategory === "propeller",
-      directional,
-      defaultDirection: "down",
-      hasAngleLimit: directional,
-      cwAngle: directional ? 30 : undefined,
-      ccwAngle: directional ? 30 : undefined,
-      thrustAngleDeg: directional ? 30 : undefined,
+      powerGround: partCategory !== "jet",
+      powerAir: partCategory === "jet",
+      directional: false,
     };
   }
   if (partType === "weapon") {
@@ -105,6 +95,7 @@ export function getPartPropertiesDefaultsByType(partType: PartType, partCategory
       damage: 20,
       range: 300,
       cooldown: 1,
+      fireSoundVolume: 1,
       recoil: 10,
       hitImpulse: 10,
       penetration: 0,
@@ -121,6 +112,7 @@ export function getPartPropertiesDefaultsByType(partType: PartType, partCategory
       ccwAngle: 15,
       shootAngleDeg: 30,
       needLoader: false,
+      maxCapacity: 2,
       defaultDirection: "right",
       computingConsumption: 1,
     };
@@ -128,7 +120,7 @@ export function getPartPropertiesDefaultsByType(partType: PartType, partCategory
   if (partType === "loader") {
     return { gasCost: 10, mass: 5, tag: "loader", supportedWeaponTags: ["cannon"], loadMultiplier: 1, minLoadTime: 0.5, minBurstInterval: 0.2 };
   }
-  return { gasCost: 10, tag: "ammo", supportedWeaponTags: ["cannon"], maxCapacity: 1, explosionDamage: 100, explosionRadius: 100 };
+  return { gasCost: 10, mass: 5, tag: "loader", supportedWeaponTags: ["cannon"], loadMultiplier: 1, minLoadTime: 0.5, minBurstInterval: 0.2 };
 }
 
 export function getPartMetadataDefaultsForLayer(

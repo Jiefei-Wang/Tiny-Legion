@@ -1,6 +1,7 @@
 export * from "./types.ts";
 
 export * from "./config/balance/commander.ts";
+export * from "./config/balance/battlefield.ts";
 export * from "./config/balance/economy.ts";
 export * from "./config/balance/materials.ts";
 export * from "./config/balance/range.ts";
@@ -24,6 +25,7 @@ export * from "./simulation/units/structure-grid.ts";
 export * from "./simulation/units/unit-builder.ts";
 
 export * from "./gameplay/battle/battle-session.ts";
+export * from "./gameplay/campaign/real-time-campaign.ts";
 export * from "./gameplay/map/garrison-upkeep.ts";
 export * from "./gameplay/map/node-graph.ts";
 export * from "./gameplay/map/occupation.ts";

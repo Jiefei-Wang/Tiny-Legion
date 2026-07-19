@@ -3,6 +3,10 @@ import { BattleSession } from "../src/gameplay/battle/battle-session.ts";
 import { BATTLEFIELD_HEIGHT, BATTLEFIELD_WIDTH, UNIT_OVERLAP_ALLOWANCE_RATIO } from "../src/config/balance/battlefield.ts";
 import { COMPONENTS } from "../src/config/balance/weapons.ts";
 import { createInitialTemplates } from "../src/simulation/units/unit-builder.ts";
+import { instantiateUnit } from "../src/simulation/units/unit-builder.ts";
+import { applyHitToUnit } from "../src/simulation/combat/damage-model.ts";
+import { destroyCell } from "../src/simulation/units/structure-grid.ts";
+import { canOperate } from "../src/simulation/units/control-unit-rules.ts";
 import { mergeTemplates, parseTemplate, validateTemplateDetailed } from "../src/app/template-store.ts";
 import { mergePartCatalogs, parsePartDefinition } from "../src/app/part-store.ts";
 import type { BattleHooks } from "../src/gameplay/battle/battle-session.ts";
@@ -13,13 +17,15 @@ declare const process: { exit: (code?: number) => void; cwd: () => string };
 type Failure = {
   templateId: number;
   templateName: string;
-  check: "validation" | "movement" | "firing" | "overlap";
+  check: "validation" | "movement" | "firing" | "overlap" | "functional-support" | "weapon-capacity" | "air-isotropic" | "escape-mode" | "structure-origin";
   detail: string;
 };
 
 const dt = 1 / 60;
 const idleKeys: KeyState = { a: false, d: false, w: false, s: false, space: false };
 const moveRightKeys: KeyState = { a: false, d: true, w: false, s: false, space: false };
+const moveUpKeys: KeyState = { a: false, d: false, w: true, s: false, space: false };
+const moveUpRightKeys: KeyState = { a: false, d: true, w: true, s: false, space: false };
 
 function createMockCanvas(width: number, height: number): HTMLCanvasElement {
   const contextStub = {} as CanvasRenderingContext2D;
@@ -180,6 +186,55 @@ function runSmoke(): Failure[] {
   const templates = loadRuntimeMergedTemplates(partCatalog);
   const defaultTemplateIds = new Set(readTemplateDir(`${process.cwd().replace(/\\/g, "/")}/templates/default`, partCatalog).map((template) => template.id));
 
+  const supportPart: PartDefinition = {
+    id: 999_001,
+    name: "Headless Multi Support Control",
+    layer: "functional",
+    partType: "control",
+    baseComponent: "control",
+    anchor: { x: 0, y: 0 },
+    boxes: [
+      { x: 0, y: 0, isAttachPoint: true, occupiesFunctionalSpace: false, takesDamage: false },
+      { x: 1, y: 0, isAttachPoint: true, occupiesFunctionalSpace: false, takesDamage: false },
+    ],
+  };
+  const supportTemplate: UnitTemplate = {
+    id: 999_001,
+    name: "Headless Functional Support Test",
+    type: "ground",
+    gasCost: 0,
+    structure: [
+      { partId: 11, x: 0, y: 0 },
+      { partId: 11, x: 1, y: 0 },
+    ],
+    attachments: [{ component: "control", partId: supportPart.id, cell: 0, x: 0, y: 0 }],
+  };
+  const supportUnit = instantiateUnit([supportTemplate], supportTemplate.id, "player", 0, 0, {
+    partCatalog: [...partCatalog, supportPart],
+  });
+  const supportAttachment = supportUnit?.attachments[0];
+  if (!supportUnit || !supportAttachment) {
+    failures.push({ templateId: supportTemplate.id, templateName: supportTemplate.name, check: "functional-support", detail: "failed to instantiate support-link fixture" });
+  } else {
+    if ("hp" in supportAttachment || "maxHp" in supportAttachment) {
+      failures.push({ templateId: supportTemplate.id, templateName: supportTemplate.name, check: "functional-support", detail: "functional attachment still exposes an HP pool" });
+    }
+    if (supportAttachment.attachedStructureCellIds.join(",") !== "0,1") {
+      failures.push({ templateId: supportTemplate.id, templateName: supportTemplate.name, check: "functional-support", detail: `expected support links 0,1; got ${supportAttachment.attachedStructureCellIds.join(",")}` });
+    }
+    const armorBypassResult = applyHitToUnit(supportUnit, 10, 0, 1, 0, true);
+    if (armorBypassResult.armorDeducted !== 0 || armorBypassResult.structureDamage !== 10) {
+      failures.push({ templateId: supportTemplate.id, templateName: supportTemplate.name, check: "functional-support", detail: `armor bypass relayed ${armorBypassResult.structureDamage} damage with ${armorBypassResult.armorDeducted} armor deducted` });
+    }
+    destroyCell(supportUnit, 1);
+    if (supportAttachment.alive) {
+      failures.push({ templateId: supportTemplate.id, templateName: supportTemplate.name, check: "functional-support", detail: "functional attachment survived destruction of one of multiple supports" });
+    }
+    if (!supportUnit.alive || canOperate(supportUnit) || supportUnit.vx !== 0 || supportUnit.vy !== 0) {
+      failures.push({ templateId: supportTemplate.id, templateName: supportTemplate.name, check: "functional-support", detail: "controller loss did not leave a persistent, stationary, inoperable wreck" });
+    }
+  }
+
   for (const template of templates) {
     if (!defaultTemplateIds.has(template.id)) {
       continue;
@@ -230,6 +285,75 @@ function runSmoke(): Failure[] {
   };
   battle.start(node);
 
+  const bastionTemplate = templates.find((template) => template.id === 2);
+  const bastion = bastionTemplate
+    ? instantiateUnit(templates, bastionTemplate.id, "player", 640, 500, { partCatalog })
+    : null;
+  const bastionFrontSecondRow = bastion
+    ? bastion.structure
+      .filter((cell) => cell.y === 0)
+      .sort((left, right) => right.x - left.x)[0] ?? null
+    : null;
+  if (!bastionTemplate || !bastion || !bastionFrontSecondRow) {
+    failures.push({
+      templateId: 2,
+      templateName: bastionTemplate?.name ?? "Bastion Line Tank",
+      check: "structure-origin",
+      detail: "failed to create Bastion second-row origin fixture",
+    });
+  } else {
+    const beforePosition = { x: bastion.x, y: bastion.y };
+    const beforeCoordinates = new Map(bastion.structure.map((cell) => [cell.id, `${cell.x},${cell.y}`]));
+    const survivingSecondRow = bastion.structure.filter((cell) => cell.y === 0 && cell.id !== bastionFrontSecondRow.id);
+    const beforeWorldCenters = new Map(
+      survivingSecondRow.map((cell) => [cell.id, battle.getStructureCellWorldCenter(bastion, cell.id)]),
+    );
+    destroyCell(bastion, bastionFrontSecondRow.id);
+    const coordinatesChanged = bastion.structure.some((cell) => beforeCoordinates.get(cell.id) !== `${cell.x},${cell.y}`);
+    const rowShifted = survivingSecondRow.some((cell) => {
+      const before = beforeWorldCenters.get(cell.id);
+      const after = battle.getStructureCellWorldCenter(bastion, cell.id);
+      return !before || !after || Math.abs(before.x - after.x) > 1e-6 || Math.abs(before.y - after.y) > 1e-6;
+    });
+    if (bastion.x !== beforePosition.x || bastion.y !== beforePosition.y || coordinatesChanged || rowShifted) {
+      failures.push({
+        templateId: bastionTemplate.id,
+        templateName: bastionTemplate.name,
+        check: "structure-origin",
+        detail: "destroying the front cell of the second row changed the craft position, local coordinates, or surviving weapon geometry",
+      });
+    }
+    const facingBeforeEscape = bastion.facing;
+    battle.getState().units.push(bastion);
+    battle.update(dt, idleKeys);
+    if (!bastion.escapeActive || bastion.facing !== facingBeforeEscape) {
+      failures.push({
+        templateId: bastionTemplate.id,
+        templateName: bastionTemplate.name,
+        check: "structure-origin",
+        detail: "damage-triggered escape changed facing and mirrored the damaged structure grid",
+      });
+    }
+    for (let frame = 1; frame < 59; frame += 1) battle.update(dt, idleKeys);
+    if (bastion.facing !== facingBeforeEscape) {
+      failures.push({
+        templateId: bastionTemplate.id,
+        templateName: bastionTemplate.name,
+        check: "structure-origin",
+        detail: "escaping craft flipped before the one-second facing delay elapsed",
+      });
+    }
+    battle.update(dt, idleKeys);
+    if (bastion.facing !== -1) {
+      failures.push({
+        templateId: bastionTemplate.id,
+        templateName: bastionTemplate.name,
+        check: "structure-origin",
+        detail: "escaping craft did not turn toward its base after the one-second facing delay",
+      });
+    }
+  }
+
   for (const template of testTemplates) {
     const beforeIds = new Set(battle.getState().units.map((unit) => unit.id));
     battle.deployUnit(template.id);
@@ -263,6 +387,37 @@ function runSmoke(): Failure[] {
       continue;
     }
     unit = movedUnit;
+    if (unit.type === "air") {
+      const rightSpeed = Math.hypot(unit.vx, unit.vy);
+      battle.update(dt, moveUpKeys);
+      const upUnit = battle.getState().units.find((entry) => entry.id === unitId);
+      const upSpeed = upUnit ? Math.hypot(upUnit.vx, upUnit.vy) : 0;
+      battle.update(dt, moveUpRightKeys);
+      const diagonalUnit = battle.getState().units.find((entry) => entry.id === unitId);
+      const diagonalSpeed = diagonalUnit ? Math.hypot(diagonalUnit.vx, diagonalUnit.vy) : 0;
+      const tolerance = Math.max(0.1, rightSpeed * 0.01);
+      if (Math.abs(rightSpeed - upSpeed) > tolerance || Math.abs(rightSpeed - diagonalSpeed) > tolerance) {
+        failures.push({
+          templateId: template.id,
+          templateName: template.name,
+          check: "air-isotropic",
+          detail: `directional speeds differ: right=${rightSpeed.toFixed(2)}, up=${upSpeed.toFixed(2)}, diagonal=${diagonalSpeed.toFixed(2)}`,
+        });
+      }
+    }
+    for (let slot = 0; slot < unit.weaponAttachmentIds.length; slot += 1) {
+      const attachment = unit.attachments.find((entry) => entry.id === unit.weaponAttachmentIds[slot]);
+      const weaponPart = partCatalog.find((part) => part.id === attachment?.partId);
+      const capacity = weaponPart?.partProperties?.maxCapacity ?? (attachment ? COMPONENTS[attachment.component].maxLoadedAmmo : undefined);
+      if (capacity !== undefined && (unit.weaponReadyCharges[slot] ?? 0) > capacity) {
+        failures.push({
+          templateId: template.id,
+          templateName: template.name,
+          check: "weapon-capacity",
+          detail: `slot ${slot + 1} has ${unit.weaponReadyCharges[slot]} loaded rounds, above weapon maximum ${capacity}`,
+        });
+      }
+    }
     const movedDistance = unit.x - startX;
     const movementThreshold = Math.max(2.5, unit.maxSpeed * 0.08);
     if (movedDistance < movementThreshold) {
@@ -379,6 +534,51 @@ function runSmoke(): Failure[] {
             detail: `units stayed too overlapped after resolution: distance=${finalDistance.toFixed(2)}, minAllowed=${minAllowed.toFixed(2)}`,
           });
         }
+      }
+    }
+  }
+
+  const loaderTemplate = templates.find((template) => template.id === 4);
+  const airTemplate = templates.find((template) => template.id === 5);
+  if (loaderTemplate && airTemplate) {
+    const escapeBattle = new BattleSession(canvas, makeHooks([]), templates, {
+      partCatalog,
+      disableAutoEnemySpawns: true,
+      disableEnemyMinimumPresence: true,
+      disableDefaultStarters: true,
+    });
+    escapeBattle.start(node);
+    escapeBattle.arenaDeploy("player", loaderTemplate.id, { chargeGas: false, ignoreCap: true });
+    const loaderUnit = escapeBattle.getState().units.find((unit) => unit.templateId === loaderTemplate.id && unit.side === "player");
+    if (!loaderUnit) {
+      failures.push({ templateId: loaderTemplate.id, templateName: loaderTemplate.name, check: "escape-mode", detail: "failed to deploy loader-loss fixture" });
+    } else {
+      escapeBattle.setControlByClick(loaderUnit.x, loaderUnit.y);
+      for (const loader of loaderUnit.attachments.filter((attachment) => COMPONENTS[attachment.component].type === "loader")) loader.alive = false;
+      loaderUnit.weaponReadyCharges.fill(0);
+      escapeBattle.update(dt, idleKeys);
+      if (!loaderUnit.escapeActive || escapeBattle.getSelection().playerControlledId === loaderUnit.id) {
+        failures.push({ templateId: loaderTemplate.id, templateName: loaderTemplate.name, check: "escape-mode", detail: "exhausted weapon with destroyed loader did not enter uncontrollable escape mode" });
+      }
+    }
+
+    const weaponLossBattle = new BattleSession(canvas, makeHooks([]), templates, {
+      partCatalog,
+      disableAutoEnemySpawns: true,
+      disableEnemyMinimumPresence: true,
+      disableDefaultStarters: true,
+    });
+    weaponLossBattle.start(node);
+    weaponLossBattle.arenaDeploy("player", airTemplate.id, { chargeGas: false, ignoreCap: true });
+    const airUnit = weaponLossBattle.getState().units.find((unit) => unit.templateId === airTemplate.id && unit.side === "player");
+    if (!airUnit) {
+      failures.push({ templateId: airTemplate.id, templateName: airTemplate.name, check: "escape-mode", detail: "failed to deploy destroyed-weapon fixture" });
+    } else {
+      weaponLossBattle.setControlByClick(airUnit.x, airUnit.y);
+      for (const weapon of airUnit.attachments.filter((attachment) => COMPONENTS[attachment.component].type === "weapon")) weapon.alive = false;
+      weaponLossBattle.update(dt, idleKeys);
+      if (!airUnit.escapeActive || airUnit.airDropActive || weaponLossBattle.getSelection().playerControlledId === airUnit.id) {
+        failures.push({ templateId: airTemplate.id, templateName: airTemplate.name, check: "escape-mode", detail: "aircraft with destroyed weapons did not enter non-crashing, uncontrollable escape mode" });
       }
     }
   }

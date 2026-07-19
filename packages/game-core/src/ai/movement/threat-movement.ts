@@ -7,6 +7,62 @@ export interface MovementDecision {
   shouldEvade: boolean;
 }
 
+export interface ProjectileThreatAssessment {
+  projectileIndex: number;
+  timeToClosestS: number;
+  missDistance: number;
+  clearance: number;
+  score: number;
+  evadeX: number;
+  evadeY: number;
+}
+
+function stableUnitPhase(id: string): number {
+  let hash = 2166136261;
+  for (let i = 0; i < id.length; i += 1) {
+    hash ^= id.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0) / 0xffffffff * Math.PI * 2;
+}
+
+/** Predict closest approaches so movement reacts to bullets that will hit, not merely nearby bullets. */
+export function assessProjectileThreats(unit: UnitInstance, state: BattleState): ProjectileThreatAssessment[] {
+  const assessments: ProjectileThreatAssessment[] = [];
+  for (let projectileIndex = 0; projectileIndex < state.projectiles.length; projectileIndex += 1) {
+    const projectile = state.projectiles[projectileIndex];
+    if (projectile.side === unit.side) continue;
+    const relativeX = unit.x - projectile.x;
+    const relativeY = unit.y - projectile.y;
+    const speedSq = projectile.vx * projectile.vx + projectile.vy * projectile.vy;
+    if (speedSq < 1) continue;
+    const rawTime = (relativeX * projectile.vx + relativeY * projectile.vy) / speedSq;
+    if (rawTime < 0 || rawTime > 1.15) continue;
+    const closestX = projectile.x + projectile.vx * rawTime;
+    const closestY = projectile.y + projectile.vy * rawTime + 0.5 * projectile.gravity * rawTime * rawTime;
+    const missX = unit.x - closestX;
+    const missY = unit.y - closestY;
+    const missDistance = Math.hypot(missX, missY);
+    const clearance = missDistance - unit.radius - projectile.r;
+    const urgency = 1 - rawTime / 1.15;
+    const proximity = clamp(1 - clearance / Math.max(18, unit.radius * 1.7), 0, 1);
+    const perpendicularX = -projectile.vy;
+    const perpendicularY = projectile.vx;
+    const norm = Math.hypot(perpendicularX, perpendicularY) || 1;
+    const sign = (missX * perpendicularX + missY * perpendicularY) >= 0 ? 1 : -1;
+    assessments.push({
+      projectileIndex,
+      timeToClosestS: rawTime,
+      missDistance,
+      clearance,
+      score: proximity * (0.35 + urgency * 0.65),
+      evadeX: perpendicularX / norm * sign,
+      evadeY: perpendicularY / norm * sign,
+    });
+  }
+  return assessments.sort((a, b) => b.score - a.score);
+}
+
 export function computeMovementDecision(
   unit: UnitInstance,
   state: BattleState,
@@ -23,39 +79,12 @@ export function computeMovementDecision(
 
   let evadeX = 0;
   let evadeY = 0;
-  let highestThreat = 0;
-
-  for (const projectile of state.projectiles) {
-    if (projectile.side === unit.side) {
-      continue;
-    }
-    const rx = unit.x - projectile.x;
-    const ry = unit.y - projectile.y;
-    const pvx = projectile.vx;
-    const pvy = projectile.vy;
-    const pv2 = pvx * pvx + pvy * pvy;
-    if (pv2 < 1) {
-      continue;
-    }
-    const t = clamp((rx * pvx + ry * pvy) / pv2, 0, 0.75);
-    const cx = projectile.x + pvx * t;
-    const cy = projectile.y + pvy * t;
-    const mdx = unit.x - cx;
-    const mdy = unit.y - cy;
-    const miss = Math.hypot(mdx, mdy);
-    const threat = 1 / Math.max(22, miss);
-    if (threat > highestThreat) {
-      highestThreat = threat;
-      const perpX = -pvy;
-      const perpY = pvx;
-      const norm = Math.hypot(perpX, perpY) || 1;
-      const sign = (mdx * perpX + mdy * perpY) >= 0 ? 1 : -1;
-      evadeX = (perpX / norm) * sign;
-      evadeY = (perpY / norm) * sign;
-    }
+  const primaryThreat = assessProjectileThreats(unit, state)[0];
+  if (primaryThreat) {
+    evadeX = primaryThreat.evadeX;
+    evadeY = primaryThreat.evadeY;
   }
-
-  const shouldEvade = highestThreat > 0.022;
+  const shouldEvade = (primaryThreat?.score ?? 0) > 0.28;
   const preferredMinRange = desiredRange * 0.74;
   const preferredMaxRange = desiredRange * 1.1;
 
@@ -75,8 +104,9 @@ export function computeMovementDecision(
   baseAx += strafeX * 0.22;
   const evadeWeight = shouldEvade ? 0.85 : 0.18;
   const jinkScale = shouldEvade ? (unit.type === "air" ? 0.35 : 0.2) : (unit.type === "air" ? 0.16 : 0.09);
-  const randomJinkX = (Math.random() - 0.5) * jinkScale * dt * 60;
-  const randomJinkY = (Math.random() - 0.5) * jinkScale * dt * 60;
+  const jinkPhase = unit.aiStateTimer * 8.3 + stableUnitPhase(unit.id);
+  const randomJinkX = Math.sin(jinkPhase) * jinkScale * 0.5 * dt * 60;
+  const randomJinkY = Math.cos(jinkPhase * 0.83) * jinkScale * 0.5 * dt * 60;
 
   return {
     ax: clamp(baseAx + evadeX * evadeWeight + randomJinkX, -1.4, 1.4),

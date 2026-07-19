@@ -62,6 +62,10 @@ function readOptionalInt(value: unknown): number | undefined {
   return Math.floor(value);
 }
 
+function readOptionalColor(value: unknown): string | undefined {
+  return typeof value === "string" && /^#[0-9a-fA-F]{6}$/.test(value) ? value : undefined;
+}
+
 export function computeTemplateGasCost(
   template: Pick<UnitTemplate, "structure" | "attachments">,
   partCatalog?: ReadonlyArray<PartDefinition>,
@@ -428,7 +432,7 @@ export function cloneTemplate(template: UnitTemplate): UnitTemplate {
     name: template.name,
     type: template.type,
     gasCost: template.gasCost,
-    structure: template.structure.map((cell) => ({ partId: cell.partId, x: cell.x, y: cell.y })),
+    structure: template.structure.map((cell) => ({ partId: cell.partId, x: cell.x, y: cell.y, color: cell.color })),
     attachments: template.attachments.map((attachment) => ({
       component: attachment.component,
       partId: attachment.partId,
@@ -490,6 +494,7 @@ export function parseTemplate(input: unknown, options: ParseTemplateOptions = {}
       partId,
       x: readOptionalInt(record.x),
       y: readOptionalInt(record.y),
+      color: readOptionalColor(record.color),
     });
   }
 
