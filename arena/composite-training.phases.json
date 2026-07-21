@@ -33,10 +33,16 @@
       "initialUnitsPerSide": 4,
       "seeds": 16,
       "templateNames": ["*"],
-      "battlefield": { "width": 1000, "height": 1000, "groundHeight": 400 },
+      "battlefield": { "width": 2000, "height": 1000, "groundHeight": 400 },
       "opponentMode": "leaderboard-nearby",
       "leaderboard": { "opponentCount": 6 },
-      "maxSimSeconds": 60
+      "maxSimSeconds": 120,
+      "nodeDefense": 1,
+      "baseHp": 1200,
+      "playerGas": 0,
+      "enemyGas": 0,
+      "spawnBurst": 1,
+      "spawnMaxActive": 4
     }
   ]
 }

@@ -31,7 +31,7 @@ import {
   PROJECTILE_SPEED,
   getAircraftAltitudeBonus,
 } from "../../config/balance/range.ts";
-import { applyHitToUnit, applyStructureRecovery } from "../../simulation/combat/damage-model.ts";
+import { applyHitToUnit, applyStructureRecovery, scaleDamageByRemainingPenetration } from "../../simulation/combat/damage-model.ts";
 import { applyRecoilForAttachment, getAliveWeaponAttachments } from "../../simulation/combat/recoil.ts";
 import { clamp } from "../../simulation/physics/impulse-model.ts";
 import { canOperate } from "../../simulation/units/control-unit-rules.ts";
@@ -704,13 +704,21 @@ export class BattleSession {
         continue;
       }
       if (!canOperate(unit)) {
-        unit.vx = 0;
-        unit.vy = 0;
-        unit.vibrate = 0;
         if (unit.id === this.playerControlledId || unit.id === this.selectedUnitId) {
           this.clearControlSelection();
         }
-        continue;
+        if (unit.type === "air") {
+          if (!unit.airDropActive) {
+            unit.airDropActive = true;
+            unit.airDropTargetY = laneBounds.groundMinY + Math.random() * (laneBounds.groundMaxY - laneBounds.groundMinY);
+            unit.aiDebugDecisionPath = "air-control-loss-drop";
+          }
+        } else {
+          unit.vx = 0;
+          unit.vy = 0;
+          unit.vibrate = 0;
+          continue;
+        }
       }
       this.refreshUnitMobility(unit);
 
@@ -727,7 +735,6 @@ export class BattleSession {
         }
       }
 
-      this.enforceWeaponComputingBudget(unit);
       this.activateEscapeIfUnavailable(unit);
 
       const isControlled = unit.side === "player" && unit.id === this.playerControlledId;
@@ -802,11 +809,6 @@ export class BattleSession {
       this.clampUnitToBattlefield(unit, laneBounds);
 
       if (unit.airDropActive) {
-        const base = unit.side === "player" ? this.state.playerBase : this.state.enemyBase;
-        if (this.isUnitInsideBase(unit, base)) {
-          this.onUnitReturnedToBase(unit);
-          continue;
-        }
         if (unit.y >= unit.airDropTargetY - 2) {
           this.onAirDropImpact(unit);
         }
@@ -844,13 +846,19 @@ export class BattleSession {
           projectile.vy = Math.sin(nextAngle) * speed;
         }
       }
-      const stepX = projectile.vx * dt;
-      projectile.vy += projectile.gravity * dt;
-      const stepY = projectile.vy * dt;
+      const instantBeam = projectile.weaponClass === "beam-precision";
+      const remainingRange = Math.max(0, projectile.maxDistance - projectile.traveledDistance);
+      const projectileSpeed = Math.max(1, Math.hypot(projectile.vx, projectile.vy));
+      const stepX = instantBeam ? (projectile.vx / projectileSpeed) * remainingRange : projectile.vx * dt;
+      if (!instantBeam) {
+        projectile.vy += projectile.gravity * dt;
+      }
+      const stepY = instantBeam ? (projectile.vy / projectileSpeed) * remainingRange : projectile.vy * dt;
       projectile.x += stepX;
       projectile.y += stepY;
       projectile.traveledDistance += Math.hypot(stepX, stepY);
-      if (projectile.traveledDistance >= projectile.maxDistance) {
+      const expireAfterCollision = instantBeam && projectile.traveledDistance >= projectile.maxDistance;
+      if (!instantBeam && projectile.traveledDistance >= projectile.maxDistance) {
         projectile.ttl = -1;
       }
       const exceededGroundDropLimit = projectile.sourceUnitType === "ground" &&
@@ -865,8 +873,13 @@ export class BattleSession {
         continue;
       }
 
-      for (const target of this.state.units) {
-        if (!target.alive || !canOperate(target) || target.side === projectile.side) {
+      const orderedTargets = this.state.units.slice().sort((a, b) => {
+        const aProgress = (a.x - projectile.prevX) * projectile.vx + (a.y - projectile.prevY) * projectile.vy;
+        const bProgress = (b.x - projectile.prevX) * projectile.vx + (b.y - projectile.prevY) * projectile.vy;
+        return aProgress - bProgress;
+      });
+      for (const target of orderedTargets) {
+        if (!target.alive || target.side === projectile.side) {
           continue;
         }
         if (target.type === "air") {
@@ -883,6 +896,7 @@ export class BattleSession {
             }
             const currentHp = Math.max(0, hitCell.breakThreshold - hitCell.strain);
             const penetrationCost = (hit.ignoreArmor ? 0 : Math.max(0, hitCell.armor) * PENETRATION_ARMOR_SCALER) + currentHp;
+            const impactDamage = projectile.currentDamage;
             projectile.remainingPenetration -= penetrationCost;
             const beforeDestroyed = new Set(target.structure.filter((cell) => cell.destroyed).map((cell) => cell.id));
             const beforeAliveAttachments = new Set(target.attachments.filter((attachment) => attachment.alive).map((attachment) => attachment.id));
@@ -890,9 +904,9 @@ export class BattleSession {
             const impactSide = projectile.vx >= 0 ? -1 : 1;
             let deliveredDamage = 0;
             if (!this.shouldIgnoreDamageForUnit(target)) {
-              deliveredDamage = applyHitToUnit(target, projectile.damage, projectile.hitImpulse, impactSide, hitCellId, hit.ignoreArmor).deliveredDamage;
+              deliveredDamage = applyHitToUnit(target, impactDamage, projectile.hitImpulse, impactSide, hitCellId, hit.ignoreArmor).deliveredDamage;
             }
-            this.queueImpactAudioEvent(projectile, hitCell, deliveredDamage, hit.ignoreArmor);
+            this.queueImpactAudioEvent(projectile, hitCell, impactDamage, deliveredDamage, hit.ignoreArmor);
             projectile.hitPartKeys.push(hitPartKey);
             this.hooks.addLog(`Hit ${target.name} (air) by projectile from ${projectile.sourceId}`, "warn");
             this.spawnBreakDebris(target, beforeDestroyed, beforeAliveAttachments, wasAlive);
@@ -900,7 +914,7 @@ export class BattleSession {
               x: projectile.x,
               y: target.y,
               life: 0.23 + Math.random() * 0.2,
-              size: 6 + projectile.damage * 0.05,
+              size: 6 + impactDamage * 0.05,
             });
             if (projectile.controlImpairDuration > 0) {
               this.applyControlImpair(target, projectile.controlImpairFactor, projectile.controlImpairDuration);
@@ -914,6 +928,7 @@ export class BattleSession {
               projectile.ttl = -1;
               break;
             }
+            projectile.currentDamage = scaleDamageByRemainingPenetration(projectile.damage, projectile.initialPenetration, projectile.remainingPenetration);
           }
           continue;
         }
@@ -931,6 +946,7 @@ export class BattleSession {
           }
           const currentHp = Math.max(0, hitCell.breakThreshold - hitCell.strain);
           const penetrationCost = (hit.ignoreArmor ? 0 : Math.max(0, hitCell.armor) * PENETRATION_ARMOR_SCALER) + currentHp;
+          const impactDamage = projectile.currentDamage;
           projectile.remainingPenetration -= penetrationCost;
           const beforeDestroyed = new Set(target.structure.filter((cell) => cell.destroyed).map((cell) => cell.id));
           const beforeAliveAttachments = new Set(target.attachments.filter((attachment) => attachment.alive).map((attachment) => attachment.id));
@@ -938,9 +954,9 @@ export class BattleSession {
           const impactSide = projectile.vx >= 0 ? -1 : 1;
           let deliveredDamage = 0;
           if (!this.shouldIgnoreDamageForUnit(target)) {
-            deliveredDamage = applyHitToUnit(target, projectile.damage, projectile.hitImpulse, impactSide, hitCellId, hit.ignoreArmor).deliveredDamage;
+            deliveredDamage = applyHitToUnit(target, impactDamage, projectile.hitImpulse, impactSide, hitCellId, hit.ignoreArmor).deliveredDamage;
           }
-          this.queueImpactAudioEvent(projectile, hitCell, deliveredDamage, hit.ignoreArmor);
+          this.queueImpactAudioEvent(projectile, hitCell, impactDamage, deliveredDamage, hit.ignoreArmor);
           projectile.hitPartKeys.push(hitPartKey);
           this.hooks.addLog(`Hit ${target.name} (ground) by projectile from ${projectile.sourceId}`, "warn");
           this.spawnBreakDebris(target, beforeDestroyed, beforeAliveAttachments, wasAlive);
@@ -948,7 +964,7 @@ export class BattleSession {
             x: projectile.x,
             y: target.y,
             life: 0.23 + Math.random() * 0.2,
-            size: 6 + projectile.damage * 0.05,
+            size: 6 + impactDamage * 0.05,
           });
           if (projectile.controlImpairDuration > 0) {
             this.applyControlImpair(target, projectile.controlImpairFactor, projectile.controlImpairDuration);
@@ -962,11 +978,15 @@ export class BattleSession {
             projectile.ttl = -1;
             break;
           }
+          projectile.currentDamage = scaleDamageByRemainingPenetration(projectile.damage, projectile.initialPenetration, projectile.remainingPenetration);
         }
       }
 
       if (projectile.ttl > 0) {
         this.applyBaseDamage(projectile);
+      }
+      if (expireAfterCollision) {
+        projectile.ttl = -1;
       }
     }
 
@@ -977,6 +997,10 @@ export class BattleSession {
       effect.life -= dt;
     }
     this.state.particles = this.state.particles.filter((effect) => effect.life > 0);
+    for (const beam of this.state.beamEffects) {
+      beam.life -= dt;
+    }
+    this.state.beamEffects = this.state.beamEffects.filter((beam) => beam.life > 0);
 
     for (const chunk of this.state.debris) {
       chunk.life -= dt;
@@ -1029,6 +1053,16 @@ export class BattleSession {
       this.ctx.fill();
     }
     this.ctx.globalAlpha = 1;
+
+    for (const beam of this.state.beamEffects) {
+      const alpha = clamp(beam.life / beam.maxLife, 0, 1);
+      this.ctx.strokeStyle = beam.side === "player" ? `rgba(143, 246, 255, ${alpha})` : `rgba(255, 143, 168, ${alpha})`;
+      this.ctx.lineWidth = 3;
+      this.ctx.beginPath();
+      this.ctx.moveTo(beam.x1, beam.y1);
+      this.ctx.lineTo(beam.x2, beam.y2);
+      this.ctx.stroke();
+    }
 
     for (const projectile of this.state.projectiles) {
       this.ctx.fillStyle = projectile.side === "player" ? "#9bd5ff" : "#ffb19a";
@@ -1105,6 +1139,7 @@ export class BattleSession {
       nodeId: null,
       units: [],
       projectiles: [],
+      beamEffects: [],
       particles: [],
       debris: [],
       playerBase: { hp: 1300, maxHp: 1300, x: playerBase.x, y: playerBase.y, w: playerBase.w, h: playerBase.h },
@@ -1547,7 +1582,7 @@ export class BattleSession {
         projectile.y > this.state.enemyBase.y &&
         projectile.y < this.state.enemyBase.y + this.state.enemyBase.h
       ) {
-        this.state.enemyBase.hp -= projectile.damage * 0.5;
+        this.state.enemyBase.hp -= projectile.currentDamage * 0.5;
         projectile.ttl = -1;
       }
       return;
@@ -1562,7 +1597,7 @@ export class BattleSession {
       projectile.y > this.state.playerBase.y &&
       projectile.y < this.state.playerBase.y + this.state.playerBase.h
     ) {
-      this.state.playerBase.hp -= projectile.damage * 0.5;
+      this.state.playerBase.hp -= projectile.currentDamage * 0.5;
       projectile.ttl = -1;
     }
   }
@@ -1581,7 +1616,7 @@ export class BattleSession {
     this.queueAudioEvent({ kind: "explosion", x: projectile.x, y: projectile.y, intensity: maxDamage, radius });
 
     for (const target of this.state.units) {
-      if (!target.alive || !canOperate(target) || target.side === projectile.side) {
+      if (!target.alive || target.side === projectile.side) {
         continue;
       }
       if (directHitUnitId && target.id === directHitUnitId) {
@@ -1681,6 +1716,17 @@ export class BattleSession {
     const projectileSpeed = shot.projectileSpeed;
     const gravity = shot.projectileGravity;
     const ttl = Math.max(2.0, effectiveRange / Math.max(120, projectileSpeed));
+    if (shot.weaponClass === "beam-precision") {
+      this.state.beamEffects.push({
+        x1: muzzle.x,
+        y1: muzzle.y,
+        x2: muzzle.x + ux * effectiveRange,
+        y2: muzzle.y + uy * effectiveRange,
+        side: unit.side,
+        life: 0.12,
+        maxLife: 0.12,
+      });
+    }
     this.state.projectiles.push({
       x: muzzle.x,
       y: muzzle.y,
@@ -1714,7 +1760,9 @@ export class BattleSession {
       initialVy: uy * projectileSpeed,
       sourceWeaponAttachmentId: attachmentId,
       damage: shot.damage,
+      currentDamage: shot.damage,
       hitImpulse: shot.impulse,
+      initialPenetration: shot.penetration,
       remainingPenetration: shot.penetration,
       r: Math.max(2, Math.sqrt(shot.damage) * 0.35),
     });
@@ -1786,7 +1834,7 @@ export class BattleSession {
     this.audioEvents.push(event);
   }
 
-  private queueImpactAudioEvent(projectile: BattleState["projectiles"][number], cell: UnitInstance["structure"][number], deliveredDamage: number, ignoreArmor = false): void {
+  private queueImpactAudioEvent(projectile: BattleState["projectiles"][number], cell: UnitInstance["structure"][number], incomingDamage: number, deliveredDamage: number, ignoreArmor = false): void {
     this.queueAudioEvent({
       kind: "impact",
       x: projectile.x,
@@ -1794,7 +1842,7 @@ export class BattleSession {
       weaponClass: projectile.weaponClass,
       materialColor: cell.color,
       armor: ignoreArmor ? 0 : cell.armor,
-      incomingDamage: projectile.damage,
+      incomingDamage,
       deliveredDamage,
     });
   }
@@ -2244,44 +2292,6 @@ export class BattleSession {
     return { enabled: true, cwRad: halfRad, ccwRad: halfRad };
   }
 
-  private getControlComputing(unit: UnitInstance): number {
-    let total = 0;
-    for (const attachment of unit.attachments) {
-      if (!attachment.alive) {
-        continue;
-      }
-      const stats = COMPONENTS[attachment.component];
-      if (stats.type !== "control") {
-        continue;
-      }
-      const part = this.getAttachmentPart(attachment);
-      total += Math.max(0, part?.partProperties?.computing ?? 1);
-    }
-    return total;
-  }
-
-  private getWeaponComputingCost(weaponAttachment: UnitInstance["attachments"][number]): number {
-    const part = this.getAttachmentPart(weaponAttachment);
-    return Math.max(0, part?.partProperties?.computingConsumption ?? 1);
-  }
-
-  private enforceWeaponComputingBudget(unit: UnitInstance): void {
-    const controlComputing = this.getControlComputing(unit);
-    let aliveWeapons = unit.attachments.filter((attachment) => attachment.alive && COMPONENTS[attachment.component].type === "weapon");
-    let usedComputing = aliveWeapons.reduce((sum, attachment) => sum + this.getWeaponComputingCost(attachment), 0);
-    while (usedComputing > controlComputing && aliveWeapons.length > 0) {
-      const idx = Math.floor(Math.random() * aliveWeapons.length);
-      const lostWeapon = aliveWeapons[idx];
-      if (!lostWeapon) {
-        break;
-      }
-      lostWeapon.alive = false;
-      this.hooks.addLog(`${unit.name} lost weapon control capacity: ${lostWeapon.component}`, "warn");
-      aliveWeapons = unit.attachments.filter((attachment) => attachment.alive && COMPONENTS[attachment.component].type === "weapon");
-      usedComputing = aliveWeapons.reduce((sum, attachment) => sum + this.getWeaponComputingCost(attachment), 0);
-    }
-  }
-
   private normalizeMovementSpeedMultiplier(multiplier: number | undefined): number {
     const finiteMultiplier = typeof multiplier === "number" && Number.isFinite(multiplier)
       ? multiplier
@@ -2344,11 +2354,9 @@ export class BattleSession {
 
     // --- Movement ---
     if (unit.airDropActive) {
-      const dirX = command.move.dirX;
-      unit.vx = Math.sign(dirX) * this.scaleMovementSpeed(unit.maxSpeed);
+      unit.vx = 0;
       unit.vy = Math.max(0, unit.vy);
-      const fallAccel = Math.max(0, AIR_DROP_GRAVITY - this.computeAirThrustSpeed(unit));
-      unit.vy += fallAccel * dt;
+      unit.vy += AIR_DROP_GRAVITY * dt;
     } else if (unit.type === "air") {
       this.applyAirThrustMovement(unit, dt, command.move.dirX, command.move.dirY, command.move.allowDescend ?? false);
     } else {
@@ -2547,7 +2555,13 @@ export class BattleSession {
     unit.aiDebugDecisionPath = decision.debug.decisionPath;
     unit.aiDebugFireBlockReason = decision.debug.fireBlockedReason;
 
-    if (!decision.firePlan) {
+    const plans = decision.firePlans.length > 0
+      ? decision.firePlans
+      : decision.firePlan
+        ? [decision.firePlan]
+        : [];
+    const primaryPlan = plans[0] ?? null;
+    if (!primaryPlan) {
       unit.aiDebugLastRange = 0;
       unit.aiDebugLastAngleRad = 0;
       unit.aiDebugPreferredWeaponSlot = -1;
@@ -2555,46 +2569,43 @@ export class BattleSession {
       return;
     }
 
-    unit.aiDebugLastRange = decision.firePlan.effectiveRange;
-    unit.aiDebugLastAngleRad = decision.firePlan.angleRad;
-    unit.aiDebugPreferredWeaponSlot = decision.firePlan.preferredSlot;
-    unit.aiDebugLeadTimeS = decision.firePlan.leadTimeS;
+    unit.aiDebugLastRange = primaryPlan.effectiveRange;
+    unit.aiDebugLastAngleRad = primaryPlan.angleRad;
+    unit.aiDebugPreferredWeaponSlot = primaryPlan.preferredSlot;
+    unit.aiDebugLeadTimeS = primaryPlan.leadTimeS;
 
     const slotCount = unit.weaponAttachmentIds.length;
     if (slotCount <= 0) {
       return;
     }
-    const start = ((decision.firePlan.preferredSlot % slotCount) + slotCount) % slotCount;
-    for (let offset = 0; offset < slotCount; offset += 1) {
-      const slot = (start + offset) % slotCount;
+    const plannedSlots = new Set<number>();
+    for (const plan of plans) {
+      const slot = ((plan.preferredSlot % slotCount) + slotCount) % slotCount;
+      if (plannedSlots.has(slot)) continue;
+      plannedSlots.add(slot);
       if (suppressedAutoSlots?.has(slot)) continue;
       if (!unit.weaponAutoFire[slot]) continue;
       if ((unit.weaponFireTimers[slot] ?? 0) > 0) continue;
       fire.push({
         slot,
-        angleRad: decision.firePlan.angleRad,
-        intendedTargetId: decision.firePlan.intendedTargetId,
-        intendedTargetY: decision.firePlan.intendedTargetY,
+        angleRad: plan.angleRad,
+        intendedTargetId: plan.intendedTargetId,
+        intendedTargetY: plan.intendedTargetY,
         manual: false,
       });
-      break;
     }
   }
 
   private airDropReturnToCommand(unit: UnitInstance, _dt: number): UnitCommand {
     const fire: FireRequest[] = [];
-    const base = unit.side === "player" ? this.state.playerBase : this.state.enemyBase;
-    const baseCenterX = base.x + base.w / 2;
-    const dx = baseCenterX - unit.x;
-    const dirX = Math.abs(dx) < 1 ? 0 : Math.sign(dx);
 
     // Set debug info
     unit.aiState = "evade";
     unit.aiDebugShouldEvade = true;
-    unit.aiDebugDecisionPath = unit.aiDebugDecisionPath || "air-drop-return";
+    unit.aiDebugDecisionPath = unit.aiDebugDecisionPath || "air-drop";
 
     // Try to fire at closest enemy while dropping
-    if (this.hasAvailableWeapons(unit)) {
+    if (canOperate(unit) && this.hasAvailableWeapons(unit)) {
       const target = this.pickTarget(unit);
       if (target) {
         unit.aiDebugTargetId = target.id;
@@ -2616,8 +2627,8 @@ export class BattleSession {
     }
 
     return {
-      move: { dirX, dirY: 0 },
-      facing: dirX < 0 ? -1 : dirX > 0 ? 1 : null,
+      move: { dirX: 0, dirY: 0 },
+      facing: null,
       fire,
     };
   }
@@ -2974,7 +2985,12 @@ export class BattleSession {
     const firepoint = this.getAttachmentFirepointWorld(unit, attachment);
     return {
       componentId: attachment.component,
+      weaponClass: stats.weaponClass ?? "rapid-fire",
       damage: attachment.stats?.damage ?? stats.damage,
+      penetration: attachment.stats?.penetration ?? stats.penetration ?? 0,
+      spreadDeg: attachment.stats?.spreadDeg ?? stats.spreadDeg ?? 0,
+      explosiveBlastRadius: attachment.stats?.explosiveBlastRadius ?? stats.explosive?.blastRadius ?? 0,
+      trackingTurnRateDegPerSec: attachment.stats?.trackingTurnRateDegPerSec ?? stats.tracking?.turnRateDegPerSec ?? 0,
       shootAngleDeg: attachment.stats?.shootAngleDeg ?? stats.shootAngleDeg,
       angleLimit: {
         hasAngleLimit: part?.partProperties?.hasAngleLimit,

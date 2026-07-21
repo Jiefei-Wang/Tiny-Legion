@@ -189,6 +189,12 @@ class BattleScene extends Phaser.Scene {
       }
     }
     for (const p of state.particles) g.fillStyle(0xf5c07a, Math.min(1, p.life / 0.4)).fillCircle(p.x, p.y, Math.max(1, p.size * (1 - p.life * 0.8)));
+    for (const beam of state.beamEffects) {
+      const alpha = Math.max(0, Math.min(1, beam.life / beam.maxLife));
+      const beamColor = beam.side === "player" ? 0x8ff6ff : 0xff8fa8;
+      g.lineStyle(7, beamColor, alpha * 0.18).lineBetween(beam.x1, beam.y1, beam.x2, beam.y2);
+      g.lineStyle(2, 0xffffff, alpha * 0.92).lineBetween(beam.x1, beam.y1, beam.x2, beam.y2);
+    }
     for (const p of state.projectiles) {
       const projectileColor = p.side === "player" ? 0x9bd5ff : 0xff9d81;
       g.lineStyle(Math.max(1.5, p.r * 0.8), projectileColor, 0.42).lineBetween(p.prevX, p.prevY, p.x, p.y);

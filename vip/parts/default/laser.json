@@ -1,6 +1,6 @@
 {
   "id": 17,
-  "name": "Precision Beam",
+  "name": "laser",
   "layer": "functional",
   "partType": "weapon",
   "partCategory": "beam",
@@ -45,9 +45,27 @@
     "requireEmptyStructureOffsets": [],
     "requireEmptyFunctionalOffsets": []
   },
+  "stats": {
+    "gasCost": 8,
+    "mass": 11,
+    "recoil": 2,
+    "hitImpulse": 2.5,
+    "damage": 5,
+    "range": 340,
+    "cooldown": 0.1,
+    "shootAngleDeg": 105,
+    "projectileSpeed": 20000,
+    "projectileGravity": 0,
+    "penetration": 0,
+    "spreadDeg": 0
+  },
   "partProperties": {
     "computingConsumption": 1,
+    "hasAngleLimit": false,
+    "bulletType": "laser",
     "fireSoundVolume": 1,
+    "explodeOnHit": false,
+    "needLoader": false,
     "maxCapacity": 1
   },
   "properties": {
@@ -62,6 +80,7 @@
   "tags": [
     "default",
     "weapon",
-    "beam"
+    "beam",
+    "laser"
   ]
 }

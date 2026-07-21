@@ -335,7 +335,7 @@ export function createBaselineShootAi(): ShootAiModule {
           x: weaponInput.firepointX + Math.cos(angleRad) * aimDistance,
           y: weaponInput.firepointY + Math.sin(angleRad) * aimDistance,
         };
-        const aim = adjustAimForWeaponPolicy(weaponInput.componentId, baseAim);
+        const aim = adjustAimForWeaponPolicy(weaponInput, baseAim);
         const angleAllowed = input.canShootAtAngle(
           weaponInput.componentId,
           aim.x - weaponInput.firepointX,
@@ -462,7 +462,7 @@ export function createHistoryWeightedShootAi(recencyPowerRaw = 1): ShootAiModule
           x: weaponInput.firepointX + Math.cos(angleRad) * aimDistance,
           y: weaponInput.firepointY + Math.sin(angleRad) * aimDistance,
         };
-        const aim = adjustAimForWeaponPolicy(weaponInput.componentId, baseAim);
+        const aim = adjustAimForWeaponPolicy(weaponInput, baseAim);
         const angleAllowed = input.canShootAtAngle(
           weaponInput.componentId,
           aim.x - weaponInput.firepointX,
@@ -585,7 +585,7 @@ export function createAutoregShootAi(alphaRaw: number): ShootAiModule {
           x: weaponInput.firepointX + Math.cos(angleRad) * aimDistance,
           y: weaponInput.firepointY + Math.sin(angleRad) * aimDistance,
         };
-        const aim = adjustAimForWeaponPolicy(weaponInput.componentId, baseAim);
+        const aim = adjustAimForWeaponPolicy(weaponInput, baseAim);
         const angleAllowed = input.canShootAtAngle(
           weaponInput.componentId,
           aim.x - weaponInput.firepointX,
@@ -704,7 +704,7 @@ export function createWeightedLagShootAi(alphaRaw: ReadonlyArray<number>): Shoot
           x: weaponInput.firepointX + Math.cos(angleRad) * aimDistance,
           y: weaponInput.firepointY + Math.sin(angleRad) * aimDistance,
         };
-        const aim = adjustAimForWeaponPolicy(weaponInput.componentId, baseAim);
+        const aim = adjustAimForWeaponPolicy(weaponInput, baseAim);
         const angleAllowed = input.canShootAtAngle(
           weaponInput.componentId,
           aim.x - weaponInput.firepointX,

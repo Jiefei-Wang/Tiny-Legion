@@ -9,7 +9,7 @@ export function getControlUnit(attachments: Attachment[]): Attachment | null {
 }
 
 export function validateSingleControlUnit(attachments: Attachment[]): boolean {
-  return attachments.some((attachment) => attachment.alive && COMPONENTS[attachment.component].type === "control");
+  return attachments.filter((attachment) => attachment.alive && COMPONENTS[attachment.component].type === "control").length === 1;
 }
 
 export function canOperate(unit: UnitInstance): boolean {

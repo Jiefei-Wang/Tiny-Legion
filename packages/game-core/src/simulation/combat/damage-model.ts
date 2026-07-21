@@ -11,6 +11,19 @@ export interface DamageApplicationResult {
   functionalDamage: number;
 }
 
+export function scaleDamageByRemainingPenetration(
+  baseDamage: number,
+  initialPenetration: number,
+  remainingPenetration: number,
+): number {
+  const safeDamage = Math.max(0, baseDamage);
+  if (initialPenetration <= 0) {
+    return safeDamage;
+  }
+  const ratio = Math.max(0, Math.min(1, remainingPenetration / initialPenetration));
+  return safeDamage * ratio;
+}
+
 export function applyHitToUnit(
   unit: UnitInstance,
   incomingDamage: number,
@@ -20,7 +33,7 @@ export function applyHitToUnit(
   ignoreArmor = false,
 ): DamageApplicationResult {
   const noDamage = (): DamageApplicationResult => ({ incomingDamage, armorDeducted: 0, deliveredDamage: 0, structureDamage: 0, functionalDamage: 0 });
-  if (!canOperate(unit)) {
+  if (!unit.alive) {
     return noDamage();
   }
   const cells = aliveStructureCells(unit.structure);

@@ -1,9 +1,9 @@
 {
-  "id": 2,
-  "name": "Cannon Loader",
+  "id": 3,
+  "name": "small control unit",
   "layer": "functional",
-  "partType": "loader",
-  "baseComponent": "cannonLoader",
+  "partType": "control",
+  "baseComponent": "control",
   "directional": false,
   "direction": "up",
   "anchor": {
@@ -17,7 +17,7 @@
       "structureOccupy": false,
       "functionalOccupy": true,
       "needStructureBehind": true,
-      "takeDamage": false,
+      "takeDamage": true,
       "attachPoint": false,
       "anchorPoint": true,
       "firePoint": false
@@ -33,8 +33,8 @@
       "isAttachPoint": false,
       "isAnchorPoint": true,
       "isShootingPoint": false,
-      "takesDamage": false,
-      "takesFunctionalDamage": false
+      "takesDamage": true,
+      "takesFunctionalDamage": true
     }
   ],
   "placement": {
@@ -44,22 +44,26 @@
     "requireEmptyStructureOffsets": [],
     "requireEmptyFunctionalOffsets": []
   },
+  "stats": {
+    "gasCost": 10,
+    "mass": 2
+  },
+  "partProperties": {
+    "computing": 8
+  },
   "properties": {
     "category": "functional",
-    "subcategory": "loader",
+    "subcategory": "control",
+    "materialAlpha": 1,
     "isEngine": false,
     "isWeapon": false,
-    "isLoader": true,
+    "isLoader": false,
     "isArmor": false,
-    "loaderServesTags": [
-      "heavy-shot"
-    ],
-    "loaderCooldownMultiplier": 0.95,
     "hasCoreTuning": false
   },
   "tags": [
     "default",
-    "support",
-    "loader"
+    "core",
+    "small"
   ]
 }

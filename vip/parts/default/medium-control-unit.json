@@ -1,10 +1,9 @@
 {
-  "id": 19,
-  "name": "Skyneedle AA Array",
+  "id": 4,
+  "name": "medium control unit",
   "layer": "functional",
-  "partType": "weapon",
-  "partCategory": "bullet",
-  "baseComponent": "rapidGun",
+  "partType": "control",
+  "baseComponent": "control",
   "directional": false,
   "direction": "up",
   "anchor": {
@@ -21,7 +20,18 @@
       "takeDamage": true,
       "attachPoint": false,
       "anchorPoint": true,
-      "firePoint": true
+      "firePoint": false
+    },
+    {
+      "x": 0,
+      "y": 1,
+      "structureOccupy": false,
+      "functionalOccupy": true,
+      "needStructureBehind": true,
+      "takeDamage": true,
+      "attachPoint": false,
+      "anchorPoint": false,
+      "firePoint": false
     }
   ],
   "boxes": [
@@ -33,7 +43,19 @@
       "needsStructureBehind": true,
       "isAttachPoint": false,
       "isAnchorPoint": true,
-      "isShootingPoint": true,
+      "isShootingPoint": false,
+      "takesDamage": true,
+      "takesFunctionalDamage": true
+    },
+    {
+      "x": 0,
+      "y": 1,
+      "occupiesStructureSpace": false,
+      "occupiesFunctionalSpace": true,
+      "needsStructureBehind": true,
+      "isAttachPoint": false,
+      "isAnchorPoint": false,
+      "isShootingPoint": false,
       "takesDamage": true,
       "takesFunctionalDamage": true
     }
@@ -46,40 +68,25 @@
     "requireEmptyFunctionalOffsets": []
   },
   "stats": {
-    "recoil": 4,
-    "damage": 8,
-    "range": 720,
-    "cooldown": 0.08,
-    "shootAngleDeg": 360,
-    "projectileSpeed": 900,
-    "projectileGravity": 0,
-    "penetration": 18,
-    "spreadDeg": 0.7
+    "gasCost": 16,
+    "mass": 6
   },
   "partProperties": {
-    "computingConsumption": 1,
-    "directional": false,
-    "defaultDirection": "up",
-    "hasAngleLimit": false,
-    "cwAngle": 180,
-    "ccwAngle": 180,
-    "fireSoundVolume": 0.45,
-    "explodeOnHit": false,
-    "shootAngleDeg": 30,
-    "maxCapacity": 1
+    "computing": 14
   },
   "properties": {
-    "category": "weapon",
-    "subcategory": "anti-air-high-velocity",
+    "category": "functional",
+    "subcategory": "control",
+    "materialAlpha": 1,
     "isEngine": false,
-    "isWeapon": true,
+    "isWeapon": false,
     "isLoader": false,
     "isArmor": false,
     "hasCoreTuning": false
   },
   "tags": [
     "default",
-    "weapon",
-    "rapid-fire"
+    "core",
+    "medium"
   ]
 }

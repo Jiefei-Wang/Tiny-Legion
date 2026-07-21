@@ -1,6 +1,6 @@
 import type { MatchResult, MatchSpec } from "./match-types.ts";
 import { setMathRandomSeed } from "../lib/seeded-rng.ts";
-import { loadRuntimeMergedTemplates } from "./templates.ts";
+import { loadRuntimeMergedParts, loadRuntimeMergedTemplates } from "./templates.ts";
 import { mulberry32 } from "../lib/seeded-rng.ts";
 import { getSpawnFamily } from "../spawn/families.ts";
 import { BattleSession } from "../../../packages/game-core/src/gameplay/battle/battle-session.ts";
@@ -12,6 +12,10 @@ import {
 import { makeCompositeAiController } from "../ai/composite-controller.ts";
 import { structureIntegrity } from "../../../packages/game-core/src/simulation/units/structure-grid.ts";
 import { canOperate } from "../../../packages/game-core/src/simulation/units/control-unit-rules.ts";
+import { validateTemplateDetailed } from "../../../packages/game-core/src/templates/template-validation.ts";
+import type { UnitTemplate } from "../../../packages/game-core/src/types.ts";
+import type { SpawnRosterEntry } from "../spawn/spawn-schema.ts";
+import { resetUidCounter } from "../../../packages/game-core/src/core/ids/uid.ts";
 
 type GameBattleHooks = {
   addLog: (text: string, tone?: any) => void;
@@ -73,21 +77,28 @@ function aliveCount(units: any[], side: "player" | "enemy"): number {
 
 export async function runMatch(spec: MatchSpec): Promise<MatchResult> {
   setMathRandomSeed(spec.seed);
-  const allTemplates = await loadRuntimeMergedTemplates();
+  resetUidCounter();
+  const partCatalog = loadRuntimeMergedParts();
+  const allTemplates = await loadRuntimeMergedTemplates(partCatalog);
   const templatePatterns = Array.isArray(spec.templateNames) && spec.templateNames.length > 0
     ? spec.templateNames
     : ["*"];
-  const templates = allTemplates.filter((template: any) => {
+  const templates = allTemplates.filter((template) => {
     const id = String(template?.id ?? "");
-    if (!id) {
+    const name = String(template?.name ?? "");
+    if (!id && !name) {
       return false;
     }
-    return templatePatterns.some((pattern) => matchesTemplatePattern(id, String(pattern)));
+    return templatePatterns.some((pattern) => {
+      const normalized = String(pattern);
+      return matchesTemplatePattern(id, normalized) || matchesTemplatePattern(name, normalized);
+    });
   });
-  if (templates.length <= 0) {
+  const validTemplates = templates.filter((template) => validateTemplateDetailed(template, { partCatalog }).errors.length === 0);
+  if (validTemplates.length <= 0) {
     throw new Error(`runMatch: no templates matched pattern(s): ${templatePatterns.join(", ")}`);
   }
-  const templateById = new Map<number, any>(templates.map((t: any) => [Number(t.id), t] as const));
+  const templateById = new Map<number, UnitTemplate>(validTemplates.map((template) => [template.id, template] as const));
   const refundFactor = BATTLE_SALVAGE_REFUND_FACTOR;
 
   let playerGas = spec.playerGas;
@@ -125,7 +136,7 @@ export async function runMatch(spec: MatchSpec): Promise<MatchResult> {
   const battlefieldWidth = clamp(Math.floor(spec.battlefield?.width ?? BATTLEFIELD_WIDTH), 640, 4096);
   const battlefieldHeight = clamp(Math.floor(spec.battlefield?.height ?? BATTLEFIELD_HEIGHT), 360, 2160);
   const canvas = createMockCanvas(battlefieldWidth, battlefieldHeight);
-  const battle = new BattleSession(canvas, hooks, templates, {
+  const battle = new BattleSession(canvas, hooks, validTemplates, {
     aiControllers: {
       player: aiForSide("player"),
       enemy: aiForSide("enemy"),
@@ -134,6 +145,7 @@ export async function runMatch(spec: MatchSpec): Promise<MatchResult> {
     disableAutoEnemySpawns: true,
     disableEnemyMinimumPresence: true,
     disableDefaultStarters: true,
+    partCatalog,
   });
 
   const scenario = spec.scenario ?? { withBase: true, initialUnitsPerSide: 2 };
@@ -156,23 +168,34 @@ export async function runMatch(spec: MatchSpec): Promise<MatchResult> {
   }
   battle.clearControlSelection();
 
-  const rosterPreference = [1, 2, 3, 4, 5];
-  const availableTemplateIds = new Set<number>(templates.map((t: any) => Number(t.id)));
-  const roster = rosterPreference.filter((id) => availableTemplateIds.has(id));
-  if (roster.length === 0) {
-    for (const t of templates.slice(0, 6)) {
-      roster.push(Number(t.id));
-    }
-  }
+  const roster = Array.from(new Set(validTemplates.map((template) => template.id))).sort((a, b) => a - b);
+  const spawnRoster: SpawnRosterEntry[] = validTemplates.map((template) => ({
+    templateId: String(template.id),
+    gasCost: Math.max(0, template.gasCost),
+    unitType: template.type,
+    structureCells: template.structure.length,
+    weaponCount: template.attachments.filter((attachment) => {
+      const part = partCatalog.find((candidate) => candidate.id === attachment.partId);
+      return part?.partType === "weapon";
+    }).length,
+  }));
 
   const spawnRng = mulberry32((spec.seed ^ 0x2f7a1d) >>> 0);
 
   if (scenario.withBase) {
     // Symmetric starters (free and non-refundable, like headless smoke test semantics).
-    const starterTemplates = rosterPreference.filter((id) => availableTemplateIds.has(id)).slice(0, 2);
-    for (const templateId of starterTemplates) {
-      battle.arenaDeploy("player", templateId, { chargeGas: false, deploymentGasCost: 0, y: 300 });
-      battle.arenaDeploy("enemy", templateId, { chargeGas: false, deploymentGasCost: 0, y: 300 });
+    const unitsPerSide = Math.max(1, Math.floor(scenario.initialUnitsPerSide));
+    const starterRoster = [...roster];
+    for (let index = starterRoster.length - 1; index > 0; index -= 1) {
+      const swapIndex = Math.floor(spawnRng() * (index + 1));
+      [starterRoster[index], starterRoster[swapIndex]] = [starterRoster[swapIndex]!, starterRoster[index]!];
+    }
+    for (let index = 0; index < unitsPerSide; index += 1) {
+      const templateId = starterRoster[index % starterRoster.length] ?? null;
+      if (!templateId) continue;
+      const y = 220 + spawnRng() * 260;
+      battle.arenaDeploy("player", templateId, { chargeGas: false, deploymentGasCost: 0, y });
+      battle.arenaDeploy("enemy", templateId, { chargeGas: false, deploymentGasCost: 0, y });
     }
   } else {
     const unitsPerSide = Math.max(1, Math.floor(scenario.initialUnitsPerSide));
@@ -265,10 +288,10 @@ export async function runMatch(spec: MatchSpec): Promise<MatchResult> {
     let minInterval = spawnIntervalS;
     for (let i = 0; i < spawnBurst; i += 1) {
       const playerDecision = spawnFamilyPlayer
-        ? spawnFamilyPlayer.pick(spec.spawnPlayer?.params ?? {}, roster.map((id) => String(id)), spawnRng, { gas: playerGas, capRemaining: playerCapRemaining })
+        ? spawnFamilyPlayer.pick(spec.spawnPlayer?.params ?? {}, spawnRoster, spawnRng, { gas: playerGas, capRemaining: playerCapRemaining })
         : { templateId: null, intervalS: spawnIntervalS };
       const enemyDecision = spawnFamilyEnemy
-        ? spawnFamilyEnemy.pick(spec.spawnEnemy?.params ?? {}, roster.map((id) => String(id)), spawnRng, { gas: s.enemyGas, capRemaining: enemyCapRemaining })
+        ? spawnFamilyEnemy.pick(spec.spawnEnemy?.params ?? {}, spawnRoster, spawnRng, { gas: s.enemyGas, capRemaining: enemyCapRemaining })
         : { templateId: null, intervalS: spawnIntervalS };
 
       minInterval = Math.min(minInterval, playerDecision.intervalS, enemyDecision.intervalS);
@@ -321,8 +344,18 @@ export async function runMatch(spec: MatchSpec): Promise<MatchResult> {
   const state1 = battle.getState();
   if (state1.active && !state1.outcome) {
     if (scenario.withBase) {
-      const victory = state1.enemyBase.hp <= state1.playerBase.hp;
-      battle.forceEnd(victory, "Arena deadline reached");
+      const baseHpDelta = state1.playerBase.hp - state1.enemyBase.hp;
+      const integrityFor = (side: "player" | "enemy"): number => state1.units
+        .filter((unit) => unit.alive && canOperate(unit) && unit.side === side)
+        .reduce((total, unit) => total + structureIntegrity(unit), 0);
+      const integrityDelta = integrityFor("player") - integrityFor("enemy");
+      if (Math.abs(baseHpDelta) > 1e-6) {
+        battle.forceEnd(baseHpDelta > 0, "Arena deadline reached (base HP)");
+      } else if (Math.abs(integrityDelta) > 1e-6) {
+        battle.forceEnd(integrityDelta > 0, "Arena deadline reached (unit integrity)");
+      } else {
+        battle.forceEnd(false, "Arena deadline reached (tie)");
+      }
     } else {
       const alivePlayer = aliveCount(state1.units, "player");
       const aliveEnemy = aliveCount(state1.units, "enemy");
@@ -361,6 +394,10 @@ export async function runMatch(spec: MatchSpec): Promise<MatchResult> {
 
   const playerOutcome: "win" | "tie" | "loss" = tie ? "tie" : Boolean(outcome.victory) ? "win" : "loss";
   const enemyOutcome: "win" | "tie" | "loss" = tie ? "tie" : Boolean(outcome.victory) ? "loss" : "win";
+  const operationalUnits = (side: "player" | "enemy") => finalState.units
+    .filter((unit) => unit.alive && canOperate(unit) && unit.side === side);
+  const playerOperationalUnits = operationalUnits("player");
+  const enemyOperationalUnits = operationalUnits("enemy");
 
   return {
     spec,
@@ -387,6 +424,14 @@ export async function runMatch(spec: MatchSpec): Promise<MatchResult> {
         gasWorthDelta: worth1Enemy - worth0Enemy,
         score: scoreFor(enemyOutcome, worth1Enemy - worth0Enemy),
       },
+    },
+    final: {
+      playerBaseHp: finalState.playerBase.hp,
+      enemyBaseHp: finalState.enemyBase.hp,
+      playerOperationalUnits: playerOperationalUnits.length,
+      enemyOperationalUnits: enemyOperationalUnits.length,
+      playerUnitIntegrity: playerOperationalUnits.reduce((total, unit) => total + structureIntegrity(unit), 0),
+      enemyUnitIntegrity: enemyOperationalUnits.reduce((total, unit) => total + structureIntegrity(unit), 0),
     },
     replay: {
       seed: spec.seed,

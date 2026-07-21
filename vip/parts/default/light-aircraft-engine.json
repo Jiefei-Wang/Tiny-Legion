@@ -1,12 +1,12 @@
 {
-  "id": 6,
-  "name": "Engine S",
+  "id": 9,
+  "name": "light aircraft engine",
   "layer": "functional",
   "partType": "engine",
-  "partCategory": "vehicle",
-  "baseComponent": "engineS",
+  "partCategory": "jet",
+  "baseComponent": "jetEngine",
   "directional": false,
-  "direction": "up",
+  "direction": "right",
   "anchor": {
     "x": 0,
     "y": 0
@@ -18,7 +18,7 @@
       "structureOccupy": false,
       "functionalOccupy": true,
       "needStructureBehind": true,
-      "takeDamage": false,
+      "takeDamage": true,
       "attachPoint": false,
       "anchorPoint": true,
       "firePoint": false
@@ -34,8 +34,8 @@
       "isAttachPoint": false,
       "isAnchorPoint": true,
       "isShootingPoint": false,
-      "takesDamage": false,
-      "takesFunctionalDamage": false
+      "takesDamage": true,
+      "takesFunctionalDamage": true
     }
   ],
   "placement": {
@@ -45,19 +45,33 @@
     "requireEmptyStructureOffsets": [],
     "requireEmptyFunctionalOffsets": []
   },
+  "stats": {
+    "gasCost": 10,
+    "mass": 14,
+    "power": 150,
+    "maxSpeed": 320
+  },
+  "partProperties": {
+    "power": 150,
+    "maxSpeed": 320,
+    "powerGround": false,
+    "powerAir": true
+  },
   "properties": {
     "category": "functional",
-    "subcategory": "engine-ground",
+    "subcategory": "engine-air",
+    "materialAlpha": 1,
     "isEngine": true,
     "isWeapon": false,
     "isLoader": false,
     "isArmor": false,
-    "engineType": "ground",
+    "engineType": "air",
     "hasCoreTuning": false
   },
   "tags": [
     "default",
     "mobility",
-    "ground"
+    "air",
+    "light"
   ]
 }

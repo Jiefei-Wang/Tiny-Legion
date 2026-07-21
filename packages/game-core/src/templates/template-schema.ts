@@ -166,18 +166,6 @@ export function sanitizeTemplatePlacement(
     let blocked = false;
     if (anchor) {
       if (!blocked) {
-        for (const offset of placement?.requireStructureOffsets ?? []) {
-          const rotated = rotateOffsetByQuarter(offset.x, offset.y, normalizedRotate);
-          const x = anchor.x + rotated.x;
-          const y = anchor.y + rotated.y;
-          if (!structureCoords.has(`${x},${y}`)) {
-            blocked = true;
-            break;
-          }
-        }
-      }
-
-      if (!blocked) {
         for (const offset of placement?.requireEmptyStructureOffsets ?? []) {
           const rotated = rotateOffsetByQuarter(offset.x, offset.y, normalizedRotate);
           const x = anchor.x + rotated.x;
@@ -202,21 +190,9 @@ export function sanitizeTemplatePlacement(
       }
 
       if (!blocked) {
-        const requireStructureOnFunctional = placement?.requireStructureOnFunctionalOccupiedBoxes ?? true;
-        const requireStructureOnStructure = placement?.requireStructureOnStructureOccupiedBoxes ?? true;
         for (const item of occupancyKeys) {
           if (item.coordKey === null) {
             continue;
-          }
-          const needsStructureForFunctional = item.needsStructureBehind || (item.occupiesFunctionalSpace && requireStructureOnFunctional);
-          const needsStructureForAttachPoint = item.isAttachPoint;
-          if ((needsStructureForFunctional || needsStructureForAttachPoint) && !structureCoords.has(item.coordKey)) {
-            blocked = true;
-            break;
-          }
-          if (item.occupiesStructureSpace && requireStructureOnStructure && !structureCoords.has(item.coordKey)) {
-            blocked = true;
-            break;
           }
           if (item.occupiesStructureSpace && structureCoords.has(item.coordKey)) {
             blocked = true;

@@ -17,7 +17,7 @@ import { parsePartDefinition } from "../../../packages/game-core/src/parts/part-
 
 async function fetchPartCollection(path: string): Promise<PartDefinition[]> {
   try {
-    const response = await fetch(path);
+    const response = await fetch(path, { cache: "no-store" });
     if (!response.ok) {
       return [];
     }
@@ -54,16 +54,23 @@ export async function saveUserPartToStore(part: PartDefinition): Promise<boolean
   }
 }
 
-export async function saveDefaultPartToStore(part: PartDefinition): Promise<boolean> {
+export async function saveDefaultPartToStore(part: PartDefinition): Promise<PartDefinition | null> {
   try {
     const response = await fetch(`/__parts/default/${part.id}`, {
       method: "PUT",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(part),
+      cache: "no-store",
     });
-    return response.ok;
+    if (!response.ok) {
+      return null;
+    }
+    const body = await response.json().catch(() => null) as { part?: unknown } | null;
+    // Older already-running dev middleware may return only { ok: true }.
+    // The submitted snapshot is still the authoritative value for this save.
+    return (body?.part ? parsePartDefinition(body.part) : null) ?? part;
   } catch {
-    return false;
+    return null;
   }
 }
 

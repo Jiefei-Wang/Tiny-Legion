@@ -1,10 +1,3 @@
-import { runSingleMatch } from "./match/run-single-match.ts";
-import { runReplay } from "./replay/run-replay.ts";
-import { loadArenaDefaults } from "./config/arena-config.ts";
-import { openReplayUiFromFile } from "./replay/open-replay-ui.ts";
-import { runCompositeTraining } from "./train/run-composite-training.ts";
-import { evaluateAiTiers } from "./eval/evaluate-ai-tiers.ts";
-
 type Args = Record<string, string | boolean>;
 
 function parseArgs(argv: string[]): { cmd: string; args: Args } {
@@ -65,8 +58,10 @@ function asShootFamily(
 
 async function main(): Promise<void> {
   const { cmd, args } = parseArgs(process.argv.slice(2));
+  const { loadArenaDefaults } = await import("./config/arena-config.ts");
   const defaults = loadArenaDefaults();
   if (cmd === "match") {
+    const { runSingleMatch } = await import("./match/run-single-match.ts");
     const playerCompositePath = typeof args.playerComposite === "string" ? args.playerComposite : null;
     const enemyCompositePath = typeof args.enemyComposite === "string" ? args.enemyComposite : null;
     const seed = asNumber(args.seed, Date.now() % 1_000_000);
@@ -94,6 +89,7 @@ async function main(): Promise<void> {
     return;
   }
   if (cmd === "train-composite") {
+    const { runCompositeTraining } = await import("./train/run-composite-training.ts");
     const seed0 = asNumber(args.seed0, 100);
     const phaseSeeds = asNumber(args.phaseSeeds, defaults.seeds ?? 16);
     const generations = asNumber(args.generations, defaults.generations ?? 20);
@@ -145,14 +141,27 @@ async function main(): Promise<void> {
     }
     const headless = args.headless === true || args.headless === "true";
     if (headless) {
+      const { runReplay } = await import("./replay/run-replay.ts");
       await runReplay({ replayPath });
       return;
     }
+    const { openReplayUiFromFile } = await import("./replay/open-replay-ui.ts");
     await openReplayUiFromFile(replayPath);
     return;
   }
   if (cmd === "eval-tiers") {
+    const { evaluateAiTiers } = await import("./eval/evaluate-ai-tiers.ts");
     await evaluateAiTiers(asNumber(args.seeds, 10));
+    return;
+  }
+  if (cmd === "eval-levels") {
+    const { evaluateAiLevels } = await import("./eval/evaluate-ai-levels.ts");
+    await evaluateAiLevels(
+      asNumber(args.maxLevel, 5),
+      asNumber(args.seeds, 16),
+      asNumber(args.threshold, 0.6),
+      asNumber(args.minLevel, 2),
+    );
     return;
   }
   // eslint-disable-next-line no-console
@@ -164,6 +173,7 @@ async function main(): Promise<void> {
       "  match --seed 123 --out match.json",
       "  match --playerComposite player.json --enemyComposite enemy.json --seed 123 --out match.json",
       "  eval-tiers --seeds 10",
+      "  eval-levels --minLevel 2 --maxLevel 5 --seeds 16 --threshold 0.6",
       "  train-composite --scope all --generations 20 --population 24 --phaseSeeds 16 --nUnits 4",
       "  train-composite --scope shoot --shootSource new --movementSource baseline --targetSource baseline",
       "  train-composite --scope shoot --shootSource new --shootFamily dt-shoot-atan",

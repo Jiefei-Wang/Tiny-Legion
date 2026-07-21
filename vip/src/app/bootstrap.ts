@@ -73,7 +73,8 @@ import {
   getPartTypeFromComponent,
   getStructureMaterialDefaults,
 } from "./part-default-config.ts";
-import { makeCompositeAiController, type CompositeModuleSpec } from "../../../arena/src/ai/composite-controller.ts";
+import { levelCompositeConfig, makeCompositeAiController, type CompositeModuleSpec } from "../../../arena/src/ai/composite-controller.ts";
+import { MAX_CERTIFIED_AI_LEVEL } from "../../../packages/game-core/src/ai/composite/level-modules.ts";
 import type { MatchAiSpec } from "../../../arena/src/match/match-types.ts";
 import type {
   ComponentId,
@@ -227,7 +228,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         </section>
 
         <section class="right-panel">
-          <div class="card">
+          <div class="card context-inspector-card">
             <h3 id="contextInspectorTitle">Inspector</h3>
             <div id="selectedInfo" class="small"></div>
           </div>
@@ -504,79 +505,31 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     isUnranked?: boolean;
     winRate?: number;
     leaderboardScore?: number;
+    previousLevelWinRate?: number;
+    previousLevelRounds?: number;
+    previousLevelCertified?: boolean;
     wins?: number;
     spec?: MatchAiSpec;
     mtimeMs: number;
   };
-  const createSkillTierSpec = (tier: "low" | "medium" | "high"): MatchAiSpec => ({
+  const createLevelSpec = (level: number): MatchAiSpec => ({
     familyId: "composite",
     params: {},
-    composite: {
-      target: { familyId: `skill-${tier}-target`, params: {} },
-      movement: { familyId: `skill-${tier}-movement`, params: {} },
-      shoot: { familyId: `skill-${tier}-shoot`, params: {} },
-    },
+    composite: levelCompositeConfig(level),
   });
   let testArenaPlayerAiPreset: TestArenaAiPreset = "component-config";
   let testArenaEnemyAiPreset: TestArenaAiPreset = "component-config";
   let latestCompositeSpec: MatchAiSpec | null = null;
   let testArenaCompositeModelOptions: TestArenaCompositeModelOption[] = [
     { id: "custom-components", label: "Custom components (target/movement/shoot)" },
-    {
-      id: "builtin-baseline-composite",
-      label: "builtin: baseline composite",
-      spec: {
-        familyId: "composite",
-        params: {},
-        composite: {
-          target: { familyId: "baseline-target", params: {} },
-          movement: { familyId: "baseline-movement", params: {} },
-          shoot: { familyId: "baseline-shoot", params: {} },
-        },
-      },
-    },
-    { id: "builtin-skill-low-composite", label: "builtin: low skill", spec: createSkillTierSpec("low") },
-    { id: "builtin-skill-medium-composite", label: "builtin: medium skill", spec: createSkillTierSpec("medium") },
-    { id: "builtin-skill-high-composite", label: "builtin: high skill", spec: createSkillTierSpec("high") },
-    {
-      id: "builtin-dt-default-composite",
-      label: "builtin: dt composite (default params)",
-      spec: {
-        familyId: "composite",
-        params: {},
-        composite: {
-          target: { familyId: "dt-target", params: {} },
-          movement: { familyId: "dt-movement", params: {} },
-          shoot: { familyId: "dt-shoot", params: {} },
-        },
-      },
-    },
-    {
-      id: "builtin-dt-atan-default-composite",
-      label: "builtin: dt composite (atan shoot)",
-      spec: {
-        familyId: "composite",
-        params: {},
-        composite: {
-          target: { familyId: "dt-target", params: {} },
-          movement: { familyId: "dt-movement", params: {} },
-          shoot: { familyId: "dt-shoot-atan", params: {} },
-        },
-      },
-    },
-    {
-      id: "builtin-history-shoot-composite",
-      label: "builtin: baseline + history-shoot",
-      spec: {
-        familyId: "composite",
-        params: {},
-        composite: {
-          target: { familyId: "baseline-target", params: {} },
-          movement: { familyId: "baseline-movement", params: {} },
-          shoot: { familyId: "history-shoot", params: {} },
-        },
-      },
-    },
+    ...Array.from({ length: MAX_CERTIFIED_AI_LEVEL }, (_, index) => {
+      const level = index + 1;
+      return {
+        id: `builtin-level-${level}-composite`,
+        label: `builtin: L${level}`,
+        spec: createLevelSpec(level),
+      };
+    }),
   ];
   let testArenaCompositeModelSelections: Record<TestArenaSide, string> = {
     player: "custom-components",
@@ -777,6 +730,13 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     | "markEmptyStructure"
     | "markEmptyFunctional";
   type PartOpenFilter = "all" | "structure" | "control" | "engine" | "weapon" | "loader";
+  const CANONICAL_PART_CATEGORIES: Record<PartType, readonly string[]> = {
+    structure: ["light steel", "normal steel", "heavy steel"],
+    control: ["small control unit", "medium control unit", "large control unit"],
+    engine: ["light tank engine", "heavy tank engine", "light aircraft engine", "heavy aircraft engine"],
+    weapon: ["firearm", "cannons", "anti-tank gun", "laser"],
+    loader: ["cannons reloader", "anti-tank gun reloader"],
+  };
   type EditorScreenMode = "templateEditor" | "partEditor";
   type PartDesignerSlot = {
     occupiesFunctionalSpace: boolean;
@@ -818,7 +778,6 @@ export function bootstrap(options: BootstrapOptions = {}): void {
   let editorHoverMouseY = 0;
   let editorHoverActive = false;
   let editorStructureColor = MATERIALS.basic.color;
-  let editorStructureColorOnly = true;
   let battleViewOffsetX = 0;
   let battleViewOffsetY = 0;
   let battleViewScale = 1;
@@ -1467,67 +1426,16 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     const defaults: TestArenaCompositeModelOption[] = [
       testArenaCompositeModelOptions.find((entry) => entry.id === "custom-components")
         ?? { id: "custom-components", label: "Custom components (target/movement/shoot)" },
-      testArenaCompositeModelOptions.find((entry) => entry.id === "builtin-baseline-composite")
-        ?? {
-          id: "builtin-baseline-composite",
-          label: "builtin: baseline composite",
-          spec: {
-            familyId: "composite",
-            params: {},
-            composite: {
-              target: { familyId: "baseline-target", params: {} },
-              movement: { familyId: "baseline-movement", params: {} },
-              shoot: { familyId: "baseline-shoot", params: {} },
-            },
-          },
-        },
-      testArenaCompositeModelOptions.find((entry) => entry.id === "builtin-dt-default-composite")
-        ?? {
-          id: "builtin-dt-default-composite",
-          label: "builtin: dt composite (default params)",
-          spec: {
-            familyId: "composite",
-            params: {},
-            composite: {
-              target: { familyId: "dt-target", params: {} },
-              movement: { familyId: "dt-movement", params: {} },
-              shoot: { familyId: "dt-shoot", params: {} },
-            },
-          },
-        },
-      testArenaCompositeModelOptions.find((entry) => entry.id === "builtin-dt-atan-default-composite")
-        ?? {
-          id: "builtin-dt-atan-default-composite",
-          label: "builtin: dt composite (atan shoot)",
-          spec: {
-            familyId: "composite",
-            params: {},
-            composite: {
-              target: { familyId: "dt-target", params: {} },
-              movement: { familyId: "dt-movement", params: {} },
-              shoot: { familyId: "dt-shoot-atan", params: {} },
-            },
-          },
-        },
-      testArenaCompositeModelOptions.find((entry) => entry.id === "builtin-history-shoot-composite")
-        ?? {
-          id: "builtin-history-shoot-composite",
-          label: "builtin: baseline + history-shoot",
-          spec: {
-            familyId: "composite",
-            params: {},
-            composite: {
-              target: { familyId: "baseline-target", params: {} },
-              movement: { familyId: "baseline-movement", params: {} },
-              shoot: { familyId: "history-shoot", params: {} },
-            },
-          },
-        },
+      ...Array.from({ length: MAX_CERTIFIED_AI_LEVEL }, (_, index) => {
+        const level = index + 1;
+        return testArenaCompositeModelOptions.find((entry) => entry.id === `builtin-level-${level}-composite`)
+          ?? {
+            id: `builtin-level-${level}-composite`,
+            label: `builtin: L${level}`,
+            spec: createLevelSpec(level),
+          };
+      }),
     ];
-    for (const id of ["builtin-skill-high-composite", "builtin-skill-medium-composite", "builtin-skill-low-composite"]) {
-      const option = testArenaCompositeModelOptions.find((entry) => entry.id === id);
-      if (option) defaults.splice(2, 0, option);
-    }
     const merged: TestArenaCompositeModelOption[] = [...defaults];
     try {
       const res = await fetch("/__arena/composite/models", { method: "GET" });
@@ -2551,6 +2459,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     debugMenu.open = false;
     developerMenu.open = false;
     appShell.classList.toggle("editor-mode", next === "templateEditor" || next === "partEditor");
+    appShell.classList.toggle("craft-editor-mode", next === "templateEditor");
     appShell.classList.toggle("scenario-mode", next === "testArena");
     contextInspectorTitle.textContent = next === "templateEditor"
       ? "Craft Inspector"
@@ -2893,35 +2802,33 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       }
       ensureEditorSelectionForLayer();
       const catalog = getEditorCatalogItems();
-      const validation = validateTemplateDetailed(editorDraft, { partCatalog: parts });
-      const controlCount = editorDraft.attachments.filter((attachment) => attachment.component === "control").length;
-      const displayCount = (editorDraft.display ?? []).length;
-      const materialUsage = getEditorMaterialBreakdown();
-      const functionalUsage = editorDraft.attachments.length;
-      const errorSummary = validation.errors.length > 0 ? validation.errors.join(" | ") : "none";
-      const warningSummary = validation.warnings.length > 0 ? validation.warnings.join(" | ") : "none";
-      const selectedDirectionalPart = resolvePartForSelection(editorSelection);
-      const selectedFacingQuarter = getDirectionalFacingQuarter(
-        selectedDirectionalPart,
-        isDirectionalPart(selectedDirectionalPart) ? editorWeaponRotateQuarter : 0,
-      );
-      const selectedDirectionText = shouldShowTemplateDirectionForPart(selectedDirectionalPart)
-        ? `Weapon direction: ${getRotationSymbol(selectedFacingQuarter)} (${selectedFacingQuarter * 90}deg)${isDirectionalPart(selectedDirectionalPart) ? "" : " | fixed"}`
-        : "Weapon direction: n/a";
-      const paletteCards = Array.from({ length: 30 }, (_, index) => {
-        const item = catalog[index];
-        if (!item) {
-          return `<div class="editor-comp-card empty"></div>`;
-        }
+      const renderPaletteCard = (item: EditorCatalogItem): string => {
         const selectedClass = item.value === editorSelection ? "selected" : "";
         return `<button class="editor-comp-card ${selectedClass}" data-comp-value="${item.value}" data-comp-detail="${item.detail}" data-comp-title="${item.title}" title="${item.title}">
           <span class="editor-thumb ${editorLayer === "functional" ? "functional" : ""}">${item.thumb}</span>
           <span class="editor-comp-name">${item.title}</span>
         </button>`;
-      }).join("");
+      };
+      const paletteContent = editorLayer === "functional"
+        ? (["control", "engine", "weapon", "loader"] as const).map((partType) => {
+            const typeItems = catalog.filter((item) => {
+              if (typeof item.value !== "number") {
+                return false;
+              }
+              const part = parts.find((candidate) => candidate.id === item.value);
+              return part ? getResolvedPartType(part) === partType : false;
+            });
+            if (typeItems.length === 0) {
+              return "";
+            }
+            return `<section class="editor-comp-group">
+              <div class="editor-comp-group-title">${partType}</div>
+              <div class="editor-comp-grid">${typeItems.map(renderPaletteCard).join("")}</div>
+            </section>`;
+          }).join("")
+        : `<div class="editor-comp-grid">${catalog.map(renderPaletteCard).join("")}</div>`;
       selectedInfo.innerHTML = `
         <div><strong>${editorDraft.name}</strong> (${editorDraft.type})</div>
-        <div class="small">Workspace: Template Editor</div>
         <div class="row">
           <button id="editorLayerStructureRight" class="${editorLayer === "structure" ? "active" : ""}">Structure</button>
           <button id="editorLayerFunctionalRight" class="${editorLayer === "functional" ? "active" : ""}">Functional</button>
@@ -2939,18 +2846,9 @@ export function bootstrap(options: BootstrapOptions = {}): void {
             </select>
           </label>
         </div>
-        <div class="small">Structure: ${editorDraft.structure.length} | Functional: ${functionalUsage} | Display: ${displayCount}</div>
-        ${editorLayer === "structure" ? `<div class="row"><label class="small">Armor color <input id="editorStructureColor" type="color" value="${editorStructureColor}" title="Tint newly placed or repainted structure blocks" /></label>
-        <label class="small"><input id="editorStructureColorOnly" type="checkbox" ${editorStructureColorOnly ? "checked" : ""} /> Color only</label></div>
-        <div class="small">With Color only enabled, click an existing block to tint it without changing its armor material or stats.</div>` : ""}
-        <div class="small">Control Units: ${controlCount}</div>
-        <div class="small">${selectedDirectionText}</div>
-        <div class="small">Placement: ${editorPlaceByCenter ? "center-on-click" : "anchor-on-click"}</div>
-        <div class="small">Material usage: ${materialUsage}</div>
-        <div class="small bad">Errors (${validation.errors.length}): ${errorSummary}</div>
-        <div class="small warn">Warnings (${validation.warnings.length}): ${warningSummary}</div>
+        ${editorLayer === "structure" ? `<div class="row"><label class="small">Block color <input id="editorStructureColor" type="color" value="${editorStructureColor}" title="Tint the selected structure block when placing it" /></label></div>` : ""}
         <div class="editor-comp-scroll">
-          <div class="editor-comp-grid">${paletteCards}</div>
+          ${paletteContent}
         </div>
       `;
       return;
@@ -3009,7 +2907,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       if (isPartEditorScreen()) {
         weaponHud.innerHTML = `<div><strong>Part Designer</strong></div><div class="small">Tool=${partDesignerTool}. Left-click applies the selected tool, right-click erases a box, right-drag pans, and wheel zooms. Q/E rotates preview for directional parts.</div>`;
       } else {
-        weaponHud.innerHTML = `<div><strong>Object Editor</strong></div><div class="small">Layer=${editorLayer} | Mode=${editorDeleteMode ? "delete" : "place"}. Left-click places/deletes by mode, right-click deletes (functional first, then structure), right-drag pans, wheel zooms. Q/E = weapon rotate 90deg (ccw/cw). Display items attach to structure cells only.</div>`;
+        weaponHud.innerHTML = `<div class="small">${editorLayer} | ${editorDeleteMode ? "delete" : "place"} | Left: apply | Right: remove | Drag: pan | Wheel: zoom${isCurrentEditorSelectionRotatable() ? " | Q: rotate 90° counterclockwise | E: rotate 90° clockwise" : ""}</div>`;
       }
       return;
     }
@@ -3460,34 +3358,15 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     }>,
     anchorCoord: { x: number; y: number },
   ): { ok: boolean; reason: string | null } => {
-    const placement = part.placement;
     const currentGroupId = editorFunctionalSlots[anchorSlot]?.groupId ?? -1;
-    const requireStructureOnFunctional = placement?.requireStructureOnFunctionalOccupiedBoxes ?? true;
-    const requireStructureOnStructure = placement?.requireStructureOnStructureOccupiedBoxes ?? true;
 
     for (const footprint of footprintSlots) {
-      const needsStructureForFunctional = footprint.needsStructureBehind || (footprint.occupiesFunctionalSpace && requireStructureOnFunctional);
-      const needsStructureForAttachPoint = footprint.isAttachPoint;
-      if ((needsStructureForFunctional || needsStructureForAttachPoint) && !editorStructureSlots[footprint.slot]) {
-        return { ok: false, reason: needsStructureForAttachPoint ? "Attach point requires structure support at target cell" : "Functional occupied boxes must sit on structure cells" };
-      }
-      if (footprint.occupiesStructureSpace && requireStructureOnStructure && !editorStructureSlots[footprint.slot]) {
-        return { ok: false, reason: "Structure occupied boxes require structure support" };
-      }
       if (footprint.occupiesStructureSpace && editorStructureSlots[footprint.slot]) {
         return { ok: false, reason: "Structure occupied boxes require empty structure space" };
       }
       const existing = editorFunctionalSlots[footprint.slot];
       if (footprint.occupiesFunctionalSpace && existing && existing.groupId !== currentGroupId) {
         return { ok: false, reason: "Functional occupied boxes overlap another component" };
-      }
-    }
-
-    const requiredSupportOffsets = getPlacementOffsets(part, rotateQuarter, "support");
-    for (const offset of requiredSupportOffsets) {
-      const requiredSlot = coordToSlot(anchorCoord.x + offset.x, anchorCoord.y + offset.y);
-      if (requiredSlot === null || !editorStructureSlots[requiredSlot]) {
-        return { ok: false, reason: "Component requires structure support offsets" };
       }
     }
 
@@ -3625,11 +3504,12 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     return isDirectionalPart(part) || COMPONENTS[part.baseComponent].type === "weapon";
   };
 
-  const isCurrentEditorSelectionDirectional = (): boolean => {
+  const isCurrentEditorSelectionRotatable = (): boolean => {
     if (editorLayer !== "functional") {
       return false;
     }
-    return isDirectionalPart(resolvePartForSelection(editorSelection));
+    const part = resolvePartForSelection(editorSelection);
+    return part !== null && (isDirectionalPart(part) || getPartFootprintOffsets(part, 0).length > 1);
   };
 
   const getEditorCatalogItems = (): EditorCatalogItem[] => {
@@ -3724,7 +3604,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       .filter((item): item is {
         entry: { component: ComponentId; partId?: number; rotateQuarter: 0 | 1 | 2 | 3; groupId: number; isAnchor: boolean };
         slotIndex: number;
-      } => item.entry !== null && item.entry.isAnchor && slotToCell.has(item.slotIndex))
+      } => item.entry !== null && item.entry.isAnchor)
       .map((entry) => ({
         component: entry.entry.component,
         partId: entry.entry.partId,
@@ -3851,6 +3731,17 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     partDesignerDraft = {
       ...partDesignerDraft,
       anchor: { x: anchorCoord.x, y: anchorCoord.y },
+      cells: boxes.map((box) => ({
+        x: box.x,
+        y: box.y,
+        structureOccupy: box.occupiesStructureSpace,
+        functionalOccupy: box.occupiesFunctionalSpace,
+        needStructureBehind: box.needsStructureBehind,
+        takeDamage: box.takesDamage,
+        attachPoint: box.isAttachPoint,
+        anchorPoint: box.isAnchorPoint,
+        firePoint: box.isShootingPoint,
+      })),
       boxes,
       placement: {
         requireStructureOffsets: toRelativeOffsets(partDesignerSupportOffsets),
@@ -4243,23 +4134,31 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     context.font = "14px Trebuchet MS";
     context.fillText(`Template: ${editorDraft.name}`, 18, 26);
     context.fillText(`Grid ${editorGridCols}x${editorGridRows} | Layer ${editorLayer.toUpperCase()} ${editorDeleteMode ? "| DELETE" : "| PLACE"}`, 18, 46);
-    context.fillText("Left-click: place/delete | Right-click: delete (functional first) | Right-drag: pan | Mouse wheel: zoom | Origin: (0,0).", 18, 66);
 
     const selectedPartForFacingUi = resolvePartForSelection(editorSelection);
-    if (shouldShowTemplateDirectionForPart(selectedPartForFacingUi)) {
-      const selectedPart = selectedPartForFacingUi;
-      const facingQuarter = getDirectionalFacingQuarter(
-        selectedPart,
-        isDirectionalPart(selectedPart) ? editorWeaponRotateQuarter : 0,
-      );
-      context.fillStyle = "rgba(28, 43, 61, 0.92)";
-      context.fillRect(drawCanvas.width - 170, 14, 154, 40);
-      context.strokeStyle = "rgba(139, 172, 206, 0.8)";
-      context.strokeRect(drawCanvas.width - 170, 14, 154, 40);
-      context.fillStyle = "#dbe8f6";
-      context.font = "12px Trebuchet MS";
-      context.fillText(`Dir: ${getRotationSymbol(facingQuarter)}`, drawCanvas.width - 160, 31);
-      context.fillText(isDirectionalPart(selectedPart) ? "Q ccw | E cw" : "Fixed by part", drawCanvas.width - 160, 47);
+    const functionalCount = editorDraft.attachments.length;
+    const displayCount = editorDraft.display?.length ?? 0;
+    const controlCount = editorDraft.attachments.filter((attachment) => attachment.component === "control").length;
+    const infoWidth = 360;
+    const infoHeight = 70;
+    const infoX = drawCanvas.width - infoWidth - 16;
+    const infoY = 14;
+    context.fillStyle = "rgba(28, 43, 61, 0.92)";
+    context.fillRect(infoX, infoY, infoWidth, infoHeight);
+    context.strokeStyle = "rgba(139, 172, 206, 0.8)";
+    context.strokeRect(infoX, infoY, infoWidth, infoHeight);
+    context.fillStyle = "#dbe8f6";
+    context.font = "12px Trebuchet MS";
+    context.fillText(`Structure: ${editorDraft.structure.length} | Functional: ${functionalCount} | Display: ${displayCount}`, infoX + 10, infoY + 17);
+    context.fillText(`Control Units: ${controlCount} | Material: ${getEditorMaterialBreakdown()}`, infoX + 10, infoY + 35, infoWidth - 20);
+    if (isCurrentEditorSelectionRotatable() && selectedPartForFacingUi) {
+      const directional = isDirectionalPart(selectedPartForFacingUi);
+      const facingQuarter = directional
+        ? getDirectionalFacingQuarter(selectedPartForFacingUi, editorWeaponRotateQuarter)
+        : editorWeaponRotateQuarter;
+      context.fillText(`${directional ? "Direction" : "Footprint rotation"}: ${getRotationSymbol(facingQuarter)} (${facingQuarter * 90}deg)`, infoX + 10, infoY + 53);
+    } else {
+      context.fillText("Direction: n/a", infoX + 10, infoY + 53);
     }
 
     const validation = validateTemplateDetailed(editorDraft, { partCatalog: parts });
@@ -4328,7 +4227,9 @@ export function bootstrap(options: BootstrapOptions = {}): void {
             parts,
           );
           if (functional.isAnchor && part) {
-            const facingQuarter = getDirectionalFacingQuarter(part, functional.rotateQuarter);
+            const facingQuarter = isDirectionalPart(part)
+              ? getDirectionalFacingQuarter(part, functional.rotateQuarter)
+              : functional.rotateQuarter;
             drawFunctionalPartIcon(context, part, x + grid.cell * 0.5, y + grid.cell * 0.45, Math.min(22, grid.cell * 0.48), facingQuarter);
           } else {
             context.fillStyle = "#f0b39f";
@@ -4418,7 +4319,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         } else {
           const part = resolvePartForSelection(editorSelection);
           if (part) {
-            const rotateQuarter = isDirectionalPart(part) ? editorWeaponRotateQuarter : 0;
+            const rotateQuarter = isCurrentEditorSelectionRotatable() ? editorWeaponRotateQuarter : 0;
             const attempt = resolveFunctionalPlacementAttempt(hover.slot, part, rotateQuarter);
             if (attempt.ok) {
               context.globalAlpha = 0.5;
@@ -4434,7 +4335,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
               const anchorRow = Math.floor(attempt.anchorSlot / editorGridCols);
               const anchorX = grid.x + anchorCol * grid.cell;
               const anchorY = grid.y + anchorRow * grid.cell;
-              const facingQuarter = getDirectionalFacingQuarter(part, rotateQuarter);
+              const facingQuarter = isDirectionalPart(part) ? getDirectionalFacingQuarter(part, rotateQuarter) : rotateQuarter;
               drawFunctionalPartIcon(context, part, anchorX + grid.cell * 0.5, anchorY + grid.cell * 0.45, Math.min(22, grid.cell * 0.48), facingQuarter);
               context.fillStyle = "#fff5ef";
               context.font = "9px Trebuchet MS";
@@ -4442,6 +4343,63 @@ export function bootstrap(options: BootstrapOptions = {}): void {
               context.globalAlpha = 1;
             }
           }
+        }
+      }
+    }
+
+    if (editorHoverActive) {
+      const hover = getEditorSlotFromCanvasPoint(editorHoverMouseX, editorHoverMouseY);
+      if (hover) {
+        const structurePartId = editorStructureSlots[hover.slot];
+        const structurePart = structurePartId === null ? null : resolveStructurePartById(structurePartId);
+        const functionalSlot = editorFunctionalSlots[hover.slot];
+        const functionalPart = functionalSlot
+          ? resolvePartDefinitionForAttachment(
+              { partId: functionalSlot.partId, component: functionalSlot.component },
+              parts,
+            )
+          : null;
+        if (structurePart || functionalPart) {
+          const lines = [`Block: ${structurePart?.name ?? "empty"}`];
+          if (functionalPart) {
+            lines.push(`Functional: ${functionalPart.name}`);
+          }
+
+          const hoverCol = hover.slot % editorGridCols;
+          const hoverRow = Math.floor(hover.slot / editorGridCols);
+          const hoverX = grid.x + hoverCol * grid.cell;
+          const hoverY = grid.y + hoverRow * grid.cell;
+          context.globalAlpha = 1;
+          context.strokeStyle = "rgba(255, 232, 154, 0.95)";
+          context.lineWidth = 2;
+          context.strokeRect(hoverX + 1, hoverY + 1, grid.cell - 2, grid.cell - 2);
+
+          context.font = "12px Trebuchet MS";
+          const paddingX = 8;
+          const paddingY = 6;
+          const lineHeight = 16;
+          const tooltipWidth = Math.ceil(Math.max(...lines.map((line) => context.measureText(line).width))) + paddingX * 2;
+          const tooltipHeight = lines.length * lineHeight + paddingY * 2;
+          let tooltipX = hoverX + grid.cell + 8;
+          let tooltipY = hoverY + 4;
+          if (tooltipX + tooltipWidth > drawCanvas.width - 4) {
+            tooltipX = hoverX - tooltipWidth - 8;
+          }
+          if (tooltipY + tooltipHeight > drawCanvas.height - 4) {
+            tooltipY = drawCanvas.height - tooltipHeight - 4;
+          }
+          tooltipX = Math.max(4, tooltipX);
+          tooltipY = Math.max(4, tooltipY);
+
+          context.fillStyle = "rgba(16, 27, 40, 0.96)";
+          context.fillRect(tooltipX, tooltipY, tooltipWidth, tooltipHeight);
+          context.strokeStyle = "rgba(255, 232, 154, 0.9)";
+          context.lineWidth = 1;
+          context.strokeRect(tooltipX, tooltipY, tooltipWidth, tooltipHeight);
+          context.fillStyle = "#f5f0df";
+          lines.forEach((line, index) => {
+            context.fillText(line, tooltipX + paddingX, tooltipY + paddingY + 12 + index * lineHeight);
+          });
         }
       }
     }
@@ -4591,9 +4549,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       } else {
         const structurePart = typeof editorSelection === "number" ? resolveStructurePartById(editorSelection) : null;
         if (structurePart) {
-          if (!editorStructureColorOnly || editorStructureSlots[slot] === null) {
-            editorStructureSlots[slot] = structurePart.id;
-          }
+          editorStructureSlots[slot] = structurePart.id;
           editorStructureColorSlots[slot] = editorStructureColor;
         }
       }
@@ -4613,7 +4569,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
           addLog("Select a valid part first", "warn");
           return;
         }
-        const rotateQuarter = isDirectionalPart(part) ? editorWeaponRotateQuarter : 0;
+        const rotateQuarter = isCurrentEditorSelectionRotatable() ? editorWeaponRotateQuarter : 0;
         const attempt = resolveFunctionalPlacementAttempt(slot, part, rotateQuarter);
         if (!attempt.ok) {
           addLog(attempt.reason, "warn");
@@ -4956,6 +4912,9 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       .map((entry, index) => {
         const winRate = Number.isFinite(entry.winRate) ? `${(Number(entry.winRate) * 100).toFixed(1)}%` : "-";
         const score = Number.isFinite(entry.leaderboardScore) ? Number(entry.leaderboardScore).toFixed(2) : "-";
+        const previousLevelRate = Number.isFinite(entry.previousLevelWinRate)
+          ? `${(Number(entry.previousLevelWinRate) * 100).toFixed(1)}% (${Number(entry.previousLevelRounds) || 0})${entry.previousLevelCertified ? " ✓" : ""}`
+          : entry.runId === "level-1-ai" ? "reference" : "not tested";
         const wins = Number.isFinite(entry.wins) ? Number(entry.wins) : 0;
         const rounds = Number.isFinite(entry.rounds) ? Number(entry.rounds) : (Number.isFinite(entry.games) ? Number(entry.games) : 0);
         const losses = Number.isFinite(entry.losses) ? Number(entry.losses) : 0;
@@ -4971,6 +4930,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
           <td>${escapeHtml(entry.runId)} ${rankTag}</td>
           <td>${escapeHtml(components)}</td>
           <td>${score}</td>
+          <td>${escapeHtml(previousLevelRate)}</td>
           <td>${winRate}</td>
           <td>${wins}/${losses}/${ties}</td>
           <td>${rounds}</td>
@@ -5029,7 +4989,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
 
     leaderboardCenter.innerHTML = `
       <h3>AI Leaderboard</h3>
-      <div class="small">Real ranking by head-to-head matches. All runs start at score 100.</div>
+      <div class="small">Persistent head-to-head ranking. “Vs previous” is certified after 16 mirrored rounds and must exceed 60%.</div>
       <div class="leaderboard-table-wrap" style="margin-top:6px; border:1px solid #333; border-radius:6px; padding:6px; max-height:520px; overflow:auto;">
         ${testArenaLeaderboardLoading ? `<div class="small">Loading...</div>` : ""}
         ${!testArenaLeaderboardLoading && leaderboardRows.length <= 0 ? `<div class="small warn">No leaderboard data found. Train composite runs first.</div>` : ""}
@@ -5040,6 +5000,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
               <th style="text-align:left;">Run</th>
               <th style="text-align:left;">Components (Target / Move / Shoot)</th>
               <th style="text-align:left;">Score</th>
+              <th style="text-align:left;">Vs previous</th>
               <th style="text-align:left;">Win Rate</th>
               <th style="text-align:left;">W/L/T</th>
               <th style="text-align:left;">Rounds</th>
@@ -5122,14 +5083,14 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         <div class="row">
           <span class="small">${(() => {
             const selectedPart = resolvePartForSelection(editorSelection);
-            if (!shouldShowTemplateDirectionForPart(selectedPart)) {
-              return "Direction: n/a (undirectional component)";
+            if (!selectedPart || !isCurrentEditorSelectionRotatable()) {
+              return "Rotation: n/a";
             }
-            const facingQuarter = getDirectionalFacingQuarter(
-              selectedPart,
-              isDirectionalPart(selectedPart) ? editorWeaponRotateQuarter : 0,
-            );
-            return `Direction: ${facingQuarter * 90}deg (${getRotationSymbol(facingQuarter)})${isDirectionalPart(selectedPart) ? "" : " | fixed"}`;
+            const directional = isDirectionalPart(selectedPart);
+            const facingQuarter = directional
+              ? getDirectionalFacingQuarter(selectedPart, editorWeaponRotateQuarter)
+              : editorWeaponRotateQuarter;
+            return `${directional ? "Direction" : "Footprint rotation"}: ${facingQuarter * 90}deg (${getRotationSymbol(facingQuarter)})`;
           })()}</span>
         </div>
         <div class="row">
@@ -5214,11 +5175,15 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       const partProps = partDesignerDraft.properties ?? {};
       const partRuntimeProps = partDesignerDraft.partProperties ?? getPartPropertiesDefaultsByType(resolvedPartType, resolvedPartCategory);
       const partTypeOptions: PartType[] = ["structure", "control", "engine", "weapon", "loader"];
-      const partCategoryOptions: PartCategory[] = resolvedPartType === "engine"
-        ? ["vehicle", "jet"]
-        : resolvedPartType === "weapon"
-          ? ["bullet", "missile", "beam"]
-          : [];
+      const canonicalCategoryParts = CANONICAL_PART_CATEGORIES[resolvedPartType]
+        .map((name) => ({
+          name,
+          part: parts.find((part) => part.name.trim().toLowerCase() === name),
+        }))
+        .filter((entry): entry is { name: string; part: PartDefinition } => entry.part !== undefined);
+      const selectedCanonicalPartId = canonicalCategoryParts.some((entry) => entry.part.id === partDesignerDraft.id)
+        ? partDesignerDraft.id
+        : null;
       const propIsEngine = resolvedPartType === "engine";
       const propIsWeapon = resolvedPartType === "weapon";
       const propIsLoader = resolvedPartType === "loader";
@@ -5260,9 +5225,10 @@ export function bootstrap(options: BootstrapOptions = {}): void {
               ${partTypeOptions.map((option) => `<option value="${option}" ${resolvedPartType === option ? "selected" : ""}>${option}</option>`).join("")}
             </select>
           </label>
-          ${partCategoryOptions.length > 0 ? `<label class="small">Category
-            <select id="partCategoryTypeSelect">
-              ${partCategoryOptions.map((option) => `<option value="${option}" ${resolvedPartCategory === option ? "selected" : ""}>${option}</option>`).join("")}
+          ${canonicalCategoryParts.length > 0 ? `<label class="small">Category
+            <select id="partCanonicalCategorySelect">
+              ${selectedCanonicalPartId === null ? `<option value="" selected>custom / unsaved</option>` : ""}
+              ${canonicalCategoryParts.map((entry) => `<option value="${entry.part.id}" ${selectedCanonicalPartId === entry.part.id ? "selected" : ""}>${entry.name}</option>`).join("")}
             </select>
           </label>` : ""}
         </div>
@@ -6452,6 +6418,26 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       if (value !== "structure" && value !== "control" && value !== "engine" && value !== "weapon" && value !== "loader") {
         return;
       }
+      const nextPartType = value as PartType;
+      const firstCanonicalName = CANONICAL_PART_CATEGORIES[nextPartType][0];
+      const firstCanonicalPart = parts.find((part) => part.name.trim().toLowerCase() === firstCanonicalName);
+      if (firstCanonicalPart) {
+        if (partDesignerOpenedPartId === null) {
+          const draftId = partDesignerDraft.id;
+          const presetDraft = clonePartDefinition(firstCanonicalPart);
+          presetDraft.id = draftId;
+          presetDraft.name = `Custom ${firstCanonicalPart.name}`;
+          loadPartIntoDesignerSlots(presetDraft);
+          partDesignerOpenedPartId = null;
+          partDesignerSelectedId = draftId;
+        } else {
+          partDesignerSelectedId = firstCanonicalPart.id;
+          partDesignerOpenedPartId = firstCanonicalPart.id;
+          loadPartIntoDesignerSlots(firstCanonicalPart);
+        }
+        renderPanels();
+        return;
+      }
       partDesignerDraft.partType = value as PartType;
       partDesignerDraft.partCategory = value === "engine"
         ? "vehicle"
@@ -6475,24 +6461,25 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       renderPanels();
     });
 
-    getOptionalElement<HTMLSelectElement>("#partCategoryTypeSelect")?.addEventListener("change", (event) => {
-      const value = (event.currentTarget as HTMLSelectElement).value;
-      if (value !== "vehicle" && value !== "jet" && value !== "bullet" && value !== "missile" && value !== "beam") {
+    getOptionalElement<HTMLSelectElement>("#partCanonicalCategorySelect")?.addEventListener("change", (event) => {
+      const selectedPartId = Number.parseInt((event.currentTarget as HTMLSelectElement).value, 10);
+      const preset = parts.find((part) => part.id === selectedPartId);
+      if (!preset) {
         return;
       }
-      partDesignerDraft.partCategory = value as PartCategory;
-      const partType = getResolvedPartType(partDesignerDraft);
-      const weaponExplosive = partType === "weapon"
-        ? (partDesignerDraft.partProperties?.explodeOnHit ?? partDesignerDraft.baseComponent === "explosiveShell")
-        : false;
-      partDesignerDraft.baseComponent = getComponentFromPartTypeAndCategory(partType, partDesignerDraft.partCategory, weaponExplosive);
-      partDesignerDraft.partProperties = {
-        ...getPartPropertiesDefaultsByType(partType, partDesignerDraft.partCategory),
-        ...(partDesignerDraft.partProperties ?? {}),
-      };
-      partDesignerDraft.direction = partDesignerDraft.partProperties.defaultDirection ?? getPartDirectionDefault(partDesignerDraft.baseComponent);
-      partDesignerDraft.directional = partDesignerDraft.partProperties.directional ?? COMPONENTS[partDesignerDraft.baseComponent].directional === true;
-      recalcPartDraftFromSlots();
+      if (partDesignerOpenedPartId === null) {
+        const draftId = partDesignerDraft.id;
+        const presetDraft = clonePartDefinition(preset);
+        presetDraft.id = draftId;
+        presetDraft.name = `Custom ${preset.name}`;
+        loadPartIntoDesignerSlots(presetDraft);
+        partDesignerOpenedPartId = null;
+        partDesignerSelectedId = draftId;
+      } else {
+        partDesignerSelectedId = preset.id;
+        partDesignerOpenedPartId = preset.id;
+        loadPartIntoDesignerSlots(preset);
+      }
       renderPanels();
     });
 
@@ -7082,18 +7069,26 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       for (const issue of validation.warnings) {
         addLog(`Part Warning: ${issue}`, "warn");
       }
-      const saved = await saveDefaultPartToStore(snapshot);
-      if (!saved) {
+      const savedPart = await saveDefaultPartToStore(snapshot);
+      if (!savedPart) {
         addLog("Failed to save part", "bad");
         return;
       }
       await refreshPartsFromStore();
+      // The successful PUT payload is authoritative. Do not let a stale catalog
+      // GET replace the just-saved draft with the previous file contents.
+      const savedPartIndex = parts.findIndex((part) => part.id === savedPart.id);
+      if (savedPartIndex >= 0) {
+        parts[savedPartIndex] = clonePartDefinition(savedPart);
+      } else {
+        parts.push(clonePartDefinition(savedPart));
+      }
+      battle.setPartCatalog(parts);
       await refreshTemplatesFromStore();
-      partDesignerSelectedId = snapshot.id;
-      partDesignerOpenedPartId = snapshot.id;
-      const reloaded = parts.find((part) => part.id === snapshot.id) ?? snapshot;
-      loadPartIntoDesignerSlots(reloaded);
-      addLog(`Saved part: ${snapshot.name}`, "good");
+      partDesignerSelectedId = savedPart.id;
+      partDesignerOpenedPartId = savedPart.id;
+      loadPartIntoDesignerSlots(savedPart);
+      addLog(`Saved part: ${savedPart.name}`, "good");
       renderPanels();
     };
 
@@ -7316,10 +7311,6 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       }
       return;
     }
-    if (target instanceof HTMLInputElement && target.id === "editorStructureColorOnly") {
-      editorStructureColorOnly = target.checked;
-      return;
-    }
     if (!(target instanceof HTMLSelectElement)) {
       return;
     }
@@ -7474,7 +7465,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
 
     if (isEditorScreen()) {
       if (event.key === "q" || event.key === "Q") {
-        if (isTemplateEditorScreen() && !isCurrentEditorSelectionDirectional()) {
+        if (isTemplateEditorScreen() && !isCurrentEditorSelectionRotatable()) {
           event.preventDefault();
           return;
         }
@@ -7484,7 +7475,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         return;
       }
       if (event.key === "e" || event.key === "E") {
-        if (isTemplateEditorScreen() && !isCurrentEditorSelectionDirectional()) {
+        if (isTemplateEditorScreen() && !isCurrentEditorSelectionRotatable()) {
           event.preventDefault();
           return;
         }

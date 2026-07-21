@@ -1,0 +1,102 @@
+{
+  "id": 5,
+  "name": "attack aircraft",
+  "type": "air",
+  "structure": [
+    {
+      "partId": 10,
+      "x": -1,
+      "y": -1
+    },
+    {
+      "partId": 10,
+      "x": 0,
+      "y": -1
+    },
+    {
+      "partId": 10,
+      "x": -2,
+      "y": 0
+    },
+    {
+      "partId": 10,
+      "x": -1,
+      "y": 0
+    },
+    {
+      "partId": 10,
+      "x": 0,
+      "y": 0
+    },
+    {
+      "partId": 10,
+      "x": 1,
+      "y": 0
+    },
+    {
+      "partId": 11,
+      "x": 2,
+      "y": 0
+    },
+    {
+      "partId": 10,
+      "x": -2,
+      "y": 1
+    },
+    {
+      "partId": 10,
+      "x": -1,
+      "y": 1
+    },
+    {
+      "partId": 10,
+      "x": 0,
+      "y": 1
+    },
+    {
+      "partId": 10,
+      "x": 1,
+      "y": 1
+    },
+    {
+      "partId": 11,
+      "x": 2,
+      "y": 1
+    }
+  ],
+  "attachments": [
+    {
+      "component": "cannonLoader",
+      "partId": 2,
+      "cell": 1,
+      "x": 0,
+      "y": -1,
+      "rotateQuarter": 0
+    },
+    {
+      "component": "jetEngine",
+      "partId": 14,
+      "cell": 2,
+      "x": -2,
+      "y": 0,
+      "rotateQuarter": 0
+    },
+    {
+      "component": "control",
+      "partId": 4,
+      "cell": 4,
+      "x": 0,
+      "y": 0,
+      "rotateQuarter": 0
+    },
+    {
+      "component": "explosiveShell",
+      "partId": 7,
+      "cell": 10,
+      "x": 1,
+      "y": 1,
+      "rotateQuarter": 0
+    }
+  ],
+  "display": []
+}

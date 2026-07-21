@@ -1,0 +1,180 @@
+{
+  "id": 8,
+  "name": "anti-tank gun",
+  "layer": "functional",
+  "partType": "weapon",
+  "partCategory": "bullet",
+  "baseComponent": "heavyCannon",
+  "directional": true,
+  "direction": "right",
+  "anchor": {
+    "x": -1,
+    "y": 0
+  },
+  "cells": [
+    {
+      "x": -1,
+      "y": -1,
+      "structureOccupy": false,
+      "functionalOccupy": true,
+      "needStructureBehind": true,
+      "takeDamage": true,
+      "attachPoint": false,
+      "anchorPoint": false,
+      "firePoint": false
+    },
+    {
+      "x": -1,
+      "y": 0,
+      "structureOccupy": false,
+      "functionalOccupy": true,
+      "needStructureBehind": true,
+      "takeDamage": true,
+      "attachPoint": false,
+      "anchorPoint": true,
+      "firePoint": false
+    },
+    {
+      "x": 0,
+      "y": 0,
+      "structureOccupy": false,
+      "functionalOccupy": true,
+      "needStructureBehind": true,
+      "takeDamage": true,
+      "attachPoint": false,
+      "anchorPoint": false,
+      "firePoint": false
+    },
+    {
+      "x": 1,
+      "y": 0,
+      "structureOccupy": false,
+      "functionalOccupy": true,
+      "needStructureBehind": true,
+      "takeDamage": true,
+      "attachPoint": false,
+      "anchorPoint": false,
+      "firePoint": true
+    },
+    {
+      "x": -1,
+      "y": 1,
+      "structureOccupy": false,
+      "functionalOccupy": true,
+      "needStructureBehind": true,
+      "takeDamage": true,
+      "attachPoint": false,
+      "anchorPoint": false,
+      "firePoint": false
+    }
+  ],
+  "boxes": [
+    {
+      "x": -1,
+      "y": -1,
+      "occupiesStructureSpace": false,
+      "occupiesFunctionalSpace": true,
+      "needsStructureBehind": true,
+      "isAttachPoint": false,
+      "isAnchorPoint": false,
+      "isShootingPoint": false,
+      "takesDamage": true,
+      "takesFunctionalDamage": true
+    },
+    {
+      "x": -1,
+      "y": 0,
+      "occupiesStructureSpace": false,
+      "occupiesFunctionalSpace": true,
+      "needsStructureBehind": true,
+      "isAttachPoint": false,
+      "isAnchorPoint": true,
+      "isShootingPoint": false,
+      "takesDamage": true,
+      "takesFunctionalDamage": true
+    },
+    {
+      "x": 0,
+      "y": 0,
+      "occupiesStructureSpace": false,
+      "occupiesFunctionalSpace": true,
+      "needsStructureBehind": true,
+      "isAttachPoint": false,
+      "isAnchorPoint": false,
+      "isShootingPoint": false,
+      "takesDamage": true,
+      "takesFunctionalDamage": true
+    },
+    {
+      "x": 1,
+      "y": 0,
+      "occupiesStructureSpace": false,
+      "occupiesFunctionalSpace": true,
+      "needsStructureBehind": true,
+      "isAttachPoint": false,
+      "isAnchorPoint": false,
+      "isShootingPoint": true,
+      "takesDamage": true,
+      "takesFunctionalDamage": true
+    },
+    {
+      "x": -1,
+      "y": 1,
+      "occupiesStructureSpace": false,
+      "occupiesFunctionalSpace": true,
+      "needsStructureBehind": true,
+      "isAttachPoint": false,
+      "isAnchorPoint": false,
+      "isShootingPoint": false,
+      "takesDamage": true,
+      "takesFunctionalDamage": true
+    }
+  ],
+  "placement": {
+    "requireStructureOffsets": [],
+    "requireStructureOnFunctionalOccupiedBoxes": true,
+    "requireStructureOnStructureOccupiedBoxes": true,
+    "requireEmptyStructureOffsets": [],
+    "requireEmptyFunctionalOffsets": []
+  },
+  "stats": {
+    "gasCost": 18,
+    "mass": 24,
+    "recoil": 34,
+    "hitImpulse": 38,
+    "damage": 220,
+    "range": 680,
+    "cooldown": 4,
+    "shootAngleDeg": 70,
+    "projectileSpeed": 800,
+    "projectileGravity": 65,
+    "penetration": 250,
+    "spreadDeg": 0.25
+  },
+  "partProperties": {
+    "computingConsumption": 1,
+    "hasAngleLimit": false,
+    "bulletType": "bullet",
+    "fireSoundVolume": 1.5,
+    "explodeOnHit": false,
+    "projectileSpeed": 800,
+    "needLoader": true,
+    "maxCapacity": 1
+  },
+  "properties": {
+    "category": "weapon",
+    "subcategory": "heavy-shot",
+    "materialAlpha": 1,
+    "isEngine": false,
+    "isWeapon": true,
+    "isLoader": false,
+    "isArmor": false,
+    "hasCoreTuning": false
+  },
+  "tags": [
+    "default",
+    "weapon",
+    "heavy-shot",
+    "anti-tank"
+  ]
+}

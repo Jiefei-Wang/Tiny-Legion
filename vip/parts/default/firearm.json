@@ -1,9 +1,10 @@
 {
-  "id": 3,
-  "name": "Control Unit",
+  "id": 19,
+  "name": "firearm",
   "layer": "functional",
-  "partType": "control",
-  "baseComponent": "control",
+  "partType": "weapon",
+  "partCategory": "bullet",
+  "baseComponent": "rapidGun",
   "directional": false,
   "direction": "up",
   "anchor": {
@@ -17,10 +18,10 @@
       "structureOccupy": false,
       "functionalOccupy": true,
       "needStructureBehind": true,
-      "takeDamage": false,
+      "takeDamage": true,
       "attachPoint": false,
       "anchorPoint": true,
-      "firePoint": false
+      "firePoint": true
     }
   ],
   "boxes": [
@@ -32,9 +33,9 @@
       "needsStructureBehind": true,
       "isAttachPoint": false,
       "isAnchorPoint": true,
-      "isShootingPoint": false,
-      "takesDamage": false,
-      "takesFunctionalDamage": false
+      "isShootingPoint": true,
+      "takesDamage": true,
+      "takesFunctionalDamage": true
     }
   ],
   "placement": {
@@ -44,20 +45,45 @@
     "requireEmptyStructureOffsets": [],
     "requireEmptyFunctionalOffsets": []
   },
+  "stats": {
+    "gasCost": 4,
+    "mass": 6,
+    "recoil": 1.2,
+    "hitImpulse": 0.8,
+    "damage": 5,
+    "range": 420,
+    "cooldown": 0.5,
+    "shootAngleDeg": 360,
+    "projectileSpeed": 650,
+    "projectileGravity": 20,
+    "penetration": 0,
+    "spreadDeg": 2.4
+  },
   "partProperties": {
-    "computing": 1
+    "computingConsumption": 1,
+    "directional": false,
+    "defaultDirection": "up",
+    "hasAngleLimit": false,
+    "cwAngle": 180,
+    "ccwAngle": 180,
+    "bulletType": "bullet",
+    "fireSoundVolume": 0.5,
+    "explodeOnHit": false,
+    "needLoader": false,
+    "maxCapacity": 1
   },
   "properties": {
-    "category": "functional",
-    "subcategory": "control",
+    "category": "weapon",
+    "subcategory": "rapid-fire",
     "isEngine": false,
-    "isWeapon": false,
+    "isWeapon": true,
     "isLoader": false,
     "isArmor": false,
     "hasCoreTuning": false
   },
   "tags": [
     "default",
-    "core"
+    "weapon",
+    "rapid-fire"
   ]
 }

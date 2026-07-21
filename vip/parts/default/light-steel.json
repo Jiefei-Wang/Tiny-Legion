@@ -1,6 +1,6 @@
 {
   "id": 10,
-  "name": "Light Steel",
+  "name": "light steel",
   "layer": "structure",
   "partType": "structure",
   "baseComponent": "control",
@@ -46,14 +46,26 @@
   },
   "stats": {
     "gasCost": 2,
-    "mass": 5
+    "mass": 10
+  },
+  "partProperties": {
+    "gasCost": 2,
+    "mass": 10,
+    "hp": 25,
+    "tag": "structure",
+    "armor": 0,
+    "recover": 0,
+    "color": "#95a4b8",
+    "alpha": 1
   },
   "properties": {
     "category": "structure",
     "subcategory": "material",
+    "materialId": "basic",
     "materialArmor": 0,
-    "materialRecoverPerSecond": 2,
+    "materialRecoverPerSecond": 0,
     "materialColor": "#95a4b8",
+    "materialAlpha": 1,
     "hp": 25,
     "isEngine": false,
     "isWeapon": false,
@@ -64,6 +76,7 @@
   "tags": [
     "default",
     "structure",
-    "material"
+    "material",
+    "light"
   ]
 }

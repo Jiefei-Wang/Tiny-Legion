@@ -195,6 +195,7 @@ function createPassiveAi(): BattleAiController {
       state: "engage",
       movement: { ax: 0, ay: 0, shouldEvade: false },
       firePlan: null,
+      firePlans: [],
       debug: {
         targetId: null,
         decisionPath: "passive",

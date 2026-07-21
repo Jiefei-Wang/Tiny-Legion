@@ -8,6 +8,7 @@
     "match": "npm run build && node .dist/arena/src/cli.js match",
     "train:composite": "npm run build && node .dist/arena/src/cli.js train-composite",
     "eval:tiers": "npm run build && node .dist/arena/src/cli.js eval-tiers",
+    "eval:levels": "npm run build && node .dist/arena/src/cli.js eval-levels",
     "replay": "npm run build && node .dist/arena/src/cli.js replay",
     "serve": "npm run build && node .dist/arena/src/server.js"
   },

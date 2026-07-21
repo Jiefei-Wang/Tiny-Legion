@@ -34,6 +34,12 @@ type PhaseDef = {
     groundHeight?: number;
   };
   maxSimSeconds: number;
+  nodeDefense?: number;
+  baseHp?: number;
+  playerGas?: number;
+  enemyGas?: number;
+  spawnBurst?: number;
+  spawnMaxActive?: number;
   opponentMode?: "best" | "leaderboard-nearby";
   leaderboard?: {
     opponentCount: number;
@@ -100,6 +106,12 @@ function makePhase(
       ...(typeof config?.battlefield?.groundHeight === "number" ? { groundHeight: config.battlefield.groundHeight } : {}),
     },
     maxSimSeconds: config?.maxSimSeconds ?? 240,
+    ...(typeof config?.nodeDefense === "number" ? { nodeDefense: config.nodeDefense } : {}),
+    ...(typeof config?.baseHp === "number" ? { baseHp: config.baseHp } : {}),
+    ...(typeof config?.playerGas === "number" ? { playerGas: config.playerGas } : {}),
+    ...(typeof config?.enemyGas === "number" ? { enemyGas: config.enemyGas } : {}),
+    ...(typeof config?.spawnBurst === "number" ? { spawnBurst: config.spawnBurst } : {}),
+    ...(typeof config?.spawnMaxActive === "number" ? { spawnMaxActive: config.spawnMaxActive } : {}),
     opponentMode: config?.opponentMode ?? "best",
     ...(config?.leaderboard ? { leaderboard: { opponentCount: Math.max(1, Math.floor(config.leaderboard.opponentCount)) } } : {}),
   };
@@ -447,12 +459,12 @@ export async function runCompositeTraining(opts: {
 
         const baseMatch: Omit<MatchSpec, "seed" | "aiPlayer" | "aiEnemy"> = {
           maxSimSeconds: phase.maxSimSeconds,
-          nodeDefense: opts.nodeDefense,
-          ...(opts.baseHp ? { baseHp: opts.baseHp } : {}),
-          playerGas: opts.playerGas,
-          enemyGas: opts.enemyGas,
-          spawnBurst: opts.spawnBurst,
-          spawnMaxActive: opts.spawnMaxActive,
+          nodeDefense: phase.nodeDefense ?? opts.nodeDefense,
+          ...((phase.baseHp ?? opts.baseHp) ? { baseHp: phase.baseHp ?? opts.baseHp ?? undefined } : {}),
+          playerGas: phase.playerGas ?? opts.playerGas,
+          enemyGas: phase.enemyGas ?? opts.enemyGas,
+          spawnBurst: phase.spawnBurst ?? opts.spawnBurst,
+          spawnMaxActive: phase.spawnMaxActive ?? opts.spawnMaxActive,
           scenario: {
             withBase: phase.withBase,
             initialUnitsPerSide: phase.initialUnitsPerSide,

@@ -1,17 +1,27 @@
 {
-  "id": 8,
-  "name": "Railbreaker Cannon",
+  "id": 2,
+  "name": "cannons reloader",
   "layer": "functional",
-  "partType": "weapon",
-  "partCategory": "bullet",
-  "baseComponent": "rapidGun",
-  "directional": true,
-  "direction": "right",
+  "partType": "loader",
+  "baseComponent": "cannonLoader",
+  "directional": false,
+  "direction": "up",
   "anchor": {
     "x": 0,
     "y": 0
   },
   "cells": [
+    {
+      "x": -1,
+      "y": 0,
+      "structureOccupy": false,
+      "functionalOccupy": true,
+      "needStructureBehind": true,
+      "takeDamage": true,
+      "attachPoint": false,
+      "anchorPoint": false,
+      "firePoint": false
+    },
     {
       "x": 0,
       "y": 0,
@@ -22,20 +32,21 @@
       "attachPoint": false,
       "anchorPoint": true,
       "firePoint": false
-    },
-    {
-      "x": 1,
-      "y": 0,
-      "structureOccupy": false,
-      "functionalOccupy": true,
-      "needStructureBehind": false,
-      "takeDamage": true,
-      "attachPoint": false,
-      "anchorPoint": false,
-      "firePoint": true
     }
   ],
   "boxes": [
+    {
+      "x": -1,
+      "y": 0,
+      "occupiesStructureSpace": false,
+      "occupiesFunctionalSpace": true,
+      "needsStructureBehind": true,
+      "isAttachPoint": false,
+      "isAnchorPoint": false,
+      "isShootingPoint": false,
+      "takesDamage": true,
+      "takesFunctionalDamage": true
+    },
     {
       "x": 0,
       "y": 0,
@@ -45,18 +56,6 @@
       "isAttachPoint": false,
       "isAnchorPoint": true,
       "isShootingPoint": false,
-      "takesDamage": true,
-      "takesFunctionalDamage": true
-    },
-    {
-      "x": 1,
-      "y": 0,
-      "occupiesStructureSpace": false,
-      "occupiesFunctionalSpace": true,
-      "needsStructureBehind": false,
-      "isAttachPoint": false,
-      "isAnchorPoint": false,
-      "isShootingPoint": true,
       "takesDamage": true,
       "takesFunctionalDamage": true
     }
@@ -69,35 +68,42 @@
     "requireEmptyFunctionalOffsets": []
   },
   "stats": {
-    "recoil": 34,
-    "hitImpulse": 38,
-    "damage": 135,
-    "range": 680,
-    "cooldown": 1.15,
-    "shootAngleDeg": 100,
-    "projectileSpeed": 680,
-    "projectileGravity": 65,
-    "penetration": 150
+    "gasCost": 3,
+    "mass": 8,
+    "loaderSupports": [
+      "explosive"
+    ],
+    "loaderLoadMultiplier": 1,
+    "loaderFastOperation": false,
+    "loaderMinLoadTime": 2,
+    "loaderMinBurstInterval": 0.5
   },
   "partProperties": {
-    "computingConsumption": 1,
-    "fireSoundVolume": 0.5,
-    "explodeOnHit": false,
-    "maxCapacity": 2
+    "supportedWeaponTags": [
+      "explosive"
+    ],
+    "loadMultiplier": 1,
+    "minLoadTime": 2,
+    "minBurstInterval": 0.5
   },
   "properties": {
-    "category": "weapon",
-    "subcategory": "heavy-shot",
+    "category": "functional",
+    "subcategory": "loader",
     "materialAlpha": 1,
     "isEngine": false,
-    "isWeapon": true,
-    "isLoader": false,
+    "isWeapon": false,
+    "isLoader": true,
     "isArmor": false,
+    "loaderServesTags": [
+      "explosive"
+    ],
+    "loaderCooldownMultiplier": 1,
     "hasCoreTuning": false
   },
   "tags": [
     "default",
-    "weapon",
-    "heavy-shot"
+    "support",
+    "loader",
+    "cannons"
   ]
 }

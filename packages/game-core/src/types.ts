@@ -413,7 +413,10 @@ export interface Projectile {
   initialVy: number;
   sourceWeaponAttachmentId: number | null;
   damage: number;
+  /** Damage delivered by the next direct hit after penetration loss scaling. */
+  currentDamage: number;
   hitImpulse: number;
+  initialPenetration: number;
   remainingPenetration: number;
   r: number;
 }
@@ -423,6 +426,16 @@ export interface Particle {
   y: number;
   life: number;
   size: number;
+}
+
+export interface BeamEffect {
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+  side: Side;
+  life: number;
+  maxLife: number;
 }
 
 export interface Debris {
@@ -456,6 +469,7 @@ export interface BattleState {
   nodeId: string | null;
   units: UnitInstance[];
   projectiles: Projectile[];
+  beamEffects: BeamEffect[];
   particles: Particle[];
   debris: Debris[];
   playerBase: BattleBase;

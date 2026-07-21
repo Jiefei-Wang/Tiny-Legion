@@ -1,6 +1,6 @@
 {
   "id": 11,
-  "name": "Basic Steel",
+  "name": "normal steel",
   "layer": "structure",
   "partType": "structure",
   "baseComponent": "control",
@@ -45,16 +45,28 @@
     "requireEmptyFunctionalOffsets": []
   },
   "stats": {
-    "gasCost": 4,
-    "mass": 10
+    "gasCost": 8,
+    "mass": 50
+  },
+  "partProperties": {
+    "gasCost": 8,
+    "mass": 50,
+    "hp": 100,
+    "tag": "structure",
+    "armor": 10,
+    "recover": 10,
+    "color": "#66788d",
+    "alpha": 1
   },
   "properties": {
     "category": "structure",
     "subcategory": "material",
-    "materialArmor": 5,
-    "materialRecoverPerSecond": 2.2,
-    "materialColor": "#95a4b8",
-    "hp": 110,
+    "materialId": "reinforced",
+    "materialArmor": 10,
+    "materialRecoverPerSecond": 10,
+    "materialColor": "#66788d",
+    "materialAlpha": 1,
+    "hp": 100,
     "isEngine": false,
     "isWeapon": false,
     "isLoader": false,
@@ -64,6 +76,7 @@
   "tags": [
     "default",
     "structure",
-    "material"
+    "material",
+    "normal"
   ]
 }

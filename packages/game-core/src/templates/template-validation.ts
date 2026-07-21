@@ -141,12 +141,14 @@ export function validateTemplateDetailed(
   );
 
   let controlCount = 0;
+  let controlCapacity = 0;
   let totalEngineCount = 0;
   let groundEngineCount = 0;
   let airEngineCount = 0;
   let weaponCount = 0;
 
   const occupiedFunctional = new Set<string>();
+  const controlledFunctional = new Set<string>();
   const occupiedStructure = new Set<string>();
 
   for (const attachment of template.attachments) {
@@ -258,6 +260,9 @@ export function validateTemplateDetailed(
         const key = `xy:${anchor.x + cell.x},${anchor.y + cell.y}`;
         if (cell.occupiesFunctionalSpace) {
           occupiedFunctional.add(key);
+          if (componentType !== "control") {
+            controlledFunctional.add(key);
+          }
         }
         if (cell.occupiesStructureSpace) {
           occupiedStructure.add(key);
@@ -267,6 +272,7 @@ export function validateTemplateDetailed(
 
     if (componentType === "control") {
       controlCount += 1;
+      controlCapacity += Math.max(0, part.partProperties?.computing ?? 1);
     } else if (componentType === "engine") {
       totalEngineCount += 1;
       if (engineSupportsAir(part, component)) {
@@ -280,8 +286,10 @@ export function validateTemplateDetailed(
     }
   }
 
-  if (controlCount < 1) {
-    errors.push("at least one control component is required");
+  if (controlCount !== 1) {
+    errors.push("exactly one control unit is required");
+  } else if (controlledFunctional.size > controlCapacity) {
+    errors.push(`control unit capacity exceeded (${controlledFunctional.size} functional blocks used, ${controlCapacity} supported)`);
   }
   if (weaponCount < 1) {
     warnings.push("at least one weapon component is recommended");

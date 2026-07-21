@@ -67,6 +67,14 @@ export type MatchResult = {
     player: SideOutcome;
     enemy: SideOutcome;
   };
+  final: {
+    playerBaseHp: number;
+    enemyBaseHp: number;
+    playerOperationalUnits: number;
+    enemyOperationalUnits: number;
+    playerUnitIntegrity: number;
+    enemyUnitIntegrity: number;
+  };
   replay: {
     seed: number;
     maxSimSeconds: number;

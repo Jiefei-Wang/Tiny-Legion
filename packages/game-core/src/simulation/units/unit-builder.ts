@@ -23,71 +23,71 @@ export function createInitialTemplates(): UnitTemplate[] {
   return [
     {
       id: 1,
-      name: "Scout Buggy",
+      name: "tank",
       type: "ground",
-      gasCost: 22,
-      structure: [{ partId: 11 }, { partId: 11 }, { partId: 11 }],
+      gasCost: 0,
+      structure: [
+        { partId: 12, x: -2, y: 0 }, { partId: 12, x: -1, y: 0 }, { partId: 12, x: 0, y: 0 }, { partId: 12, x: 1, y: 0 }, { partId: 12, x: 2, y: 0 },
+        { partId: 12, x: -2, y: 1 }, { partId: 12, x: -1, y: 1 }, { partId: 12, x: 0, y: 1 }, { partId: 12, x: 1, y: 1 }, { partId: 12, x: 2, y: 1 },
+      ],
       attachments: [
-        { component: "control", cell: 1 },
-        { component: "engineS", cell: 0 },
-        { component: "rapidGun", cell: 2 },
+        { component: "engineM", partId: 5, cell: 0, x: -2, y: 0 },
+        { component: "control", partId: 3, cell: 2, x: 0, y: 0 },
+        { component: "explosiveShell", partId: 7, cell: 3, x: 1, y: 0 },
+        { component: "cannonLoader", partId: 2, cell: 8, x: 1, y: 1 },
       ],
     },
     {
       id: 2,
-      name: "Line Tank",
+      name: "anti-aircraft vehicle",
       type: "ground",
-      gasCost: 38,
-      structure: [
-        { partId: 11 },
-        { partId: 11 },
-        { partId: 11 },
-        { partId: 11 },
-        { partId: 11 },
-      ],
+      gasCost: 0,
+      structure: [{ partId: 11, x: -1, y: 0 }, { partId: 11, x: 0, y: 0 }, { partId: 11, x: 1, y: 0 }],
       attachments: [
-        { component: "control", cell: 2 },
-        { component: "engineM", cell: 1 },
-        { component: "heavyCannon", cell: 3 },
-        { component: "cannonLoader", cell: 2 },
+        { component: "engineS", partId: 6, cell: 0, x: -1, y: 0 },
+        { component: "control", partId: 3, cell: 1, x: 0, y: 0 },
+        { component: "rapidGun", partId: 19, cell: 2, x: 1, y: 0 },
       ],
     },
     {
       id: 3,
-      name: "Skylance Jet",
-      type: "air",
-      gasCost: 48,
-      structure: [
-        { partId: 11, x: -1, y: 0 },
-        { partId: 11, x: 0, y: 0 },
-        { partId: 11, x: 1, y: 0 },
-        { partId: 11, x: 0, y: 1 },
-      ],
+      name: "tank-killer",
+      type: "ground",
+      gasCost: 0,
+      structure: [{ partId: 11, x: -2, y: 0 }, { partId: 11, x: -1, y: 0 }, { partId: 11, x: 0, y: 0 }, { partId: 11, x: 1, y: 0 }, { partId: 11, x: 2, y: 0 }],
       attachments: [
-        { component: "control", cell: 1, x: 0, y: 0 },
-        { component: "jetEngine", cell: 3, x: 0, y: 1 },
-        { component: "trackingMissile", cell: 2, x: 1, y: 0, rotateQuarter: 0 },
-        { component: "missileLoader", cell: 1 },
+        { component: "engineS", partId: 6, cell: 0, x: -2, y: 0 },
+        { component: "control", partId: 3, cell: 1, x: -1, y: 0 },
+        { component: "cannonLoader", partId: 2, cell: 2, x: 0, y: 0 },
+        { component: "heavyCannon", partId: 8, cell: 3, x: 1, y: 0 },
       ],
     },
     {
       id: 4,
-      name: "Rotor Pike",
+      name: "fighter aircraft",
       type: "air",
-      gasCost: 54,
+      gasCost: 0,
+      structure: [{ partId: 11, x: -2, y: 0 }, { partId: 11, x: -1, y: 0 }, { partId: 11, x: 0, y: 0 }, { partId: 11, x: 1, y: 0 }],
+      attachments: [
+        { component: "jetEngine", partId: 9, cell: 0, x: -2, y: 0 },
+        { component: "control", partId: 3, cell: 1, x: -1, y: 0 },
+        { component: "rapidGun", partId: 19, cell: 2, x: 0, y: 0 },
+      ],
+    },
+    {
+      id: 5,
+      name: "attack aircraft",
+      type: "air",
+      gasCost: 0,
       structure: [
-        { partId: 11, x: -1, y: 0 },
-        { partId: 11, x: 0, y: 0 },
-        { partId: 11, x: 1, y: 0 },
-        { partId: 11, x: -1, y: 1 },
-        { partId: 11, x: 0, y: 1 },
-        { partId: 11, x: 1, y: 1 },
+        { partId: 11, x: -2, y: 0 }, { partId: 11, x: -1, y: 0 }, { partId: 11, x: 0, y: 0 }, { partId: 11, x: 1, y: 0 }, { partId: 11, x: 2, y: 0 },
+        { partId: 11, x: -2, y: 1 }, { partId: 11, x: -1, y: 1 }, { partId: 11, x: 0, y: 1 }, { partId: 11, x: 1, y: 1 }, { partId: 11, x: 2, y: 1 },
       ],
       attachments: [
-        { component: "control", cell: 4, x: 0, y: 1 },
-        { component: "jetEngine", cell: 1, x: 0, y: 0, rotateQuarter: 0 },
-        { component: "trackingMissile", cell: 2, x: 1, y: 0, rotateQuarter: 0 },
-        { component: "missileLoader", cell: 4, x: 0, y: 1 },
+        { component: "jetEngine", partId: 9, cell: 0, x: -2, y: 0 },
+        { component: "control", partId: 3, cell: 2, x: 0, y: 0 },
+        { component: "explosiveShell", partId: 7, cell: 3, x: 1, y: 0 },
+        { component: "cannonLoader", partId: 2, cell: 8, x: 1, y: 1 },
       ],
     },
   ];
@@ -248,6 +248,22 @@ export function instantiateUnit(
 
   const control = getControlUnit(attachments);
   if (!control) {
+    return null;
+  }
+  const controlPart = control.partId ? partCatalog.find((part) => part.id === control.partId) : null;
+  const controlCapacity = Math.max(0, controlPart?.partProperties?.computing ?? 1);
+  const controlledFunctionalCells = new Set<string>();
+  for (const attachment of attachments) {
+    if (attachment.id === control.id) {
+      continue;
+    }
+    for (const offset of attachment.occupiedOffsets) {
+      if (offset.occupiesFunctionalSpace) {
+        controlledFunctionalCells.add(`${attachment.x + offset.x},${attachment.y + offset.y}`);
+      }
+    }
+  }
+  if (controlledFunctionalCells.size > controlCapacity) {
     return null;
   }
   if (template.type === "air") {

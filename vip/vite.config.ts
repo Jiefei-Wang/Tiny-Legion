@@ -9,6 +9,10 @@ import {
   parsePartDefinition,
 } from "../packages/game-core/src/parts/part-schema.ts";
 import { runMatch } from "../arena/src/match/run-match.ts";
+import { compareMirroredSeries } from "../arena/src/match/mirrored-series.ts";
+import { levelCompositeConfig } from "../arena/src/ai/composite-controller.ts";
+import { aiLevelCertificationSeed } from "../arena/src/eval/evaluate-ai-levels.ts";
+import { MAX_CERTIFIED_AI_LEVEL } from "../packages/game-core/src/ai/composite/level-modules.ts";
 import type { MatchAiSpec, MatchResult, MatchSpec } from "../arena/src/match/match-types.ts";
 
 function debugLogPlugin() {
@@ -647,6 +651,7 @@ function partStorePlugin() {
       server.middlewares.use("/__parts/default", (req, res) => {
         if (req.method === "GET") {
           const parts = readDefaultParts();
+          res.setHeader("cache-control", "no-store, max-age=0");
           res.setHeader("content-type", "application/json");
           res.end(JSON.stringify({ parts }));
           return;
@@ -695,8 +700,9 @@ function partStorePlugin() {
               unlinkSync(existingPath);
             }
             writeFileSync(targetPath, `${JSON.stringify(normalized, null, 2)}\n`, "utf8");
+            res.setHeader("cache-control", "no-store, max-age=0");
             res.setHeader("content-type", "application/json");
-            res.end(JSON.stringify({ ok: true }));
+            res.end(JSON.stringify({ ok: true, part: normalized }));
           } catch {
             res.statusCode = 400;
             res.end("bad request");
@@ -707,6 +713,7 @@ function partStorePlugin() {
       server.middlewares.use("/__parts/user", (req, res) => {
         if (req.method === "GET") {
           const parts = readPartsInDir(userDir);
+          res.setHeader("cache-control", "no-store, max-age=0");
           res.setHeader("content-type", "application/json");
           res.end(JSON.stringify({ parts }));
           return;
@@ -773,8 +780,6 @@ function arenaModelPlugin() {
   const leaderboardDir = resolve(arenaDataDir, "leaderboard");
   const leaderboardFile = resolve(leaderboardDir, "composite-elo.json");
   const phaseConfigFile = resolve(process.cwd(), "..", "arena", "composite-training.phases.json");
-  const BASELINE_MODEL_ID = "baseline-game-ai";
-  const HISTORY_MODEL_ID = "baseline-history-shoot-ai";
   let leaderboardCompeteBusy = false;
   const leaderboardParallelWorkers = Math.max(
     1,
@@ -806,10 +811,17 @@ function arenaModelPlugin() {
     updatedAtMs: number;
   };
   type RatingStore = {
-    version: 1;
+    version: 6;
     updatedAt: string;
     ratings: Record<string, RatingEntry>;
     matchupRounds: Record<string, number>;
+    matchupResults: Record<string, {
+      lowerId: string;
+      higherId: string;
+      lowerWins: number;
+      higherWins: number;
+      ties: number;
+    }>;
   };
   type LeaderboardEntry = {
     runId: string;
@@ -823,6 +835,9 @@ function arenaModelPlugin() {
     mtimeMs: number;
     spec: MatchAiSpec;
     phaseGen?: string;
+    previousLevelWinRate?: number;
+    previousLevelRounds?: number;
+    previousLevelCertified?: boolean;
   };
   type LeaderboardPhaseScenario = {
     withBase: boolean;
@@ -858,23 +873,10 @@ function arenaModelPlugin() {
     ties: 0,
     updatedAtMs: Date.now(),
   });
-  const baselineCompositeSpec = (): MatchAiSpec => ({
+  const levelCompositeSpec = (level: number): MatchAiSpec => ({
     familyId: "composite",
     params: {},
-    composite: {
-      target: { familyId: "baseline-target", params: {} },
-      movement: { familyId: "baseline-movement", params: {} },
-      shoot: { familyId: "baseline-shoot", params: {} },
-    },
-  });
-  const historyCompositeSpec = (): MatchAiSpec => ({
-    familyId: "composite",
-    params: {},
-    composite: {
-      target: { familyId: "baseline-target", params: {} },
-      movement: { familyId: "baseline-movement", params: {} },
-      shoot: { familyId: "history-shoot", params: {} },
-    },
+    composite: levelCompositeConfig(level),
   });
   const getWorkerPool = async (): Promise<{ run: (payload: unknown) => Promise<unknown>; close: () => Promise<void> } | null> => {
     if (!workerPoolPromise) {
@@ -975,18 +977,14 @@ function arenaModelPlugin() {
   };
 
   const collectLeaderboardModels = (): CompositeRun[] => {
-    const models = collectCompositeRuns();
-    models.push({
-      runId: BASELINE_MODEL_ID,
-      spec: baselineCompositeSpec(),
-      mtimeMs: 0,
+    return Array.from({ length: MAX_CERTIFIED_AI_LEVEL }, (_, index) => {
+      const level = index + 1;
+      return {
+        runId: `level-${level}-ai`,
+        spec: levelCompositeSpec(level),
+        mtimeMs: 0,
+      };
     });
-    models.push({
-      runId: HISTORY_MODEL_ID,
-      spec: historyCompositeSpec(),
-      mtimeMs: 0,
-    });
-    return models;
   };
 
   const loadLeaderboardPhaseScenario = (): LeaderboardPhaseScenario => {
@@ -1065,21 +1063,28 @@ function arenaModelPlugin() {
 
   const loadRatingStore = (): RatingStore => {
     if (!existsSync(leaderboardFile)) {
-      return { version: 1, updatedAt: new Date().toISOString(), ratings: {}, matchupRounds: {} };
+      return { version: 6, updatedAt: new Date().toISOString(), ratings: {}, matchupRounds: {}, matchupResults: {} };
     }
     try {
       const raw = readFileSync(leaderboardFile, "utf8");
       const parsed = JSON.parse(raw) as unknown;
       if (!parsed || typeof parsed !== "object") {
-        return { version: 1, updatedAt: new Date().toISOString(), ratings: {}, matchupRounds: {} };
+        return { version: 6, updatedAt: new Date().toISOString(), ratings: {}, matchupRounds: {}, matchupResults: {} };
       }
       const obj = parsed as Record<string, unknown>;
+      if (obj.version !== 6) {
+        return { version: 6, updatedAt: new Date().toISOString(), ratings: {}, matchupRounds: {}, matchupResults: {} };
+      }
       const ratingsRaw = (obj.ratings && typeof obj.ratings === "object") ? obj.ratings as Record<string, unknown> : {};
       const matchupRaw = (obj.matchupRounds && typeof obj.matchupRounds === "object")
         ? obj.matchupRounds as Record<string, unknown>
         : {};
+      const matchupResultsRaw = (obj.matchupResults && typeof obj.matchupResults === "object")
+        ? obj.matchupResults as Record<string, unknown>
+        : {};
       const ratings: Record<string, RatingEntry> = {};
       const matchupRounds: Record<string, number> = {};
+      const matchupResults: RatingStore["matchupResults"] = {};
       for (const [runId, entryRaw] of Object.entries(ratingsRaw)) {
         if (!entryRaw || typeof entryRaw !== "object") {
           continue;
@@ -1098,14 +1103,27 @@ function arenaModelPlugin() {
       for (const [key, value] of Object.entries(matchupRaw)) {
         matchupRounds[key] = clampInt(value, 0, 1_000_000_000, 0);
       }
+      for (const [key, value] of Object.entries(matchupResultsRaw)) {
+        if (!value || typeof value !== "object") continue;
+        const result = value as Record<string, unknown>;
+        if (typeof result.lowerId !== "string" || typeof result.higherId !== "string") continue;
+        matchupResults[key] = {
+          lowerId: result.lowerId,
+          higherId: result.higherId,
+          lowerWins: clampInt(result.lowerWins, 0, 1_000_000_000, 0),
+          higherWins: clampInt(result.higherWins, 0, 1_000_000_000, 0),
+          ties: clampInt(result.ties, 0, 1_000_000_000, 0),
+        };
+      }
       return {
-        version: 1,
+        version: 6,
         updatedAt: typeof obj.updatedAt === "string" ? obj.updatedAt : new Date().toISOString(),
         ratings,
         matchupRounds,
+        matchupResults,
       };
     } catch {
-      return { version: 1, updatedAt: new Date().toISOString(), ratings: {}, matchupRounds: {} };
+      return { version: 6, updatedAt: new Date().toISOString(), ratings: {}, matchupRounds: {}, matchupResults: {} };
     }
   };
 
@@ -1135,6 +1153,17 @@ function arenaModelPlugin() {
     }
     const entries = runs.map((run) => {
       const rating = store.ratings[run.runId] ?? defaultRatingEntry();
+      const levelMatch = /^level-(\d+)-ai$/.exec(run.runId);
+      const level = levelMatch ? Number.parseInt(levelMatch[1] ?? "", 10) : 0;
+      const previousId = level > 1 ? `level-${level - 1}-ai` : "";
+      const previousResult = previousId ? store.matchupResults[matchupKey(run.runId, previousId)] : undefined;
+      const previousLevelRounds = previousResult
+        ? previousResult.lowerWins + previousResult.higherWins + previousResult.ties
+        : 0;
+      const previousLevelWins = previousResult
+        ? (previousResult.higherId === run.runId ? previousResult.higherWins : previousResult.lowerWins)
+        : 0;
+      const previousLevelWinRate = previousLevelRounds > 0 ? previousLevelWins / previousLevelRounds : undefined;
       return {
         runId: run.runId,
         score: round2(Math.max(1, rating.score)),
@@ -1147,6 +1176,11 @@ function arenaModelPlugin() {
         mtimeMs: run.mtimeMs,
         spec: run.spec,
         phaseGen: run.phaseGen,
+        ...(previousLevelWinRate !== undefined ? {
+          previousLevelWinRate,
+          previousLevelRounds,
+          previousLevelCertified: previousLevelRounds >= 16 && previousLevelWinRate > 0.6,
+        } : {}),
       };
     });
     entries.sort((a, b) => {
@@ -1184,6 +1218,23 @@ function arenaModelPlugin() {
     a.score = round2(a.score + deltaA);
     b.score = round2(b.score + deltaB);
     store.matchupRounds[pairKey] = pairRounds + 1;
+    const [lowerId, higherId] = runA < runB ? [runA, runB] : [runB, runA];
+    const pairResult = store.matchupResults[pairKey] ?? (store.matchupResults[pairKey] = {
+      lowerId,
+      higherId,
+      lowerWins: 0,
+      higherWins: 0,
+      ties: 0,
+    });
+    if (outcomeA >= 0.99) {
+      if (runA === pairResult.higherId) pairResult.higherWins += 1;
+      else pairResult.lowerWins += 1;
+    } else if (outcomeA <= 0.01) {
+      if (runB === pairResult.higherId) pairResult.higherWins += 1;
+      else pairResult.lowerWins += 1;
+    } else {
+      pairResult.ties += 1;
+    }
     a.rounds += 1;
     b.rounds += 1;
     a.games += 1;
@@ -1264,27 +1315,26 @@ function arenaModelPlugin() {
           res.end("method not allowed");
           return;
         }
-        const entries = buildLeaderboardEntries().map((entry) => ({
-          runId: entry.runId,
-          label: `${entry.runId}${
-            entry.phaseGen
-              ? ` (${entry.phaseGen})`
-              : entry.runId === BASELINE_MODEL_ID
-              ? " (default baseline AI)"
-              : entry.runId === HISTORY_MODEL_ID
-              ? " (default history-shoot AI)"
-              : ""
-          } (score ${entry.score.toFixed(2)}, rounds ${entry.rounds})`,
-          score: entry.score,
-          rounds: entry.rounds,
-          games: entry.games,
-          wins: entry.wins,
-          losses: entry.losses,
-          ties: entry.ties,
-          isUnranked: entry.isUnranked,
-          mtimeMs: entry.mtimeMs,
-          spec: entry.spec,
-        }));
+        // This endpoint is for genuine saved training artifacts only. Certified
+        // built-in levels are already present locally in AI Selection and live
+        // exclusively in the leaderboard pool, avoiding misleading duplicates.
+        const store = loadRatingStore();
+        const entries = collectCompositeRuns().map((run) => {
+          const rating = store.ratings[run.runId] ?? defaultRatingEntry();
+          return {
+            runId: run.runId,
+            label: `${run.runId}${run.phaseGen ? ` (${run.phaseGen})` : ""}`,
+            score: round2(rating.score),
+            rounds: rating.rounds,
+            games: rating.games,
+            wins: rating.wins,
+            losses: rating.losses,
+            ties: rating.ties,
+            isUnranked: rating.rounds <= 0,
+            mtimeMs: run.mtimeMs,
+            spec: run.spec,
+          };
+        });
         res.setHeader("content-type", "application/json");
         res.end(JSON.stringify({ ok: true, entries }));
       });
@@ -1390,7 +1440,8 @@ function arenaModelPlugin() {
             const jobs: Array<{
               modelA: CompositeRun;
               modelB: CompositeRun;
-              spec: MatchSpec;
+              aAsPlayer: MatchSpec;
+              aAsEnemy: MatchSpec;
             }> = [];
             const updates: Array<{
               runA: string;
@@ -1413,11 +1464,12 @@ function arenaModelPlugin() {
               if (!modelA || !modelB) {
                 continue;
               }
-              jobs.push({
-                modelA,
-                modelB,
-                spec: {
-                  seed: Date.now() + i * 9973 + Math.floor(Math.random() * 1000),
+              const pairRounds = store.matchupRounds[matchupKey(modelA.runId, modelB.runId)] ?? 0;
+              const seed = mode === "manual-pair"
+                ? aiLevelCertificationSeed(pairRounds + i)
+                : Date.now() + i * 9973 + Math.floor(Math.random() * 1000);
+              const baseSpec = {
+                  seed,
                   maxSimSeconds: phaseScenario.maxSimSeconds ?? 180,
                   nodeDefense: phaseScenario.nodeDefense ?? 1,
                   baseHp: phaseScenario.baseHp ?? 1200,
@@ -1425,25 +1477,30 @@ function arenaModelPlugin() {
                   enemyGas: phaseScenario.enemyGas ?? 10000,
                   spawnBurst: phaseScenario.spawnBurst ?? 1,
                   spawnMaxActive: phaseScenario.spawnMaxActive ?? 5,
-                  aiPlayer: modelA.spec,
-                  aiEnemy: modelB.spec,
                   scenario: {
                     withBase: phaseScenario.withBase,
                     initialUnitsPerSide: phaseScenario.initialUnitsPerSide,
                   },
                   templateNames: phaseScenario.templateNames,
                   ...(phaseScenario.battlefield ? { battlefield: phaseScenario.battlefield } : {}),
-                },
+              };
+              jobs.push({
+                modelA,
+                modelB,
+                aAsPlayer: { ...baseSpec, aiPlayer: modelA.spec, aiEnemy: modelB.spec },
+                aAsEnemy: { ...baseSpec, aiPlayer: modelB.spec, aiEnemy: modelA.spec },
               });
             }
 
             const pool = await getWorkerPool();
             const settledResults = await Promise.allSettled(
-              jobs.map((job) => (
-                pool
-                  ? pool.run(job.spec).then((result) => result as MatchResult)
-                  : runMatch(job.spec)
-              )),
+              jobs.map(async (job) => {
+                const run = (spec: MatchSpec): Promise<MatchResult> => pool
+                  ? pool.run(spec).then((result) => result as MatchResult)
+                  : runMatch(spec);
+                const [aAsPlayer, aAsEnemy] = await Promise.all([run(job.aAsPlayer), run(job.aAsEnemy)]);
+                return { aAsPlayer, aAsEnemy };
+              }),
             );
             let completed = 0;
             for (let i = 0; i < settledResults.length; i += 1) {
@@ -1456,7 +1513,8 @@ function arenaModelPlugin() {
               if (!job) {
                 continue;
               }
-              const outcomeA: 0 | 0.5 | 1 = result.sides.player.tie ? 0.5 : (result.sides.player.win ? 1 : 0);
+              const comparison = compareMirroredSeries(result.aAsPlayer, result.aAsEnemy);
+              const outcomeA: 0 | 0.5 | 1 = comparison.outcomeA > 0 ? 1 : comparison.outcomeA < 0 ? 0 : 0.5;
               const ratingDelta = applyLeaderboardMatch(store, job.modelA.runId, job.modelB.runId, outcomeA);
               updates.push({
                 runA: job.modelA.runId,
@@ -1500,7 +1558,7 @@ function arenaModelPlugin() {
           return;
         }
         try {
-          const store: RatingStore = { version: 1, updatedAt: new Date().toISOString(), ratings: {}, matchupRounds: {} };
+          const store: RatingStore = { version: 6, updatedAt: new Date().toISOString(), ratings: {}, matchupRounds: {}, matchupResults: {} };
           saveRatingStore(store);
           res.setHeader("content-type", "application/json");
           res.end(JSON.stringify({ ok: true, message: "Leaderboard scores reset" }));
@@ -1554,6 +1612,9 @@ function arenaModelPlugin() {
           ties: entry.ties,
           winRate: entry.games > 0 ? entry.wins / entry.games : 0,
           leaderboardScore: entry.score,
+          previousLevelWinRate: entry.previousLevelWinRate,
+          previousLevelRounds: entry.previousLevelRounds,
+          previousLevelCertified: entry.previousLevelCertified,
           isUnranked: entry.isUnranked,
           mtimeMs: entry.mtimeMs,
           spec: entry.spec,

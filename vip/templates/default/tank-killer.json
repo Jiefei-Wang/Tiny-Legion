@@ -1,0 +1,110 @@
+{
+  "id": 3,
+  "name": "tank-killer",
+  "type": "ground",
+  "structure": [
+    {
+      "partId": 11,
+      "x": -3,
+      "y": -1
+    },
+    {
+      "partId": 11,
+      "x": -2,
+      "y": -1
+    },
+    {
+      "partId": 11,
+      "x": -1,
+      "y": -1
+    },
+    {
+      "partId": 12,
+      "x": 0,
+      "y": -1
+    },
+    {
+      "partId": 12,
+      "x": 1,
+      "y": -1
+    },
+    {
+      "partId": 11,
+      "x": -3,
+      "y": 0
+    },
+    {
+      "partId": 11,
+      "x": -2,
+      "y": 0
+    },
+    {
+      "partId": 11,
+      "x": -1,
+      "y": 0
+    },
+    {
+      "partId": 11,
+      "x": 0,
+      "y": 0
+    },
+    {
+      "partId": 11,
+      "x": 1,
+      "y": 0
+    },
+    {
+      "partId": 12,
+      "x": 2,
+      "y": 0
+    },
+    {
+      "partId": 12,
+      "x": 0,
+      "y": 1
+    }
+  ],
+  "attachments": [
+    {
+      "component": "cannonLoader",
+      "partId": 15,
+      "cell": 1,
+      "x": -2,
+      "y": -1,
+      "rotateQuarter": 0
+    },
+    {
+      "component": "control",
+      "partId": 4,
+      "cell": 2,
+      "x": -1,
+      "y": -1,
+      "rotateQuarter": 0
+    },
+    {
+      "component": "engineS",
+      "partId": 6,
+      "cell": 5,
+      "x": -3,
+      "y": 0,
+      "rotateQuarter": 0
+    },
+    {
+      "component": "engineS",
+      "partId": 6,
+      "cell": 6,
+      "x": -2,
+      "y": 0,
+      "rotateQuarter": 0
+    },
+    {
+      "component": "heavyCannon",
+      "partId": 8,
+      "cell": 8,
+      "x": 0,
+      "y": 0,
+      "rotateQuarter": 0
+    }
+  ],
+  "display": []
+}

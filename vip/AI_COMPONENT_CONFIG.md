@@ -10,11 +10,16 @@ This document describes how the Test Arena `2 x 3` AI grid is populated and reso
 
 ## Dropdown Inventory
 
-Each dropdown shows:
+Each module dropdown shows:
 
-- Built-in options (for example `baseline-*`, `neural-*-default`)
+- Reusable built-in module families (baseline, decision-tree, history, autoregressive, and skill modules)
 - Saved options discovered from arena run artifacts:
   - `arena/.arena-data/runs/*/best-composite.json`
+
+The composed-model selector is separate:
+
+- `L1 AI` through `L5 AI` are built in and resolve locally through `levelCompositeConfig(...)`.
+- Entries returned by `GET /__arena/composite/models` are genuine saved training artifacts only. A built-in level is never labeled or duplicated as a saved AI.
 
 The game dev server exposes:
 

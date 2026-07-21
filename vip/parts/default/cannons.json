@@ -1,6 +1,6 @@
 {
   "id": 7,
-  "name": "Explosive Shell Cannon",
+  "name": "cannons",
   "layer": "functional",
   "partType": "weapon",
   "partCategory": "bullet",
@@ -12,6 +12,17 @@
     "y": 0
   },
   "cells": [
+    {
+      "x": 0,
+      "y": -1,
+      "structureOccupy": false,
+      "functionalOccupy": true,
+      "needStructureBehind": true,
+      "takeDamage": true,
+      "attachPoint": false,
+      "anchorPoint": false,
+      "firePoint": false
+    },
     {
       "x": 0,
       "y": 0,
@@ -28,7 +39,7 @@
       "y": 0,
       "structureOccupy": false,
       "functionalOccupy": true,
-      "needStructureBehind": false,
+      "needStructureBehind": true,
       "takeDamage": true,
       "attachPoint": false,
       "anchorPoint": false,
@@ -36,6 +47,18 @@
     }
   ],
   "boxes": [
+    {
+      "x": 0,
+      "y": -1,
+      "occupiesStructureSpace": false,
+      "occupiesFunctionalSpace": true,
+      "needsStructureBehind": true,
+      "isAttachPoint": false,
+      "isAnchorPoint": false,
+      "isShootingPoint": false,
+      "takesDamage": true,
+      "takesFunctionalDamage": true
+    },
     {
       "x": 0,
       "y": 0,
@@ -53,7 +76,7 @@
       "y": 0,
       "occupiesStructureSpace": false,
       "occupiesFunctionalSpace": true,
-      "needsStructureBehind": false,
+      "needsStructureBehind": true,
       "isAttachPoint": false,
       "isAnchorPoint": false,
       "isShootingPoint": true,
@@ -68,11 +91,37 @@
     "requireEmptyStructureOffsets": [],
     "requireEmptyFunctionalOffsets": []
   },
+  "stats": {
+    "gasCost": 12,
+    "mass": 18,
+    "recoil": 14,
+    "hitImpulse": 11,
+    "damage": 50,
+    "range": 360,
+    "cooldown": 1.5,
+    "shootAngleDeg": 60,
+    "projectileSpeed": 700,
+    "projectileGravity": 20,
+    "penetration": 0,
+    "spreadDeg": 4,
+    "explosiveBlastRadius": 100,
+    "explosiveBlastDamage": 40,
+    "explosiveFalloffPower": 1.2
+  },
   "partProperties": {
     "computingConsumption": 1,
+    "hasAngleLimit": false,
+    "bulletType": "bullet",
+    "cooldown": 1.5,
     "fireSoundVolume": 2,
+    "spreadAngleDeg": 4,
     "explodeOnHit": true,
-    "maxCapacity": 2
+    "explodeRadius": 100,
+    "projectileSpeed": 700,
+    "projectileGravity": 20,
+    "needLoader": true,
+    "maxCapacity": 1,
+    "explosionDamage": 40
   },
   "properties": {
     "category": "weapon",
@@ -87,6 +136,7 @@
   "tags": [
     "default",
     "weapon",
-    "explosive"
+    "explosive",
+    "cannons"
   ]
 }

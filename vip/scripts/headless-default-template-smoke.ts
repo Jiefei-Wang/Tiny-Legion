@@ -4,7 +4,7 @@ import { BATTLEFIELD_HEIGHT, BATTLEFIELD_WIDTH, UNIT_OVERLAP_ALLOWANCE_RATIO } f
 import { COMPONENTS } from "../src/config/balance/weapons.ts";
 import { createInitialTemplates } from "../src/simulation/units/unit-builder.ts";
 import { instantiateUnit } from "../src/simulation/units/unit-builder.ts";
-import { applyHitToUnit } from "../src/simulation/combat/damage-model.ts";
+import { applyHitToUnit, scaleDamageByRemainingPenetration } from "../src/simulation/combat/damage-model.ts";
 import { destroyCell } from "../src/simulation/units/structure-grid.ts";
 import { canOperate } from "../src/simulation/units/control-unit-rules.ts";
 import { mergeTemplates, parseTemplate, validateTemplateDetailed } from "../src/app/template-store.ts";
@@ -17,7 +17,7 @@ declare const process: { exit: (code?: number) => void; cwd: () => string };
 type Failure = {
   templateId: number;
   templateName: string;
-  check: "validation" | "movement" | "firing" | "overlap" | "functional-support" | "weapon-capacity" | "air-isotropic" | "escape-mode" | "structure-origin";
+  check: "validation" | "movement" | "firing" | "overlap" | "functional-support" | "weapon-capacity" | "air-isotropic" | "escape-mode" | "control-loss-crash" | "structure-origin" | "penetration-scaling" | "wreck-damage";
   detail: string;
 };
 
@@ -181,10 +181,101 @@ function getMissingLoaderClasses(template: UnitTemplate): string[] {
 
 function runSmoke(): Failure[] {
   const failures: Failure[] = [];
+  const halfPenetrationDamage = scaleDamageByRemainingPenetration(220, 250, 125);
+  if (halfPenetrationDamage !== 110) {
+    failures.push({ templateId: 0, templateName: "penetration model", check: "penetration-scaling", detail: `expected 110 residual damage, got ${halfPenetrationDamage}` });
+  }
   const requiredTemplateIds = [1, 2, 5, 3, 4];
   const partCatalog = loadRuntimeMergedParts();
+  const cannonGeometrySource = partCatalog.find((part) => part.name === "cannons");
+  const cannonGeometrySeed = cannonGeometrySource?.boxes[0];
+  if (cannonGeometrySource && cannonGeometrySeed) {
+    const expandedBoxes = [
+      ...cannonGeometrySource.boxes,
+      { ...cannonGeometrySeed, x: 2, y: 0, isAnchorPoint: false, isShootingPoint: false },
+      { ...cannonGeometrySeed, x: 3, y: 0, isAnchorPoint: false, isShootingPoint: false },
+    ];
+    const reparsed = parsePartDefinition({
+      ...cannonGeometrySource,
+      cells: cannonGeometrySource.cells?.slice(0, 2),
+      boxes: expandedBoxes,
+    });
+    if (!reparsed || reparsed.boxes.length !== 5 || reparsed.cells?.length !== 5) {
+      failures.push({ templateId: 0, templateName: "cannons", check: "validation", detail: "saved editor boxes were overwritten by stale legacy cells" });
+    }
+  }
+  const canonicalPartTypes: Record<string, PartDefinition["partType"]> = {
+    "light steel": "structure",
+    "normal steel": "structure",
+    "heavy steel": "structure",
+    "small control unit": "control",
+    "medium control unit": "control",
+    "large control unit": "control",
+    "light tank engine": "engine",
+    "heavy tank engine": "engine",
+    "light aircraft engine": "engine",
+    "heavy aircraft engine": "engine",
+    firearm: "weapon",
+    cannons: "weapon",
+    "anti-tank gun": "weapon",
+    laser: "weapon",
+    "cannons reloader": "loader",
+    "anti-tank gun reloader": "loader",
+  };
+  for (const [name, expectedType] of Object.entries(canonicalPartTypes)) {
+    const part = partCatalog.find((entry) => entry.name === name);
+    if (!part || part.partType !== expectedType) {
+      failures.push({ templateId: 0, templateName: name, check: "validation", detail: `canonical Part Editor category missing or wrong type (expected ${expectedType})` });
+    }
+  }
+  const canonicalWeaponComponents = new Map<string, PartDefinition["baseComponent"]>([
+    ["firearm", "rapidGun"],
+    ["cannons", "explosiveShell"],
+    ["anti-tank gun", "heavyCannon"],
+    ["laser", "precisionBeam"],
+  ]);
+  for (const [name, expectedComponent] of canonicalWeaponComponents) {
+    const part = partCatalog.find((entry) => entry.name === name);
+    if (!part || part.baseComponent !== expectedComponent) {
+      failures.push({ templateId: 0, templateName: name, check: "validation", detail: `canonical weapon is disconnected from ${expectedComponent}` });
+    }
+  }
+  const firearmPart = partCatalog.find((part) => part.name === "firearm");
+  if (!firearmPart || firearmPart.partProperties?.hasAngleLimit !== false || firearmPart.directional !== false) {
+    failures.push({ templateId: 0, templateName: "firearm", check: "validation", detail: "firearm must be omnidirectional with hasAngleLimit=false in the editor/runtime catalog" });
+  }
   const templates = loadRuntimeMergedTemplates(partCatalog);
   const defaultTemplateIds = new Set(readTemplateDir(`${process.cwd().replace(/\\/g, "/")}/templates/default`, partCatalog).map((template) => template.id));
+
+  const tankTemplate = templates.find((template) => template.id === 1);
+  if (tankTemplate) {
+    const duplicateControlTemplate: UnitTemplate = {
+      ...tankTemplate,
+      id: 999_010,
+      name: "duplicate control fixture",
+      attachments: [...tankTemplate.attachments, { component: "control", partId: 3, cell: 9, x: 2, y: 1 }],
+    };
+    const duplicateControlValidation = validateTemplateDetailed(duplicateControlTemplate, { partCatalog });
+    if (!duplicateControlValidation.errors.includes("exactly one control unit is required")) {
+      failures.push({ templateId: duplicateControlTemplate.id, templateName: duplicateControlTemplate.name, check: "validation", detail: "multiple controls were not rejected" });
+    }
+
+    const overCapacityTemplate: UnitTemplate = {
+      ...tankTemplate,
+      id: 999_011,
+      name: "control capacity fixture",
+      attachments: tankTemplate.attachments.map((attachment) => attachment.component === "control"
+        ? { ...attachment, partId: 3 }
+        : { ...attachment }),
+    };
+    const overCapacityValidation = validateTemplateDetailed(overCapacityTemplate, { partCatalog });
+    if (!overCapacityValidation.errors.some((error) => error.startsWith("control unit capacity exceeded"))) {
+      failures.push({ templateId: overCapacityTemplate.id, templateName: overCapacityTemplate.name, check: "validation", detail: "functional-cell capacity overflow was not rejected" });
+    }
+    if (instantiateUnit([overCapacityTemplate], overCapacityTemplate.id, "player", 0, 0, { partCatalog }) !== null) {
+      failures.push({ templateId: overCapacityTemplate.id, templateName: overCapacityTemplate.name, check: "validation", detail: "runtime instantiated an over-capacity craft" });
+    }
+  }
 
   const supportPart: PartDefinition = {
     id: 999_001,
@@ -233,6 +324,10 @@ function runSmoke(): Failure[] {
     if (!supportUnit.alive || canOperate(supportUnit) || supportUnit.vx !== 0 || supportUnit.vy !== 0) {
       failures.push({ templateId: supportTemplate.id, templateName: supportTemplate.name, check: "functional-support", detail: "controller loss did not leave a persistent, stationary, inoperable wreck" });
     }
+    const wreckHitResult = applyHitToUnit(supportUnit, 1000, 0, 1, 0, true);
+    if (wreckHitResult.structureDamage <= 0 || supportUnit.alive) {
+      failures.push({ templateId: supportTemplate.id, templateName: supportTemplate.name, check: "wreck-damage", detail: "inoperable wreck did not continue taking structure damage until fully destroyed" });
+    }
   }
 
   for (const template of templates) {
@@ -273,7 +368,12 @@ function runSmoke(): Failure[] {
   const logs: string[] = [];
   const canvas = createMockCanvas(BATTLEFIELD_WIDTH, BATTLEFIELD_HEIGHT);
   const hooks = makeHooks(logs);
-  const battle = new BattleSession(canvas, hooks, templates, { partCatalog });
+  const battle = new BattleSession(canvas, hooks, templates, {
+    partCatalog,
+    disableAutoEnemySpawns: true,
+    disableEnemyMinimumPresence: true,
+    disableDefaultStarters: true,
+  });
 
   const node: MapNode = {
     id: "headless-test",
@@ -285,7 +385,7 @@ function runSmoke(): Failure[] {
   };
   battle.start(node);
 
-  const bastionTemplate = templates.find((template) => template.id === 2);
+  const bastionTemplate = templates.find((template) => template.id === 1);
   const bastion = bastionTemplate
     ? instantiateUnit(templates, bastionTemplate.id, "player", 640, 500, { partCatalog })
     : null;
@@ -296,10 +396,10 @@ function runSmoke(): Failure[] {
     : null;
   if (!bastionTemplate || !bastion || !bastionFrontSecondRow) {
     failures.push({
-      templateId: 2,
-      templateName: bastionTemplate?.name ?? "Bastion Line Tank",
+      templateId: 1,
+      templateName: bastionTemplate?.name ?? "tank",
       check: "structure-origin",
-      detail: "failed to create Bastion second-row origin fixture",
+      detail: "failed to create tank second-row origin fixture",
     });
   } else {
     const beforePosition = { x: bastion.x, y: bastion.y };
@@ -322,6 +422,13 @@ function runSmoke(): Failure[] {
         check: "structure-origin",
         detail: "destroying the front cell of the second row changed the craft position, local coordinates, or surviving weapon geometry",
       });
+    }
+    // The canonical tank now has more than one weapon. Disable every surviving
+    // weapon explicitly so this fixture tests escape-facing behavior rather
+    // than depending on which structure cell happens to support the last gun.
+    for (const weaponAttachmentId of bastion.weaponAttachmentIds) {
+      const weaponAttachment = bastion.attachments.find((attachment) => attachment.id === weaponAttachmentId);
+      if (weaponAttachment) weaponAttachment.alive = false;
     }
     const facingBeforeEscape = bastion.facing;
     battle.getState().units.push(bastion);
@@ -538,8 +645,8 @@ function runSmoke(): Failure[] {
     }
   }
 
-  const loaderTemplate = templates.find((template) => template.id === 4);
-  const airTemplate = templates.find((template) => template.id === 5);
+  const loaderTemplate = templates.find((template) => template.id === 5);
+  const airTemplate = templates.find((template) => template.id === 4);
   if (loaderTemplate && airTemplate) {
     const escapeBattle = new BattleSession(canvas, makeHooks([]), templates, {
       partCatalog,
@@ -579,6 +686,45 @@ function runSmoke(): Failure[] {
       weaponLossBattle.update(dt, idleKeys);
       if (!airUnit.escapeActive || airUnit.airDropActive || weaponLossBattle.getSelection().playerControlledId === airUnit.id) {
         failures.push({ templateId: airTemplate.id, templateName: airTemplate.name, check: "escape-mode", detail: "aircraft with destroyed weapons did not enter non-crashing, uncontrollable escape mode" });
+      }
+    }
+
+    const controlLossBattle = new BattleSession(canvas, makeHooks([]), templates, {
+      partCatalog,
+      disableAutoEnemySpawns: true,
+      disableEnemyMinimumPresence: true,
+      disableDefaultStarters: true,
+    });
+    controlLossBattle.start(node);
+    controlLossBattle.arenaDeploy("player", airTemplate.id, { chargeGas: false, ignoreCap: true });
+    const controlLossUnit = controlLossBattle.getState().units.find((unit) => unit.templateId === airTemplate.id && unit.side === "player");
+    if (!controlLossUnit) {
+      failures.push({ templateId: airTemplate.id, templateName: airTemplate.name, check: "control-loss-crash", detail: "failed to deploy aircraft control-loss fixture" });
+    } else {
+      const control = controlLossUnit.attachments.find((attachment) => COMPONENTS[attachment.component].type === "control");
+      if (!control) {
+        failures.push({ templateId: airTemplate.id, templateName: airTemplate.name, check: "control-loss-crash", detail: "aircraft fixture has no control attachment" });
+      } else {
+        controlLossBattle.setControlByClick(controlLossUnit.x, controlLossUnit.y);
+        const startX = controlLossUnit.x;
+        const startY = controlLossUnit.y;
+        control.alive = false;
+        controlLossBattle.update(dt, idleKeys);
+        const beganVerticalDrop = controlLossUnit.airDropActive
+          && controlLossUnit.y > startY
+          && Math.abs(controlLossUnit.x - startX) < 1e-6
+          && controlLossBattle.getSelection().playerControlledId !== controlLossUnit.id;
+        for (let frame = 0; frame < 600 && controlLossUnit.alive; frame += 1) {
+          controlLossBattle.update(dt, idleKeys);
+        }
+        if (!beganVerticalDrop || controlLossUnit.alive) {
+          failures.push({
+            templateId: airTemplate.id,
+            templateName: airTemplate.name,
+            check: "control-loss-crash",
+            detail: `controller loss did not produce a direct destructive fall: beganVerticalDrop=${beganVerticalDrop}, alive=${controlLossUnit.alive}`,
+          });
+        }
       }
     }
   }

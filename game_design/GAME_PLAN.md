@@ -108,13 +108,18 @@ Current implementation includes dedicated in-app editor tabs where the player ca
 - Functional template entries now persist both `component` and `partId` so user templates can reference developer-authored parts.
 - Weapon functional parts store additive orientation (`rotateQuarter`, 0..3 in 90-degree steps).
 - Functional placement now uses part footprints from part catalog definitions (instead of hardcoded component-only footprints), and footprint rotation follows `rotateQuarter`.
-- Functional parts may declare `directional: true`; only directional parts show direction UI and use rotation controls. Parts without it are undirectional by default.
+- Functional parts may declare `directional: true` to rotate their aiming/facing direction. Craft Editor footprint rotation is independent: `Q`/`E` can rotate any directional part or multi-cell functional part, including non-directional control units and engines.
 - For weapon parts with `directional: false`, template placement rotation is disabled and runtime firing facing stays fixed to the part `default direction`.
 - Effective facing for directional weapon parts is computed as `part.direction` (default facing) + template `rotateQuarter` (user rotation).
 - Functional placement supports `center place on click` mode in template editor (developer/user toggle).
 - Editor canvas uses a resizable grid up to `10x10` with right-drag panning.
 - Editor viewport input supports right-click delete/erase on the targeted cell; right-click drag still pans (click vs drag), and mouse-wheel zoom is supported in editor views.
 - Template Editor shows a 50% alpha placement ghost under the mouse for the currently selected part when the hovered placement is valid.
+- Hovering an occupied Craft Designer grid cell shows the structure block name and, when present, the functional block name. Every occupied cell of a multi-cell functional part resolves to that part's name, not only its anchor cell.
+- The Craft Inspector groups its complete functional-part palette by Part Designer type (`Control`, `Engine`, `Weapon`, and `Loader`), including all compatible control-unit sizes. Battle-only Mission Log and Controls drawers are hidden on designer screens.
+- The Craft Inspector fills the right-side height with its part palette. Craft counts and material/direction status live in a compact canvas readout at the upper-right; validation remains only in the lower-right; concise interaction hints remain only in the bottom HUD, including explicit `Q` counterclockwise and `E` clockwise rotation guidance for directional parts.
+- Placing a selected structure part on an occupied structure cell replaces that cell's material and visible name immediately, while applying the chosen block tint.
+- Missing structure behind a functional part is a soft Craft Editor constraint: the editor permits preview and placement, reports the missing support as a template validation error, and still permits saving so structure can be added later. Bounds, functional overlap, and required-clearance conflicts remain hard placement blockers.
 - Template Editor labels structure part names at cell top and functional anchor parts at cell bottom using `partId + "." + initials` (for example, `18.P` and `16.ML`).
 - In Template Editor, right-click delete is staged per cell: delete functional first; if no functional remains, delete structure (and attached display) on the next click.
 - Battle and editor views each render to their own canvas while sharing the same viewport window.
@@ -176,7 +181,7 @@ Part-level properties:
 - `recover`: structure self-recovery per second.
 - `color`: structure render/debug color.
 - `transparency`: per-block render alpha from `0` (invisible) to `1` (opaque); it does not change collision or damage behavior.
-- `computing`: control processing capability budget.
+- `computing`: maximum occupied non-control functional blocks supported by the craft's single Control Unit.
 - `power`: engine thrust power source.
 - `max speed`: engine speed cap contribution.
 - `power ground`: engine can provide ground propulsion.
@@ -325,6 +330,7 @@ File operations:
 - `Load/Select -> Copy -> Save`:
   - Copy creates a new draft with a new id.
   - Save writes a new JSON file for that new id.
+- Saving geometry persists every currently painted Part Editor block; the `boxes` model and compatibility `cells` mirror are synchronized before the file is written.
 
 Part-level property visibility (left pane):
 
@@ -333,6 +339,13 @@ Part-level property visibility (left pane):
   - `part type`
   - `tags`
   - part-type default/common fields (`gas cost`, and other per-type defaults)
+- `Category` is catalog-driven and uses the canonical gameplay names rather than technical runtime families:
+  - structure: `light steel`, `normal steel`, `heavy steel`;
+  - control: `small control unit`, `medium control unit`, `large control unit`;
+  - engine: `light tank engine`, `heavy tank engine`, `light aircraft engine`, `heavy aircraft engine`;
+  - weapon: `firearm`, `cannons`, `anti-tank gun`, `laser`;
+  - loader: `cannons reloader`, `anti-tank gun reloader`.
+- Selecting a canonical category opens that existing part; for a new unsaved draft it applies the selected part as a preset while retaining a new identity.
 - `structure` selected:
   - Show structure-only fields: `mass`, `HP`, `armor`, `recover`, `color`.
   - Hide engine/weapon/loader-only fields.
@@ -376,10 +389,41 @@ Validation and message placement:
   - summary counts near the top status/header area of the Part Editor canvas.
   - detailed issue list in the Part Editor canvas issue panel (right-buttom).
 - Save is allowed even when warnings/errors are present; messages are still shown so designers can iterate quickly.
-- Runtime control-computing rule:
-  - Each alive Control Unit contributes `computing`.
-  - Each alive weapon consumes `computing consumption` (default `1`).
-  - If total weapon computing consumption exceeds total control computing, a random weapon is disabled; this repeats until weapon computing consumption is less than or equal to control computing.
+- Control-unit rule:
+  - Every craft must contain one and only one Control Unit.
+  - Capacity counts occupied functional grid blocks from every engine, weapon, loader, and other non-control functional part; the Control Unit's own footprint is excluded.
+  - `small control unit` is `1x1` with capacity `6`; `medium control unit` is `1x2` with capacity `10`; `large control unit` is `2x4` with capacity `20`.
+  - A template exceeding its single Control Unit's capacity is invalid and cannot spawn.
+
+### 4.0.6 Canonical Combat Part Set
+
+Weapons:
+
+- `firearm`: omnidirectional with no firing-angle limit, `0.5s` cooldown, `5` damage, `0` penetration, and no blast; intended for `light steel`.
+- `cannons`: `2s` cooldown, `50` direct damage, `0` penetration, `100` blast radius, `40` blast damage, `1x2` footprint, and requires `cannons reloader`; intended for `normal steel`.
+- `anti-tank gun`: `4s` cooldown, `220` damage, `250` penetration, no blast, `1x2` footprint, and requires `anti-tank gun reloader`; intended for `heavy steel`.
+- `laser`: hits across its range without flight time, renders as a short-lived straight beam, has `0.1s` cooldown, `5` damage, `0` penetration, and no blast; intended for `light steel`.
+
+Structure:
+
+- `light steel`: mass `10`, HP `25`, armor `0`, recovery `0/s`.
+- `normal steel`: mass `50`, HP `100`, armor `10`, recovery `10/s`.
+- `heavy steel`: mass `100`, HP `200`, armor `15`, recovery `20/s`.
+
+Engines:
+
+- `light tank engine`: `1x1`; high-speed ground propulsion for light and medium craft.
+- `heavy tank engine`: `2x2`; low speed cap and enough power to move heavy craft.
+- `light aircraft engine`: `1x1`; high-speed air propulsion.
+- `heavy aircraft engine`: `2x2`; medium-speed air propulsion for larger aircraft.
+
+Canonical craft templates use these exact names and roles:
+
+- `tank`: slow ground craft with `cannons`, `heavy steel`, `heavy tank engine`, `cannons reloader`, and one `medium control unit`.
+- `anti-aircraft vehicle`: fast ground craft with `firearm`, `light steel`, `light tank engine`, and one `small control unit`.
+- `tank-killer`: medium-speed ground craft with `anti-tank gun`, `normal steel`, `light tank engine`, `anti-tank gun reloader`, and one `small control unit`.
+- `fighter aircraft`: fast air craft with `firearm`, `light steel`, `light aircraft engine`, and one `small control unit`.
+- `attack aircraft`: medium-speed air craft with `cannons`, `light steel`, `heavy aircraft engine`, `cannons reloader`, and one `medium control unit`.
 
 ## 4.1 Structure Layer (Outer)
 
@@ -424,7 +468,7 @@ Attachment rules:
 - Structure overlapped by a functional part receives direct hits normally, including its armor deduction.
 - Hits on exposed functional geometry relay all damage to the attached structure cell closest to the hit point and ignore that cell's armor.
 - A functional component can attach to multiple structure cells; destruction of any attached cell destroys the whole functional component.
-- Destroying every controller makes the craft an inoperable wreck: it remains visible at a fixed battlefield position but cannot move or fire.
+- Destroying every controller makes a ground craft an inoperable wreck that remains visible at a fixed battlefield position and cannot move or fire. An aircraft instead loses flight control immediately, drops vertically, and is destroyed on ground impact.
 - A unit can have one or more Control Units.
 
 ### Functional Module Catalog
@@ -467,7 +511,7 @@ Display layer provides optional visual mesh/sprite styling and silhouette polish
   - no mass contribution
   - no functional contribution
 - Physics, collision, damage, and module breakage are evaluated only on Structure + Functional layers.
-- Each structure cell is the visible craft body: it uses a shared armor-panel texture with the structure part's color as its default tint. The Craft Designer can save a different tint per cell, including a color-only paint mode that preserves the cell's material, armor, mass, HP, and texture.
+- Each structure cell is the visible craft body: it uses a shared armor-panel texture with the structure part's color as its default tint. The Craft Designer can save a different tint per cell; placing a structure block onto an occupied cell replaces the prior material and its stats.
 - Battle rendering does not add a separate full-tank or full-aircraft silhouette behind the structure grid; the designed blocks define the craft's visible shape.
 - Craft paint (`panel`, `stripe`, and `glass`) is a visual-only display layer attached to structure and is always rendered in battle; it does not contribute armor, mass, HP, or simulation collisions.
 - Functional parts use their own recognizable icon in the craft palette/editor grid and a component-specific vector glyph on the Phaser battlefield.
@@ -617,14 +661,17 @@ No simple fixed hitpoint exchange for whole units. Damage emerges from impacts, 
 5. A functional box overlapping live structure resolves as a normal direct structure hit.
 6. An exposed functional hit relays full damage to its closest attached structure cell with no armor deduction.
 7. If any attached structure cell is destroyed or detached, the functional module is removed with it.
-8. Connectivity rule: any structure cluster disconnected from all alive control units is destroyed immediately.
+8. Connectivity rule: any structure cluster disconnected from the craft's alive Control Unit is destroyed immediately.
+   - Destroying the Control Unit makes remaining ground structure a stationary, inoperable wreck. An aircraft enters an uncontrolled vertical crash and is destroyed when it hits the ground.
 9. Armor is applied as flat damage deduction per impacted cell: `damageAfterArmor = incomingDamage - cellArmor`, `effectiveDamage = damageAfterArmor <= 0 ? 1 : damageAfterArmor`.
 10. Hit impulse still applies physical response (knockback/vibration) even on low/fully mitigated hits.
-11. Projectile penetration is tracked separately from damage:
+11. Projectile penetration controls both continuation and residual direct-hit damage:
    - each shot starts with weapon `penetration`,
    - per-hit cost is `(cellArmor * PENETRATION_ARMOR_SCALER) + cellCurrentHPBeforeDamage`,
    - projectile continues only while `remainingPenetration > 0`,
-   - penetration does not scale damage amount.
+   - the first cell receives full weapon damage,
+   - each later cell receives `baseDamage * (remainingPenetration / initialPenetration)` before its own penetration cost is deducted,
+   - a zero-penetration shot still damages its first cell and then stops.
 12. A structure cell's visible world-space panel and projectile hitbox use the same canonical size, so hits anywhere on a live displayed cell register consistently.
 
 Structure durability recovery:
@@ -843,6 +890,7 @@ The current playable implementation already includes:
 - Engine modules now provide explicit power; object mobility scales proportionally with total engine power and inversely with current mass.
 - Each engine type also defines a max-speed cap. With multiple engines, cap is aggregated by power-weighted average, and real speed is power-to-mass based but never exceeds aggregated max speed.
 - Aircraft must have pre-gravity thrust greater than the gravity budget. Otherwise they lose lift, fall, and crash at a random ground-lane Y.
+- Aircraft also enter the same direct fall-and-destroy crash path immediately when their Control Unit is lost, even if their engines remain intact.
 - Heavy-shot/explosive/tracking weapons now use loader modules and charge-based firing:
   - Loaders process one supported weapon at a time.
   - Player-controlled selected weapon is prioritized for loading.
@@ -872,6 +920,7 @@ The current playable implementation already includes:
 - Angle deadband + slew-rate damping is applied only in `baseline-shoot` (`baseline-game-ai`); `history-shoot`, `autoreg-shoot`, and `w11-shoot` use direct per-tick ballistic aim angles without AI-side angle-change clamping.
 - Leaderboard model pool no longer auto-injects built-in autoreg alpha-sweep entries; autoreg leaderboard entries now come from saved trained runs.
 - Target module returns ranked targets (sorted by importance); movement consumes ranked targets + battlefield state; shooting consumes ranked targets + movement intent + weapon readiness.
+- Composite shoot decisions may emit one independent fire plan per ready slot, allowing mixed-weapon craft to aim/fire compatible weapons independently while the common command executor still enforces auto-fire, cooldown, angle, and manual-control rules.
 - AI shot-feedback correction has been removed; baseline/composite firing now uses direct ballistic solve + runtime angle constraints without per-shot adaptive aim-offset accumulation.
 - Arena supports composite module wiring (`target/movement/shoot`) so each module can be replaced and compared independently.
 - Arena headless match specs are composite-only (`familyId: "composite"`); baseline behavior is represented as a baseline composite bundle rather than a standalone AI family.
@@ -886,16 +935,17 @@ The current playable implementation already includes:
 - Composite phase scenarios are configurable in `arena/composite-training.phases.json`, including per-phase template-name filters with wildcard support (`*`) and battlefield sizing (`width`, `height`, optional `groundHeight`).
 - Test Arena includes a `2 x 3` AI component grid (player/enemy x target/movement/shoot), and each cell is a single dropdown for quick switching.
 - Test Arena AI Selection now includes per-side composed-model selectors (saved leaderboard runs + built-ins); selecting a composed model applies the full target/movement/shoot bundle for that side.
-- Built-in composed choices expose the preserved baseline plus `low`, `medium`, and `high` skill tiers. Skill tiers improve target coordination, predictive shooting, and danger-aware movement without replacing the baseline option.
-- `npm --prefix arena run eval:tiers -- --seeds <N>` runs deterministic headless matchup series (two games per seed with sides swapped) and fails unless each higher adjacent tier wins at least 80% of those mirrored series.
+- Built-in composed choices are the certified `L1` through `L5` ladder. `L1` is the former full high-skill composite. `L2` adds per-weapon capability/impact-cell decisions and acceleration-aware intercepts; `L3` uses weighted target-history regression; `L4` adds defensive base-pressure target ranking; and `L5` uses autoregressive target velocity. The ladder never inspects template IDs/names or part IDs/names: it derives decisions from live range, ballistics, weapon class, damage, penetration, armor, structure, enemy motion, and battlefield position, so newly authored valid craft participate without AI-specific rules.
+- `npm --prefix arena run eval:levels -- --minLevel 2 --maxLevel 5 --seeds 16 --threshold 0.6` runs the real `p4-leaderboard` scenario as deterministic, two-game side-swapped series and fails unless every higher adjacent level wins strictly more than 60% of series. The certified results are L2/L1 `10/16`, L3/L2 `11/16`, L4/L3 `10/16`, and L5/L4 `10/16`. Tested L6 prediction variants did not clear the threshold, so L5 is the current ceiling.
 - Each dropdown lists built-in module options plus all saved module specs discovered from arena run artifacts (`arena/.arena-data/runs/*/best-composite.json`).
 - Grid changes apply immediately (no manual apply step).
 - Left-side mode menu includes a dedicated `Leaderboard` screen (new row in the mode grid) that shows ranked composite run scores.
 - Leaderboard rating is match-based: each composite run starts at score `100`, then head-to-head results adjust both models using an Elo-style expected-outcome update (larger score gaps produce larger swing factors).
-- Leaderboard competition runtime uses `p4-leaderboard` scenario settings from `arena/composite-training.phases.json` (template filters + battlefield size/ground-height), so rank battles align with training phase-4 conditions.
+- Leaderboard competition runtime uses `p4-leaderboard` settings from `arena/composite-training.phases.json`: the canonical `2000x1000` battlefield, `400` ground height, four initial units per side, every valid craft in the runtime-merged part/template catalog, fixed zero reinforcement gas, `120s` limit, and `1200` base HP. Each starter group shuffles the filtered catalog and uses distinct craft before repeating, rather than preferring hard-coded IDs. Training and ranking therefore use identical phase-4 conditions.
+- One leaderboard round is a side-swapped pair on the same seed. The pair is scored once using ordered base-HP, surviving-structure, operational-unit, and gas-worth margins, preventing a favorable spawn side or deadline tie from being credited as AI strength.
 - Elo uses pairwise diminishing-K updates (same two models -> progressively smaller K), which naturally converges under repeated head-to-head loops without hard score caps.
-- Leaderboard panel includes quick competition controls: `random pair`, `unranked vs random`, and `manual pair` modes plus configurable run count.
-- Leaderboard model pool includes built-in composed models for `baseline-game-ai` (`baseline-target` + `baseline-movement` + `baseline-shoot`) and `baseline-history-shoot-ai` (`baseline-target` + `baseline-movement` + `history-shoot`) so both baseline shooters are ranked directly against trained runs.
+- Leaderboard panel includes quick competition controls: `random pair`, `unranked vs random`, and `manual pair` modes plus configurable run count. Manual-pair rounds cycle the same 16 certification seeds as `eval:levels`.
+- Leaderboard model pool contains only the five certified built-ins (`level-1-ai` through `level-5-ai`). Saved training artifacts remain available in AI Selection but are not silently duplicated as built-ins. The persistent version-6 store records Elo, global W/L/T, pair rounds, and per-pair results; the UI auto-loads it and shows each level's saved win rate versus the previous level with a certification mark after 16 rounds above 60%.
 - Leaderboard `Run Competition` submits a batched request and executes rounds in parallel across CPU worker threads (all detected cores when worker runtime is available), then refreshes leaderboard/model lists after completion.
 - Test Arena module-selection contract is documented in `vip/AI_COMPONENT_CONFIG.md`.
 - Training automation script `train_ai.sh` provides module-specific optimization (`shoot`/`movement`/`target`) and full compose optimization (`compose`) with per-module source selection (`baseline|new|trained:<path>`).

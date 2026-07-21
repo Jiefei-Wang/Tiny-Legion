@@ -13,6 +13,6 @@ export const spawnBaseline: SpawnFamily = {
       return { templateId: null, intervalS };
     }
     const idx = Math.floor(rng() * roster.length);
-    return { templateId: roster[Math.max(0, Math.min(roster.length - 1, idx))] ?? null, intervalS };
+    return { templateId: roster[Math.max(0, Math.min(roster.length - 1, idx))]?.templateId ?? null, intervalS };
   },
 };

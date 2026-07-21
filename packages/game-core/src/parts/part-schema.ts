@@ -484,7 +484,7 @@ export function createImplicitPartDefinition(component: ComponentId): PartDefini
       minLoadTime: stats.loader?.minLoadTime,
       minBurstInterval: stats.loader?.minBurstInterval,
       maxCapacity: stats.type === "weapon" ? stats.maxLoadedAmmo : undefined,
-      computing: stats.type === "control" ? 1 : undefined,
+      computing: stats.type === "control" ? 20 : undefined,
       computingConsumption: stats.type === "weapon" ? 1 : undefined,
     },
     properties: {
@@ -861,7 +861,10 @@ export function parsePartDefinition(input: unknown): PartDefinition | null {
       };
     })
     .filter((entry): entry is NonNullable<typeof entry> => entry !== null);
-  const boxes = cellsAsBoxes.length > 0 ? cellsAsBoxes : parsedBoxes;
+  // `boxes` is the current editor/runtime geometry model. `cells` remains a
+  // compatibility mirror for older files, so it must not overwrite newer
+  // editor geometry when both representations are present.
+  const boxes = parsedBoxes.length > 0 ? parsedBoxes : cellsAsBoxes;
 
   const fallback = layer === "structure"
     ? createImplicitStructurePartDefinition(baseComponent)
@@ -896,7 +899,9 @@ export function parsePartDefinition(input: unknown): PartDefinition | null {
   const ccwAngleRaw = readOptionalNumber(partPropertiesRecord.ccwAngle);
   const legacyShootHalfAngle = readLegacyHalfShootAngle(partPropertiesRecord.shootAngleDeg);
   const hasLegacyLimit = legacyShootHalfAngle !== undefined;
-  const hasAngleLimit = hasAngleLimitRaw ?? (hasLegacyLimit ? true : undefined);
+  // The Part Editor renders only an explicit true value as enabled. Normalize
+  // missing weapon flags to false so editor state and runtime behavior agree.
+  const hasAngleLimit = hasAngleLimitRaw ?? (hasLegacyLimit ? true : (normalizedPartType === "weapon" ? false : undefined));
   const fallbackLegacyHalfAngle = legacyShootHalfAngle;
   const cwAngle = cwAngleRaw ?? (hasAngleLimit === true ? fallbackLegacyHalfAngle : undefined);
   const ccwAngle = ccwAngleRaw ?? (hasAngleLimit === true ? fallbackLegacyHalfAngle : undefined);
@@ -1143,12 +1148,8 @@ export function getPartFootprintOffsets(part: PartDefinition, rotateQuarterRaw: 
 }
 
 export function normalizePartAttachmentRotate(
-  part: PartDefinition,
+  _part: PartDefinition,
   rotateQuarterRaw: number,
 ): 0 | 1 | 2 | 3 {
-  const rotateQuarter = normalizeRotateQuarter(rotateQuarterRaw);
-  if (!part.directional) {
-    return 0;
-  }
-  return rotateQuarter;
+  return normalizeRotateQuarter(rotateQuarterRaw);
 }

@@ -126,6 +126,25 @@ body {
   overflow-x: hidden;
 }
 
+.app-shell.craft-editor-mode .right-panel { overflow: hidden; }
+.app-shell.craft-editor-mode .context-inspector-card {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+.app-shell.craft-editor-mode #selectedInfo {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+.app-shell.craft-editor-mode .editor-comp-scroll {
+  flex: 1;
+  min-height: 0;
+  max-height: none;
+}
+
 .left-panel {
   --sidebar-nav-height: 202px;
   display: grid;
@@ -671,6 +690,7 @@ button.active {
   .node-emblem { flex-basis:27px; width:27px; height:27px; }
 }
 .utility-drawer { padding:0 !important; overflow:hidden; }
+.app-shell.editor-mode .right-panel > .utility-drawer { display:none; }
 .utility-drawer > summary { padding:14px 13px; color:#dfeef7; font-size:13px; font-weight:800; cursor:pointer; list-style:none; }
 .utility-drawer > summary::after { content:"+"; float:right; color:#6be4c1; font-size:16px; font-weight:400; }
 .utility-drawer[open] > summary::after { content:"−"; }
@@ -704,6 +724,21 @@ button.active {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 6px;
+}
+
+.editor-comp-group + .editor-comp-group { margin-top: 10px; }
+.editor-comp-group-title {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  margin-bottom: 5px;
+  padding: 4px 2px;
+  color: #8fb2d4;
+  background: rgba(17, 27, 40, 0.96);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
 }
 
 .editor-comp-scroll {

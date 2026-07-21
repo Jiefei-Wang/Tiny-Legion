@@ -187,8 +187,11 @@ arena/src/
     composite-controller.ts
   match/
     match-types.ts
+    mirrored-series.ts
     run-match.ts
     run-single-match.ts
+  config/
+    leaderboard-scenario.ts
   spawn/
     spawn-schema.ts
     families.ts
@@ -207,7 +210,7 @@ arena/src/
 
 Notes:
 
-- Arena composite controller now resolves all configured module families to baseline target/movement/shoot behavior at runtime (baseline-only execution path).
+- Arena composite controller resolves baseline, calibrated skill-tier, and trainable module-family IDs to their game-core target/movement/shoot implementations.
 - `run-composite-training.ts` performs phased headless compare/optimization over decision-tree module parameters.
 
 Arena-specific architecture notes:
@@ -216,7 +219,9 @@ Arena-specific architecture notes:
 - Training and evaluation run headless through `WorkerPool` + `match-worker.ts` for parallel CPU usage.
 - Model ranking now prioritizes `winRateLowerBound` then `winRate`, then `score`.
 - Arena composite AI path can supply per-side `{ target, movement, shoot }` module specs that instantiate game-core `createCompositeAiController(...)`.
-- Built-in skill bundles resolve `skill-{low|medium|high}-{target|movement|shoot}` through `skill-tier-modules.ts`; baseline family IDs remain unchanged. The `eval-tiers` CLI scores each seed as a two-game, side-swapped mirrored series and exits non-zero when an adjacent tier is below the 80% series-win contract.
+- `ShootDecision`/`CombatDecision` carry normalized `firePlans[]`; `BattleSession.appendFireRequestsFromDecision(...)` deduplicates slots and converts them to ordinary `FireRequest`s, keeping enforcement centralized.
+- Headless `runMatch(...)` resets the shared unit UID counter before each seeded match. Unit-ID-derived deterministic jink phases therefore remain identical regardless of worker reuse, prior matches, or evaluation order.
+- Certified built-ins resolve through `levelCompositeConfig(...)` and `game-core/src/ai/composite/level-modules.ts`. L1 preserves the former high-skill bundle; L2-L5 compose capability-aware targeting/fire, history regression, defensive target ranking, and autoregressive prediction without craft/part identity checks. The `eval-levels` CLI loads the actual `p4-leaderboard` scenario, scores each seed as a two-game side-swapped series through `mirrored-series.ts`, and exits non-zero unless every higher adjacent level wins strictly more than 60% of 16 series.
 - `run-composite-training.ts` optimizes modules in staged order (`shoot -> movement -> target`) with phase scenarios:
   - no-base 1v1,
   - no-base NvN,
@@ -227,14 +232,20 @@ Arena-specific architecture notes:
   - scoped module optimization (`--scope shoot|movement|target|all`),
   - per-module source selection (`baseline|new|trained:<path>`),
   - optional seed composite loading (`--seedComposite`).
-- `cli.ts` supports `match`, `train-composite`, and `replay` commands (legacy `train`/`train-spawn`/`eval` flows were removed).
+- `cli.ts` lazy-loads command implementations and supports `match`, `train-composite`, `eval-levels`, `eval-tiers`, and `replay` commands.
 - `match` runtime is composite-only (`familyId: "composite"`); baseline-vs-baseline test matches are represented by baseline module bundles on both sides.
 - Replay UI (`arena-ui/src/main.ts`) still uses game interface bootstrap (`vip/src/app/bootstrap.ts`) while consuming AI/simulation primitives from `packages/game-core`.
 - Game dev server exposes `/__arena/composite/latest` for Test Arena to load latest trained composite spec from `arena/.arena-data/runs/*/best-composite.json`.
 - Game dev server exposes `/__arena/composite/leaderboard` for in-game ranking entries backed by persistent match-based rating storage (`arena/.arena-data/leaderboard/composite-elo.json`).
-- Game dev server exposes `/__arena/composite/models` (saved composed-model inventory with score/rounds/spec, including built-in `baseline-game-ai` and `baseline-history-shoot-ai` composite module bundles) and `/__arena/composite/leaderboard/compete` (run head-to-head leaderboard matches from UI controls).
+- Game dev server exposes `/__arena/composite/models` for genuine saved composed-model artifacts only. The local composed selector supplies certified L1-L5 built-ins, while `/__arena/composite/leaderboard/compete` ranks the same five-level pool without duplicating built-ins as saved models.
 - Leaderboard compete endpoint executes batched rounds in parallel using arena worker threads (`arena/.dist/.../worker-pool.js`) with all detected CPU cores when available, and falls back to single-thread execution if worker runtime is unavailable.
-- Leaderboard compete endpoint loads `p4-leaderboard` scenario from `arena/composite-training.phases.json` (global `phases` first, then optional `byComponent` fallback) and applies those template/battlefield settings to ranking matches.
+- Leaderboard compete and `eval-levels` load `p4-leaderboard` from `arena/composite-training.phases.json` using a working-directory-independent resolver. Ranking uses the canonical `2000x1000` battlefield, four fixed initial units per side, zero reinforcement gas, a `120s` limit, and the same node/base/spawn settings as phase-4 training.
+- Arena match loading parses the runtime `vip/parts/{default,user}` and `vip/templates/{default,user}` catalogs, including loader normalization, rather than silently falling back to obsolete arena-only templates. Template filters match IDs or display names.
+- Arena filters out templates with validation errors, builds the roster from every remaining catalog ID, and seeded-shuffles starter groups so distinct valid craft are used before any repeat. There is no preferred template-ID list.
+- Combat AI receives resolved per-slot weapon capabilities (`weaponClass`, effective range, damage, penetration, spread, blast radius, tracking rate, ballistics, and angle limits). Skill-tier targeting/shooting consumes those capabilities plus live unit structure and never branches on template/part identity. Baseline weapon aim offsets likewise use tracking/explosive capabilities instead of concrete component IDs.
+- Spawn-family rosters carry generic template metadata (gas cost, unit layer, structure-cell count, weapon count). `spawn-weighted` derives weights from those attributes and no longer infers roles from template-name fragments such as `tank` or `scout`.
+- Each leaderboard round runs both side assignments concurrently with one seed. `mirrored-series.ts` combines base-HP, surviving-structure, operational-unit, and gas-worth margins into one side-neutral result before the single Elo update. Deadline matches can now remain explicit ties.
+- Persistent leaderboard storage is schema version `6`; it saves Elo/global results plus per-pair W/L/T. Manual-pair competition cycles the same 16 deterministic seeds as level certification, and the leaderboard API/UI auto-loads and displays each level's persisted win rate against its previous level.
 - Elo ratings use pairwise diminishing-K updates (tracked by per-pair match count in leaderboard store) so repeated battles between the same two models converge without hard rating caps.
 
 Map node metadata supports test-only battle tuning via optional fields on `MapNode`:
@@ -270,6 +281,9 @@ Template/editor architecture notes:
 - `parts/part-schema.ts` + `parts/part-validation.ts` define part parsing and validation severity output.
 - Runtime/editor part catalog merge order is file-backed defaults -> user overrides (no implicit built-in part entries in `/__parts/*` payloads).
 - Part Designer uses dedicated default-config helpers (`vip/src/app/part-default-config.ts`) to seed values when creating a new part or switching part type/category.
+- Part Editor category options are driven by the canonical file-backed gameplay catalog for every part type. Technical schema families such as `bullet`, `beam`, `vehicle`, and `jet` remain internal and are not presented as gameplay categories.
+- Part saves use the normalized successful PUT response as the authoritative editor draft. Catalog GET requests are `no-store`, and a post-save refresh cannot overwrite the saved draft with stale pre-save data.
+- Part Editor geometry writes `boxes` and the legacy `cells` mirror together. Parsing treats `boxes` as authoritative when both exist, preventing stale legacy cells from restoring an older footprint after save.
 - Loader injection remains configurable in parse options; current dev/headless normalization persists the injected-loader result to template JSON.
 - Editor save does not block on warnings/errors; categories are surfaced in UI/logs for developer feedback.
 - Battle deploy/spawn paths validate templates and block creation when `errors` are present.
@@ -285,12 +299,14 @@ Template/editor architecture notes:
 Encode your game rules as explicit modules (not scattered checks):
 
 - `control-unit-rules.ts`
-  - at least one control unit per object.
-  - object can include multiple control units.
-  - if all controls are destroyed: object mission-killed.
+  - exactly one control unit per craft.
+  - template validation and runtime instantiation reject zero or multiple controls.
+  - the control part's `computing` value limits unique occupied non-control functional cells; its own footprint is excluded.
+  - if the control is destroyed: ground objects become persistent inoperable wrecks; aircraft enter the battle session's direct vertical crash path and are destroyed on ground impact.
 - `damage-model.ts`
   - applies localized structure damage with either normal armor deduction or explicit armor bypass for relayed functional hits.
   - applies per-cell strain recovery using material `recoverPerSecond`.
+  - exposes the canonical remaining/initial penetration damage scaler used for every follow-through hit.
 - `structure-grid.ts`
   - after cell destruction, enforces control-connectivity and destroys any disconnected structure cluster.
 - `functional-attachments.ts`
@@ -317,15 +333,12 @@ Encode your game rules as explicit modules (not scattered checks):
   - `executeCommand()` applies the command with unified enforcement of movement physics, weapon constraints, and boundary clamping.
   - command builders: `playerInputToCommand`, `aiDecisionToCommand`, `airDropReturnToCommand`, `retreatToCommand`.
   - Escape return delays its base-facing command for one second so newly asymmetric damage remains spatially stable before the retreat turn.
-  - `alive` represents a unit that remains present in battlefield state; `canOperate(unit)` distinguishes active units from persistent controller-loss wrecks. Active counts, spawning, targeting, collision separation, and arena scoring exclude inoperable wrecks.
+  - `alive` represents a unit that remains present in battlefield state; `canOperate(unit)` distinguishes active units from persistent ground controller-loss wrecks and falling controller-loss aircraft. Active counts, spawning, targeting, collision separation, and arena scoring exclude inoperable units.
   - controller priority: player-controlled available weapon → thrust-loss air-drop → escape return → armed AI decision tree.
   - weapon availability means a surviving weapon has a loaded round, does not require a loader, or has a surviving compatible loader that can eventually reload it.
   - loss of all weapon availability sets persistent `UnitInstance.escapeActive`, releases player control immediately, and routes both ground and air units through return-to-base escape behavior.
   - `CommandResult` reports which slots fired and which were blocked (with reason).
-  - weapon-control computing budget is enforced per unit:
-    - control attachments contribute computing capacity (`partProperties.computing`, default `1` each),
-    - weapon attachments consume computing (`partProperties.computingConsumption`, default `1` each),
-    - if consumption exceeds capacity, random alive weapons are disabled until budget is satisfied.
+  - craft control capacity is validated before spawn: the one Control Unit's `partProperties.computing` must cover all unique occupied non-control functional cells.
 
 This keeps your physics behavior consistent across all systems.
 
@@ -484,6 +497,7 @@ Editor UX implementation details:
 - Functional component rotation/rendering now keys off a `directional` property (default undirectional).
 - Directional weapon facing uses additive composition: part-level default `direction` + runtime/template `rotateQuarter`.
 - Directional angle limits apply to weapons through `hasAngleLimit` + `cwAngle`/`ccwAngle`; engines are isotropic.
+- Parsed file-backed weapons normalize a missing `hasAngleLimit` to `false`, matching the Part Editor's unchecked state; runtime and AI use that normalized property before any legacy component fallback.
 - Editor grid is user-resizable (up to 10x10) and supports mouse drag panning.
 - Template editor supports optional center-based placement (`center place on click`) for multi-cell part footprints.
 - Runtime unit instancing and battle rendering consume template coordinates, so visual shape and hit cell layout match editor placement.
@@ -496,7 +510,8 @@ Editor UX implementation details:
 - `BattleSessionOptions.movementSpeedMultiplier` and the live `BattleSession.setMovementSpeedMultiplier(...)` setter scale commanded ground acceleration/velocity caps and commanded air speed without changing lift eligibility, gravity, recoil, or projectile physics. The shared default is `2x` and is bounded to `0.1x..10x` in `config/balance/battlefield.ts`.
 - Browser bootstrap persists the Global Settings payload under `forge-command.global-settings.v1`; the Developer Tools -> Global Settings panel saves the movement and battle-sound multipliers, applies movement to the active `BattleSession`, and exposes sound to the Phaser renderer through a live getter.
 - Projectile runtime state now carries firing origin metadata (`sourceUnitType`, `fireOriginY`, `initialVy`) so ground-vehicle non-tracking shots fired above horizontal can be terminated when they fall too far below the firing origin, while downward-fired shots remain unaffected.
-- Projectile runtime state also carries penetration state (`remainingPenetration`) plus per-part hit keys so one projectile can pass through multiple parts while never damaging the same part twice.
+- Projectile runtime state carries `initialPenetration`, `remainingPenetration`, residual `currentDamage`, and per-part hit keys. The first hit uses full damage; later hits scale by remaining/initial penetration, and the same projectile never damages one part twice.
+- Precision-beam fire is resolved as an instant full-range projectile sweep. A separate short-lived `beamEffects` snapshot renders the complete straight laser line without coupling visual lifetime to collision lifetime.
 - Structure-cell world sizing is centralized in `getStructureCellSize(...)` from battlefield balance config. Phaser rendering, projectile AABBs, targeting points, legacy Canvas/debug rendering, debris, and weapon geometry consume that shared size so presentation and hit resolution remain aligned.
 - AI shot-feedback correction has been removed from runtime projectile state and despawn handling; projectile aim now remains purely command/solver-driven for deterministic behavior.
 - Baseline shoot module now applies anti-jitter lead smoothing (filtered target velocity, partial lead gain with acceleration guard, and per-weapon aim slew/deadband) before issuing fire angles.
@@ -506,7 +521,7 @@ Editor UX implementation details:
 - Composite shoot module resolver now supports `w11-shoot`, which computes lead velocity as a direct non-negative weighted blend of 11 lag velocities (`v1..v11`) derived from target-history interval averages only (no instantaneous-velocity sample, no sum-to-1 normalization), driven by trainable module params `shoot.alpha1..shoot.alpha11`.
 - AI-side angle deadband/slew damping is intentionally scoped to `baseline-shoot` only; `history-shoot`, `autoreg-shoot`, and `w11-shoot` keep ballistic solve output angles without additional per-tick angle-change clamping.
 - `train-composite` supports `--shootFamily history-shoot`, `--shootFamily w11-shoot`, and `--shootFamily autoreg-shoot`; when `shootSource=new`, Arena seeds default params (`history`: `history.recencyPower=1.0`, `w11`: descending alpha weights, `autoreg`: `alpha=0.5`) and mutates them during optimization.
-- Dev leaderboard model inventory keeps baseline and history built-ins; `autoreg-shoot` appears in leaderboard only from saved trained run artifacts.
+- Dev leaderboard model inventory keeps the five certified level built-ins. `history-shoot`, `autoreg-shoot`, and other trainable families remain reusable through saved run artifacts and the per-module selector.
 - Air units compare isotropic jet thrust speed against gravity; only the post-gravity remainder becomes movement speed.
 - Horizontal, vertical, and diagonal movement share that same speed magnitude.
 - If jet thrust cannot overcome gravity, units transition into the air-drop crash path.
@@ -605,7 +620,7 @@ If you want pure JavaScript (no TypeScript), use `vanilla` template and remove `
 ## 13. First Implementation Milestones
 
 1. Boot app + fixed simulation loop + Phaser battle scene.
-2. Implement structure grid + attachment rules + at-least-one control unit validation.
+2. Implement structure grid + attachment rules + exactly-one control unit and functional-cell-capacity validation.
 3. Implement impulse hit/recoil and mass-based velocity changes.
 4. Add damage pipeline (structure breach -> module loss).
 5. Add simple AI and battle win/loss flow.

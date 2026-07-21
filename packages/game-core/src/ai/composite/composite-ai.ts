@@ -1,9 +1,14 @@
-import type { ComponentId } from "../../types.ts";
+import type { ComponentId, WeaponClass } from "../../types.ts";
 import type { BattleState, UnitInstance } from "../../types.ts";
 
 export interface WeaponFireAiInput {
   componentId: ComponentId;
+  weaponClass: WeaponClass;
   damage: number;
+  penetration: number;
+  spreadDeg: number;
+  explosiveBlastRadius: number;
+  trackingTurnRateDegPerSec: number;
   shootAngleDeg?: number;
   angleLimit?: {
     hasAngleLimit?: boolean;
@@ -70,6 +75,8 @@ export interface FirePlan {
 
 export interface ShootDecision {
   firePlan: FirePlan | null;
+  /** Optional independent plans for multiple ready weapon slots in the same update. */
+  firePlans?: FirePlan[];
   fireBlockedReason: string | null;
   debugTag: string;
 }
@@ -79,6 +86,7 @@ export interface CombatDecision {
   state: "engage" | "evade";
   movement: { ax: number; ay: number; shouldEvade: boolean };
   firePlan: FirePlan | null;
+  firePlans: FirePlan[];
   debug: {
     targetId: string | null;
     decisionPath: string;
@@ -114,6 +122,7 @@ export function createCompositeAiController(modules: CompositeAiModules): Battle
       const target = modules.target.decideTarget(input);
       const movement = modules.movement.decideMovement(input, target);
       const shoot = modules.shoot.decideShoot(input, target, movement);
+      const firePlans = shoot.firePlans ?? (shoot.firePlan ? [shoot.firePlan] : []);
       const facing = target.attackPoint.x >= input.unit.x ? 1 : -1;
       const targetId = target.rankedTargets[0]?.targetId ?? null;
       return {
@@ -124,7 +133,8 @@ export function createCompositeAiController(modules: CompositeAiModules): Battle
           ay: movement.ay,
           shouldEvade: movement.shouldEvade,
         },
-        firePlan: shoot.firePlan,
+        firePlan: firePlans[0] ?? null,
+        firePlans,
         debug: {
           targetId,
           decisionPath: `${target.debugTag} > ${movement.debugTag} > ${shoot.debugTag}`,

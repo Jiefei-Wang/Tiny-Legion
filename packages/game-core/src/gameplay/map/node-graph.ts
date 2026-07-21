@@ -8,7 +8,7 @@ export function createMapNodes(): MapNode[] {
     { id: "quarry", name: "Shale Crossing", kind: "battlefield", owner: "neutral", garrison: false, reward: 60, defense: 1.08, x: 43, y: 48, links: ["mine", "oil", "relay", "delta-base"], distanceFromHome: 38 },
     { id: "delta-base", name: "Delta Relay Base", kind: "remote-base", owner: "enemy", garrison: false, reward: 100, defense: 1.35, x: 39, y: 73, links: ["oil", "quarry", "outpost"], distanceFromHome: 52 },
     { id: "relay", name: "Sky Relay", kind: "outpost", owner: "enemy", garrison: false, reward: 110, defense: 1.35, x: 72, y: 27, links: ["pass", "quarry", "outpost"], distanceFromHome: 58, outpostTemplateIds: [1], outpostRange: 30 },
-    { id: "outpost", name: "Kestrel Outpost", kind: "outpost", owner: "enemy", garrison: false, reward: 125, defense: 1.5, x: 79, y: 61, links: ["relay", "delta-base", "core"], distanceFromHome: 72, outpostTemplateIds: [1, 3], outpostRange: 26 },
+    { id: "outpost", name: "tank-killer outpost", kind: "outpost", owner: "enemy", garrison: false, reward: 125, defense: 1.5, x: 79, y: 61, links: ["relay", "delta-base", "core"], distanceFromHome: 72, outpostTemplateIds: [1, 3], outpostRange: 26 },
     { id: "core", name: "Enemy Core Base", kind: "enemy-base", owner: "enemy", garrison: false, reward: 180, defense: 1.7, x: 91, y: 38, links: ["outpost"], distanceFromHome: 92, gasDeposit: true },
   ];
 }

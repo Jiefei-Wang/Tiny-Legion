@@ -1,6 +1,6 @@
 {
   "id": 12,
-  "name": "Ceramic",
+  "name": "heavy steel",
   "layer": "structure",
   "partType": "structure",
   "baseComponent": "control",
@@ -45,16 +45,28 @@
     "requireEmptyFunctionalOffsets": []
   },
   "stats": {
-    "gasCost": 6,
-    "mass": 9
+    "gasCost": 15,
+    "mass": 100
+  },
+  "partProperties": {
+    "gasCost": 15,
+    "mass": 100,
+    "hp": 200,
+    "tag": "structure",
+    "armor": 15,
+    "recover": 20,
+    "color": "#3f4b5a",
+    "alpha": 1
   },
   "properties": {
     "category": "structure",
     "subcategory": "material",
-    "materialArmor": 1.2,
-    "materialRecoverPerSecond": 2,
-    "materialColor": "#a8d1e6",
-    "hp": 120,
+    "materialId": "ceramic",
+    "materialArmor": 15,
+    "materialRecoverPerSecond": 20,
+    "materialColor": "#3f4b5a",
+    "materialAlpha": 1,
+    "hp": 200,
     "isEngine": false,
     "isWeapon": false,
     "isLoader": false,
@@ -64,6 +76,7 @@
   "tags": [
     "default",
     "structure",
-    "material"
+    "material",
+    "heavy"
   ]
 }

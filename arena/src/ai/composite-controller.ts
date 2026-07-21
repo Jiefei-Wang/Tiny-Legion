@@ -17,6 +17,12 @@ import {
   type AiSkillTier,
 } from "../../../packages/game-core/src/ai/composite/skill-tier-modules.ts";
 import {
+  createLevelMovementAi,
+  createLevelShootAi,
+  createLevelTargetAi,
+  MAX_CERTIFIED_AI_LEVEL,
+} from "../../../packages/game-core/src/ai/composite/level-modules.ts";
+import {
   createCompositeAiController,
   type BattleAiController,
   type MovementAiModule,
@@ -443,6 +449,8 @@ void createDecisionTreeShootAtanAi;
 
 function createTargetModule(spec: CompositeModuleSpec): TargetAiModule {
   const familyId = spec.familyId.trim().toLowerCase();
+  const level = parseLevel(familyId, "target");
+  if (level) return createLevelTargetAi(level);
   const tier = parseSkillTier(familyId, "target");
   if (tier) return createSkillTierTargetAi(tier);
   if (familyId === "dt-target") return createDecisionTreeTargetAi(spec.params);
@@ -451,6 +459,8 @@ function createTargetModule(spec: CompositeModuleSpec): TargetAiModule {
 
 function createMovementModule(spec: CompositeModuleSpec): MovementAiModule {
   const familyId = spec.familyId.trim().toLowerCase();
+  const level = parseLevel(familyId, "movement");
+  if (level) return createLevelMovementAi(level);
   const tier = parseSkillTier(familyId, "movement");
   if (tier) return createSkillTierMovementAi(tier);
   if (familyId === "dt-movement") return createDecisionTreeMovementAi(spec.params);
@@ -459,6 +469,8 @@ function createMovementModule(spec: CompositeModuleSpec): MovementAiModule {
 
 function createShootModule(spec: CompositeModuleSpec): ShootAiModule {
   const familyId = spec.familyId.trim().toLowerCase();
+  const level = parseLevel(familyId, "shoot");
+  if (level) return createLevelShootAi(level);
   const tier = parseSkillTier(familyId, "shoot");
   if (tier) return createSkillTierShootAi(tier);
   if (familyId === "dt-shoot") return createDecisionTreeShootAi(spec.params);
@@ -479,17 +491,24 @@ function createShootModule(spec: CompositeModuleSpec): ShootAiModule {
 }
 
 function parseSkillTier(familyId: string, kind: ModuleKind): AiSkillTier | null {
-  for (const tier of ["low", "medium", "high"] as const) {
+  for (const tier of ["baseline", "low", "medium", "high"] as const) {
     if (familyId === `skill-${tier}-${kind}` || familyId === `${tier}-${kind}`) return tier;
   }
   return null;
 }
 
+function parseLevel(familyId: string, kind: ModuleKind): number | null {
+  const match = new RegExp(`^(?:ai-)?l(?:evel-)?(\\d+)-${kind}$`).exec(familyId);
+  if (!match) return null;
+  const level = Number.parseInt(match[1] ?? "", 10);
+  return Number.isInteger(level) && level >= 1 ? level : null;
+}
+
 export function baselineCompositeConfig(): CompositeConfig {
   return {
-    target: { familyId: "baseline-target", params: {} },
-    movement: { familyId: "baseline-movement", params: {} },
-    shoot: { familyId: "baseline-shoot", params: {} },
+    target: { familyId: "skill-baseline-target", params: {} },
+    movement: { familyId: "skill-baseline-movement", params: {} },
+    shoot: { familyId: "skill-baseline-shoot", params: {} },
   };
 }
 
@@ -498,6 +517,31 @@ export function skillTierCompositeConfig(tier: AiSkillTier): CompositeConfig {
     target: { familyId: `skill-${tier}-target`, params: {} },
     movement: { familyId: `skill-${tier}-movement`, params: {} },
     shoot: { familyId: `skill-${tier}-shoot`, params: {} },
+  };
+}
+
+export function levelCompositeConfig(level: number): CompositeConfig {
+  const normalized = Math.max(1, Math.min(MAX_CERTIFIED_AI_LEVEL, Math.floor(level)));
+  if (normalized === 3) {
+    return {
+      target: { familyId: "level-2-target", params: {} },
+      movement: { familyId: "level-2-movement", params: {} },
+      shoot: { familyId: "history-shoot", params: { "history.recencyPower": 1 } },
+    };
+  }
+  if (normalized >= 4) {
+    return {
+      target: { familyId: "dt-target", params: { "target.strategy": 3, "target.distanceWeight": 0.6 } },
+      movement: { familyId: "level-2-movement", params: {} },
+      shoot: normalized === 4
+        ? { familyId: "history-shoot", params: { "history.recencyPower": 1 } }
+        : { familyId: "autoreg-shoot", params: { alpha: 0.2 } },
+    };
+  }
+  return {
+    target: { familyId: `level-${normalized}-target`, params: {} },
+    movement: { familyId: `level-${normalized}-movement`, params: {} },
+    shoot: { familyId: `level-${normalized}-shoot`, params: {} },
   };
 }
 
