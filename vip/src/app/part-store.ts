@@ -11,9 +11,9 @@ export {
   getPartFootprintOffsets,
   isPartCompatibleWithUnitType,
   normalizePartAttachmentRotate,
-} from "../../../packages/game-core/src/parts/part-schema.ts";
+} from "../../../game-core/src/parts/part-schema.ts";
 
-import { parsePartDefinition } from "../../../packages/game-core/src/parts/part-schema.ts";
+import { parsePartDefinition } from "../../../game-core/src/parts/part-schema.ts";
 
 async function fetchPartCollection(path: string): Promise<PartDefinition[]> {
   try {

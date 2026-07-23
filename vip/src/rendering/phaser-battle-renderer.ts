@@ -3,52 +3,24 @@ import { COMPONENTS } from "../config/balance/weapons.ts";
 import { getStructureCellSize } from "../config/balance/battlefield.ts";
 import type { BattleState, UnitInstance, UnitTemplate, WeaponClass } from "../types.ts";
 import type { BattleAudioEvent, BattleSession } from "../gameplay/battle/battle-session.ts";
+import {
+  BATTLE_SAMPLE_URLS,
+  BATTLE_SPATIAL_AUDIO_CONFIG,
+  BATTLE_SYNTH_AUDIO_CONFIG,
+  DEFAULT_BATTLE_SOUND_VOLUME,
+  FIRE_SAMPLE_KEYS,
+  FIRE_SAMPLE_RATE,
+  MAX_BATTLE_SOUND_VOLUME,
+  MIN_BATTLE_SOUND_VOLUME,
+  type BattleSampleKey,
+} from "../../../game-core/src/config/sound/battle.ts";
+
+export { DEFAULT_BATTLE_SOUND_VOLUME, MAX_BATTLE_SOUND_VOLUME, MIN_BATTLE_SOUND_VOLUME };
 
 export interface BattleViewAudioContext {
   centerX: number;
   worldWidth: number;
 }
-
-export const DEFAULT_BATTLE_SOUND_VOLUME = 3;
-export const MIN_BATTLE_SOUND_VOLUME = 0;
-export const MAX_BATTLE_SOUND_VOLUME = 5;
-
-const BATTLE_SAMPLE_URLS = {
-  "fire-rapid-1": "/assets/audio/battle/fire-rapid-1.mp3",
-  "fire-rapid-2": "/assets/audio/battle/fire-rapid-2.mp3",
-  "fire-heavy-1": "/assets/audio/battle/fire-heavy-1.mp3",
-  "fire-heavy-2": "/assets/audio/battle/fire-heavy-2.mp3",
-  "fire-explosive-1": "/assets/audio/battle/fire-explosive-1.mp3",
-  "fire-explosive-2": "/assets/audio/battle/fire-explosive-2.mp3",
-  "fire-tracking-1": "/assets/audio/battle/fire-tracking-1.mp3",
-  "fire-tracking-2": "/assets/audio/battle/fire-tracking-2.mp3",
-  "fire-beam-1": "/assets/audio/battle/fire-beam-1.mp3",
-  "fire-beam-2": "/assets/audio/battle/fire-beam-2.mp3",
-  "impact-light-1": "/assets/audio/battle/impact-light-1.mp3",
-  "impact-light-2": "/assets/audio/battle/impact-light-2.mp3",
-  "impact-light-3": "/assets/audio/battle/impact-light-3.mp3",
-  "impact-light-4": "/assets/audio/battle/impact-light-4.mp3",
-  "impact-heavy-1": "/assets/audio/battle/impact-heavy-1.mp3",
-  "impact-heavy-2": "/assets/audio/battle/impact-heavy-2.mp3",
-} as const;
-
-type BattleSampleKey = keyof typeof BATTLE_SAMPLE_URLS;
-
-const FIRE_SAMPLE_KEYS: Record<WeaponClass, readonly BattleSampleKey[]> = {
-  "rapid-fire": ["fire-rapid-1", "fire-rapid-2"],
-  "heavy-shot": ["fire-heavy-1", "fire-heavy-2"],
-  explosive: ["fire-explosive-1", "fire-explosive-2"],
-  tracking: ["fire-tracking-1", "fire-tracking-2"],
-  "beam-precision": ["fire-beam-1", "fire-beam-2"],
-};
-
-const FIRE_SAMPLE_RATE: Record<WeaponClass, number> = {
-  "rapid-fire": 1.12,
-  "heavy-shot": 0.96,
-  explosive: 0.7,
-  tracking: 1,
-  "beam-precision": 1.42,
-};
 
 const color = (value: string, fallback = 0x829eba): number => {
   try {
@@ -440,8 +412,15 @@ class BattleScene extends Phaser.Scene {
     const view = this.getViewAudioContext();
     const halfWidth = Math.max(1, view.worldWidth * 0.5);
     const relative = (worldX - view.centerX) / halfWidth;
-    const pan = Math.max(-1, Math.min(1, relative));
-    const attenuation = 1 / (1 + Math.max(0, Math.abs(relative) - 0.25) * 0.75);
+    const pan = Math.max(
+      -BATTLE_SPATIAL_AUDIO_CONFIG.maxPan,
+      Math.min(BATTLE_SPATIAL_AUDIO_CONFIG.maxPan, relative),
+    );
+    const attenuation = 1 / (
+      1
+      + Math.max(0, Math.abs(relative) - BATTLE_SPATIAL_AUDIO_CONFIG.attenuationStart)
+      * BATTLE_SPATIAL_AUDIO_CONFIG.attenuationFactor
+    );
     const input = context.createGain();
     const soundVolume = Math.max(MIN_BATTLE_SOUND_VOLUME, Math.min(MAX_BATTLE_SOUND_VOLUME, this.getSoundVolume()));
     input.gain.value = volume * soundVolume * attenuation;
@@ -450,11 +429,20 @@ class BattleScene extends Phaser.Scene {
       // Air and terrain absorb the crisp upper frequencies first. Keep shots near
       // the listener unchanged, then roll the cutoff down smoothly past the
       // middle of the visible battlefield and for off-screen fire.
-      const distanceMuffle = Math.max(0, Math.min(1, (Math.abs(relative) - 0.3) / 1.2));
+      const distanceMuffle = Math.max(
+        0,
+        Math.min(
+          1,
+          (Math.abs(relative) - BATTLE_SPATIAL_AUDIO_CONFIG.muffleStart) / BATTLE_SPATIAL_AUDIO_CONFIG.muffleSpan,
+        ),
+      );
       const lowpass = context.createBiquadFilter();
       lowpass.type = "lowpass";
-      lowpass.frequency.value = 18_000 * Math.pow(900 / 18_000, distanceMuffle);
-      lowpass.Q.value = 0.7;
+      lowpass.frequency.value = BATTLE_SPATIAL_AUDIO_CONFIG.lowpassNearHz * Math.pow(
+        BATTLE_SPATIAL_AUDIO_CONFIG.lowpassFarHz / BATTLE_SPATIAL_AUDIO_CONFIG.lowpassNearHz,
+        distanceMuffle,
+      );
+      lowpass.Q.value = BATTLE_SPATIAL_AUDIO_CONFIG.lowpassQ;
       input.connect(lowpass);
       output = lowpass;
     }
@@ -487,11 +475,22 @@ class BattleScene extends Phaser.Scene {
     const view = this.getViewAudioContext();
     const halfWidth = Math.max(1, view.worldWidth * 0.5);
     const relative = (worldX - view.centerX) / halfWidth;
-    const pan = Math.max(-1, Math.min(1, relative));
-    const attenuation = 1 / (1 + Math.max(0, Math.abs(relative) - 0.25) * 0.75);
+    const pan = Math.max(
+      -BATTLE_SPATIAL_AUDIO_CONFIG.maxPan,
+      Math.min(BATTLE_SPATIAL_AUDIO_CONFIG.maxPan, relative),
+    );
+    const attenuation = 1 / (
+      1
+      + Math.max(0, Math.abs(relative) - BATTLE_SPATIAL_AUDIO_CONFIG.attenuationStart)
+      * BATTLE_SPATIAL_AUDIO_CONFIG.attenuationFactor
+    );
     const soundVolume = Math.max(MIN_BATTLE_SOUND_VOLUME, Math.min(MAX_BATTLE_SOUND_VOLUME, this.getSoundVolume()));
     const adjustedVolume = Math.max(0, Math.min(1, volume * soundVolume * attenuation));
-    const rate = Math.max(0.5, Math.min(2, baseRate * (0.96 + Math.random() * 0.08)));
+    const sampleConfig = BATTLE_SYNTH_AUDIO_CONFIG.samplePlayback;
+    const rate = Math.max(
+      sampleConfig.minRate,
+      Math.min(sampleConfig.maxRate, baseRate * (sampleConfig.jitterBase + Math.random() * sampleConfig.jitterRange)),
+    );
     if (muffleWithDistance) {
       const context = this.getAudioContext();
       const buffer = this.cache.audio.get(key) as AudioBuffer | undefined;
@@ -509,12 +508,13 @@ class BattleScene extends Phaser.Scene {
 
   private getNoiseBuffer(context: AudioContext): AudioBuffer {
     if (this.noiseBuffer && this.noiseBuffer.sampleRate === context.sampleRate) return this.noiseBuffer;
-    const buffer = context.createBuffer(1, Math.floor(context.sampleRate * 0.45), context.sampleRate);
+    const noiseConfig = BATTLE_SYNTH_AUDIO_CONFIG.noiseBuffer;
+    const buffer = context.createBuffer(1, Math.floor(context.sampleRate * noiseConfig.durationSeconds), context.sampleRate);
     const channel = buffer.getChannelData(0);
     let prior = 0;
     for (let i = 0; i < channel.length; i += 1) {
       const white = Math.random() * 2 - 1;
-      prior = prior * 0.72 + white * 0.28;
+      prior = prior * noiseConfig.priorMix + white * noiseConfig.whiteMix;
       channel[i] = prior;
     }
     this.noiseBuffer = buffer;
@@ -530,14 +530,15 @@ class BattleScene extends Phaser.Scene {
   private playFire(event: Extract<BattleAudioEvent, { kind: "fire" }>): void {
     const context = this.getAudioContext();
     if (!context) return;
-    const partVolume = Math.max(0, Math.min(2, event.volume));
+    const fireConfig = BATTLE_SYNTH_AUDIO_CONFIG.fire;
+    const partVolume = Math.max(0, Math.min(fireConfig.partMaxVolume, event.volume));
     if (partVolume <= 0) return;
-    const strength = Math.max(0, Math.min(1, event.damage / 80));
+    const strength = Math.max(0, Math.min(1, event.damage / fireConfig.strengthDamageScale));
     const samplePlayed = this.playSpatialSample(
       `fire:${event.weaponClass}`,
       FIRE_SAMPLE_KEYS[event.weaponClass],
       event.x,
-      (0.13 + strength * 0.1) * partVolume,
+      (fireConfig.sampleBaseVolume + strength * fireConfig.sampleStrengthVolume) * partVolume,
       FIRE_SAMPLE_RATE[event.weaponClass],
       true,
     );
@@ -545,22 +546,27 @@ class BattleScene extends Phaser.Scene {
       if (event.weaponClass === "heavy-shot") this.playCannonRecoilTail(context, event.x, strength);
       return;
     }
-    const profiles: Record<WeaponClass, { frequency: number; duration: number; wave: OscillatorType; noise: number }> = {
-      "rapid-fire": { frequency: 520, duration: 0.045, wave: "square", noise: 0.24 },
-      "heavy-shot": { frequency: 145, duration: 0.16, wave: "sawtooth", noise: 0.5 },
-      explosive: { frequency: 105, duration: 0.2, wave: "sawtooth", noise: 0.65 },
-      tracking: { frequency: 260, duration: 0.13, wave: "triangle", noise: 0.36 },
-      "beam-precision": { frequency: 980, duration: 0.12, wave: "sine", noise: 0.08 },
-    };
+    const profiles = fireConfig.profiles as Record<WeaponClass, { frequency: number; duration: number; wave: OscillatorType; noise: number }>;
     const profile = profiles[event.weaponClass];
-    const bus = this.createSpatialBus(context, event.x, (0.035 + strength * 0.085) * partVolume, true);
+    const bus = this.createSpatialBus(
+      context,
+      event.x,
+      (fireConfig.fallbackBaseVolume + strength * fireConfig.fallbackStrengthVolume) * partVolume,
+      true,
+    );
     const oscillator = context.createOscillator();
     const toneGain = context.createGain();
     oscillator.type = profile.wave;
-    oscillator.frequency.setValueAtTime(profile.frequency + Math.min(280, event.projectileSpeed * 0.12), context.currentTime);
-    oscillator.frequency.exponentialRampToValueAtTime(Math.max(45, profile.frequency * 0.38), context.currentTime + profile.duration);
-    toneGain.gain.setValueAtTime(0.8, context.currentTime);
-    toneGain.gain.exponentialRampToValueAtTime(0.0001, context.currentTime + profile.duration);
+    oscillator.frequency.setValueAtTime(
+      profile.frequency + Math.min(fireConfig.projectileFrequencyMax, event.projectileSpeed * fireConfig.projectileFrequencyScale),
+      context.currentTime,
+    );
+    oscillator.frequency.exponentialRampToValueAtTime(
+      Math.max(fireConfig.endingFrequencyMin, profile.frequency * fireConfig.endingFrequencyRatio),
+      context.currentTime + profile.duration,
+    );
+    toneGain.gain.setValueAtTime(fireConfig.envelopeStart, context.currentTime);
+    toneGain.gain.exponentialRampToValueAtTime(BATTLE_SYNTH_AUDIO_CONFIG.envelopeFloor, context.currentTime + profile.duration);
     oscillator.connect(toneGain).connect(bus);
     oscillator.start();
     oscillator.stop(context.currentTime + profile.duration);
@@ -569,25 +575,28 @@ class BattleScene extends Phaser.Scene {
     noise.buffer = this.getNoiseBuffer(context);
     const noiseFilter = context.createBiquadFilter();
     noiseFilter.type = event.weaponClass === "rapid-fire" ? "highpass" : "bandpass";
-    noiseFilter.frequency.value = event.weaponClass === "rapid-fire" ? 1500 : 520;
+    noiseFilter.frequency.value = event.weaponClass === "rapid-fire"
+      ? fireConfig.rapidNoiseFilterHz
+      : fireConfig.otherNoiseFilterHz;
     const noiseGain = context.createGain();
     noiseGain.gain.setValueAtTime(profile.noise, context.currentTime);
-    noiseGain.gain.exponentialRampToValueAtTime(0.0001, context.currentTime + profile.duration);
+    noiseGain.gain.exponentialRampToValueAtTime(BATTLE_SYNTH_AUDIO_CONFIG.envelopeFloor, context.currentTime + profile.duration);
     noise.connect(noiseFilter).connect(noiseGain).connect(bus);
     noise.start();
     noise.stop(context.currentTime + profile.duration);
   }
 
   private playCannonRecoilTail(context: AudioContext, worldX: number, strength: number): void {
-    const duration = 0.34 + strength * 0.12;
-    const bus = this.createSpatialBus(context, worldX, 0.045 + strength * 0.055, true);
+    const tailConfig = BATTLE_SYNTH_AUDIO_CONFIG.cannonTail;
+    const duration = tailConfig.baseDuration + strength * tailConfig.strengthDuration;
+    const bus = this.createSpatialBus(context, worldX, tailConfig.baseVolume + strength * tailConfig.strengthVolume, true);
     const boom = context.createOscillator();
     const gain = context.createGain();
     boom.type = "sine";
-    boom.frequency.setValueAtTime(82, context.currentTime);
-    boom.frequency.exponentialRampToValueAtTime(31, context.currentTime + duration);
-    gain.gain.setValueAtTime(0.85, context.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.0001, context.currentTime + duration);
+    boom.frequency.setValueAtTime(tailConfig.startFrequency, context.currentTime);
+    boom.frequency.exponentialRampToValueAtTime(tailConfig.endFrequency, context.currentTime + duration);
+    gain.gain.setValueAtTime(tailConfig.envelopeStart, context.currentTime);
+    gain.gain.exponentialRampToValueAtTime(BATTLE_SYNTH_AUDIO_CONFIG.envelopeFloor, context.currentTime + duration);
     boom.connect(gain).connect(bus);
     boom.start();
     boom.stop(context.currentTime + duration);
@@ -597,13 +606,14 @@ class BattleScene extends Phaser.Scene {
     const context = this.getAudioContext();
     if (!context) return;
     const damage = Math.max(0, event.deliveredDamage);
-    const severity = Math.max(0, Math.min(1, damage / 140));
+    const impactConfig = BATTLE_SYNTH_AUDIO_CONFIG.impact;
+    const severity = Math.max(0, Math.min(1, damage / impactConfig.severityDamageScale));
     const material = materialAcoustics(event.materialColor);
     const heavyImpact = event.weaponClass === "heavy-shot" || event.weaponClass === "explosive" || event.weaponClass === "tracking";
-    const impactKeys: readonly BattleSampleKey[] = heavyImpact
-      ? ["impact-heavy-1", "impact-heavy-2"]
-      : ["impact-light-1", "impact-light-2", "impact-light-3", "impact-light-4"];
-    const impactVolume = heavyImpact ? 0.12 + severity * 0.16 : 0.075 + severity * 0.1;
+    const impactKeys = (heavyImpact ? impactConfig.heavySamples : impactConfig.lightSamples) as readonly BattleSampleKey[];
+    const impactVolume = heavyImpact
+      ? impactConfig.heavyBaseVolume + severity * impactConfig.heavySeverityVolume
+      : impactConfig.lightBaseVolume + severity * impactConfig.lightSeverityVolume;
     if (this.playSpatialSample(
       heavyImpact ? "impact:heavy" : "impact:light",
       impactKeys,
@@ -611,21 +621,21 @@ class BattleScene extends Phaser.Scene {
       impactVolume,
       material.resonance,
     )) return;
-    const duration = 0.055 + severity * 0.2;
-    const volume = 0.018 + severity * 0.085;
+    const duration = impactConfig.baseDuration + severity * impactConfig.severityDuration;
+    const volume = impactConfig.baseVolume + severity * impactConfig.severityVolume;
     const bus = this.createSpatialBus(context, event.x, volume);
     const oscillator = context.createOscillator();
-    const tone: Record<WeaponClass, { frequency: number; wave: OscillatorType; noise: number }> = {
-      "rapid-fire": { frequency: 920, wave: "square", noise: 0.45 },
-      "heavy-shot": { frequency: 230, wave: "sawtooth", noise: 0.72 },
-      explosive: { frequency: 120, wave: "sawtooth", noise: 1 },
-      tracking: { frequency: 330, wave: "triangle", noise: 0.65 },
-      "beam-precision": { frequency: 1280, wave: "sine", noise: 0.18 },
-    };
+    const tone = impactConfig.profiles as Record<WeaponClass, { frequency: number; wave: OscillatorType; noise: number }>;
     const profile = tone[event.weaponClass];
     oscillator.type = profile.wave;
-    oscillator.frequency.setValueAtTime((profile.frequency + event.armor * 2.5) * material.resonance, context.currentTime);
-    oscillator.frequency.exponentialRampToValueAtTime(Math.max(45, profile.frequency * 0.22), context.currentTime + duration);
+    oscillator.frequency.setValueAtTime(
+      (profile.frequency + event.armor * impactConfig.armorFrequencyScale) * material.resonance,
+      context.currentTime,
+    );
+    oscillator.frequency.exponentialRampToValueAtTime(
+      Math.max(impactConfig.endingFrequencyMin, profile.frequency * impactConfig.endingFrequencyRatio),
+      context.currentTime + duration,
+    );
     const distortion = context.createWaveShaper();
     const amount = 4 + severity * 75;
     const curve = new Float32Array(256);
@@ -635,8 +645,8 @@ class BattleScene extends Phaser.Scene {
     }
     distortion.curve = curve;
     const toneGain = context.createGain();
-    toneGain.gain.setValueAtTime(0.8, context.currentTime);
-    toneGain.gain.exponentialRampToValueAtTime(0.0001, context.currentTime + duration);
+    toneGain.gain.setValueAtTime(impactConfig.envelopeStart, context.currentTime);
+    toneGain.gain.exponentialRampToValueAtTime(BATTLE_SYNTH_AUDIO_CONFIG.envelopeFloor, context.currentTime + duration);
     oscillator.connect(distortion).connect(toneGain).connect(bus);
     oscillator.start();
     oscillator.stop(context.currentTime + duration);
@@ -649,7 +659,7 @@ class BattleScene extends Phaser.Scene {
     noiseFilter.Q.value = Math.max(0.25, (1.8 - severity) / material.roughness);
     const noiseGain = context.createGain();
     noiseGain.gain.setValueAtTime(profile.noise * material.roughness * (0.018 + severity * 0.14), context.currentTime);
-    noiseGain.gain.exponentialRampToValueAtTime(0.0001, context.currentTime + duration * 1.25);
+    noiseGain.gain.exponentialRampToValueAtTime(BATTLE_SYNTH_AUDIO_CONFIG.envelopeFloor, context.currentTime + duration * 1.25);
     noise.connect(noiseFilter).connect(noiseGain).connect(bus);
     noise.start();
     noise.stop(context.currentTime + duration * 1.3);
@@ -658,25 +668,29 @@ class BattleScene extends Phaser.Scene {
   private playExplosion(event: Extract<BattleAudioEvent, { kind: "explosion" }>): void {
     const context = this.getAudioContext();
     if (!context) return;
-    const severity = Math.max(0.15, Math.min(1, event.intensity / 180));
-    const duration = 0.22 + severity * 0.38;
-    const bus = this.createSpatialBus(context, event.x, 0.08 + severity * 0.16);
+    const explosionConfig = BATTLE_SYNTH_AUDIO_CONFIG.explosion;
+    const severity = Math.max(explosionConfig.minimumSeverity, Math.min(1, event.intensity / explosionConfig.intensityScale));
+    const duration = explosionConfig.baseDuration + severity * explosionConfig.severityDuration;
+    const bus = this.createSpatialBus(context, event.x, explosionConfig.baseVolume + severity * explosionConfig.severityVolume);
     const noise = context.createBufferSource();
     noise.buffer = this.getNoiseBuffer(context);
     const lowpass = context.createBiquadFilter();
     lowpass.type = "lowpass";
-    lowpass.frequency.setValueAtTime(1600 + severity * 900, context.currentTime);
-    lowpass.frequency.exponentialRampToValueAtTime(90, context.currentTime + duration);
+    lowpass.frequency.setValueAtTime(
+      explosionConfig.lowpassBaseFrequency + severity * explosionConfig.lowpassSeverityFrequency,
+      context.currentTime,
+    );
+    lowpass.frequency.exponentialRampToValueAtTime(explosionConfig.lowpassEndFrequency, context.currentTime + duration);
     const gain = context.createGain();
-    gain.gain.setValueAtTime(0.7, context.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.0001, context.currentTime + duration);
+    gain.gain.setValueAtTime(explosionConfig.envelopeStart, context.currentTime);
+    gain.gain.exponentialRampToValueAtTime(BATTLE_SYNTH_AUDIO_CONFIG.envelopeFloor, context.currentTime + duration);
     noise.connect(lowpass).connect(gain).connect(bus);
     noise.start();
     noise.stop(context.currentTime + duration);
     const boom = context.createOscillator();
     boom.type = "sine";
-    boom.frequency.setValueAtTime(95, context.currentTime);
-    boom.frequency.exponentialRampToValueAtTime(32, context.currentTime + duration);
+    boom.frequency.setValueAtTime(explosionConfig.boomStartFrequency, context.currentTime);
+    boom.frequency.exponentialRampToValueAtTime(explosionConfig.boomEndFrequency, context.currentTime + duration);
     boom.connect(bus);
     boom.start();
     boom.stop(context.currentTime + duration);
@@ -685,37 +699,45 @@ class BattleScene extends Phaser.Scene {
   private playSpawn(unit: UnitInstance): void {
     const context = this.getAudioContext();
     if (!context) return;
-    const bus = this.createSpatialBus(context, unit.x, 0.038);
+    const spawnConfig = BATTLE_SYNTH_AUDIO_CONFIG.spawn;
+    const bus = this.createSpatialBus(context, unit.x, spawnConfig.volume);
     const oscillator = context.createOscillator();
     const gain = context.createGain();
     oscillator.type = unit.type === "air" ? "sine" : "triangle";
-    const start = unit.side === "player" ? 180 : 140;
+    const start = unit.side === "player" ? spawnConfig.playerStartFrequency : spawnConfig.enemyStartFrequency;
     oscillator.frequency.setValueAtTime(start, context.currentTime);
-    oscillator.frequency.exponentialRampToValueAtTime(unit.type === "air" ? 720 : 410, context.currentTime + 0.18);
-    gain.gain.setValueAtTime(0.7, context.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.0001, context.currentTime + 0.22);
+    oscillator.frequency.exponentialRampToValueAtTime(
+      unit.type === "air" ? spawnConfig.airEndFrequency : spawnConfig.groundEndFrequency,
+      context.currentTime + spawnConfig.rampDuration,
+    );
+    gain.gain.setValueAtTime(spawnConfig.envelopeStart, context.currentTime);
+    gain.gain.exponentialRampToValueAtTime(BATTLE_SYNTH_AUDIO_CONFIG.envelopeFloor, context.currentTime + spawnConfig.envelopeDuration);
     oscillator.connect(gain).connect(bus);
     oscillator.start();
-    oscillator.stop(context.currentTime + 0.23);
+    oscillator.stop(context.currentTime + spawnConfig.stopDuration);
   }
 
   private playEnginePulse(unit: UnitInstance, speed: number): void {
     const context = this.getAudioContext();
     if (!context) return;
     const speedRatio = Math.max(0, Math.min(1, speed / Math.max(1, unit.maxSpeed)));
-    const bus = this.createSpatialBus(context, unit.x, 0.007 + speedRatio * 0.014);
+    const engineConfig = BATTLE_SYNTH_AUDIO_CONFIG.engine;
+    const bus = this.createSpatialBus(context, unit.x, engineConfig.baseVolume + speedRatio * engineConfig.speedVolume);
     const oscillator = context.createOscillator();
     const gain = context.createGain();
     oscillator.type = unit.type === "air" ? "sawtooth" : "square";
-    oscillator.frequency.value = unit.type === "air" ? 72 + speedRatio * 90 : 38 + speedRatio * 42;
-    gain.gain.setValueAtTime(0.55, context.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.0001, context.currentTime + 0.2);
+    oscillator.frequency.value = unit.type === "air"
+      ? engineConfig.airBaseFrequency + speedRatio * engineConfig.airSpeedFrequency
+      : engineConfig.groundBaseFrequency + speedRatio * engineConfig.groundSpeedFrequency;
+    gain.gain.setValueAtTime(engineConfig.envelopeStart, context.currentTime);
+    gain.gain.exponentialRampToValueAtTime(BATTLE_SYNTH_AUDIO_CONFIG.envelopeFloor, context.currentTime + engineConfig.envelopeDuration);
     oscillator.connect(gain).connect(bus);
     oscillator.start();
-    oscillator.stop(context.currentTime + 0.21);
+    oscillator.stop(context.currentTime + engineConfig.stopDuration);
   }
 
   private updateUnitAudio(state: BattleState): void {
+    const engineConfig = BATTLE_SYNTH_AUDIO_CONFIG.engine;
     const now = this.time.now / 1000;
     const aliveIds = new Set(state.units.filter((unit) => unit.alive).map((unit) => unit.id));
     for (const unit of state.units) {
@@ -728,12 +750,17 @@ class BattleScene extends Phaser.Scene {
     for (const id of this.knownUnitIds) if (!aliveIds.has(id)) this.knownUnitIds.delete(id);
     const moving = state.units
       .map((unit) => ({ unit, speed: Math.hypot(unit.vx, unit.vy) }))
-      .filter((entry) => entry.unit.alive && entry.speed > 8)
+      .filter((entry) => entry.unit.alive && entry.speed > engineConfig.minimumMovingSpeed)
       .sort((a, b) => Math.abs(a.unit.x - this.getViewAudioContext().centerX) - Math.abs(b.unit.x - this.getViewAudioContext().centerX))
-      .slice(0, 5);
+      .slice(0, engineConfig.maxAudibleUnits);
     for (const entry of moving) {
       if ((this.nextEnginePulseByUnitId.get(entry.unit.id) ?? 0) > now) continue;
-      this.nextEnginePulseByUnitId.set(entry.unit.id, now + 0.16 + (1 - Math.min(1, entry.speed / Math.max(1, entry.unit.maxSpeed))) * 0.12);
+      this.nextEnginePulseByUnitId.set(
+        entry.unit.id,
+        now
+          + engineConfig.basePulseInterval
+          + (1 - Math.min(1, entry.speed / Math.max(1, entry.unit.maxSpeed))) * engineConfig.speedPulseInterval,
+      );
       this.playEnginePulse(entry.unit, entry.speed);
     }
   }

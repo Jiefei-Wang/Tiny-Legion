@@ -1,7 +1,7 @@
 import {
   GROUND_FIRE_Y_TOLERANCE,
-} from "../../../packages/game-core/src/config/balance/range.ts";
-import { structureIntegrity } from "../../../packages/game-core/src/simulation/units/structure-grid.ts";
+} from "../../../game-core/src/config/balance/range.ts";
+import { structureIntegrity } from "../../../game-core/src/simulation/units/structure-grid.ts";
 import {
   createAutoregShootAi,
   createHistoryWeightedShootAi,
@@ -9,28 +9,28 @@ import {
   createBaselineMovementAi,
   createBaselineShootAi,
   createBaselineTargetAi,
-} from "../../../packages/game-core/src/ai/composite/baseline-modules.ts";
+} from "../../../game-core/src/ai/composite/baseline-modules.ts";
 import {
   createSkillTierMovementAi,
   createSkillTierShootAi,
   createSkillTierTargetAi,
   type AiSkillTier,
-} from "../../../packages/game-core/src/ai/composite/skill-tier-modules.ts";
+} from "../../../game-core/src/ai/composite/skill-tier-modules.ts";
 import {
   createLevelMovementAi,
   createLevelShootAi,
   createLevelTargetAi,
   MAX_CERTIFIED_AI_LEVEL,
-} from "../../../packages/game-core/src/ai/composite/level-modules.ts";
+} from "../../../game-core/src/ai/composite/level-modules.ts";
 import {
   createCompositeAiController,
   type BattleAiController,
   type MovementAiModule,
   type ShootAiModule,
   type TargetAiModule,
-} from "../../../packages/game-core/src/ai/composite/composite-ai.ts";
-import { clamp } from "../../../packages/game-core/src/simulation/physics/impulse-model.ts";
-import { canOperate } from "../../../packages/game-core/src/simulation/units/control-unit-rules.ts";
+} from "../../../game-core/src/ai/composite/composite-ai.ts";
+import { clamp } from "../../../game-core/src/simulation/physics/impulse-model.ts";
+import { canOperate } from "../../../game-core/src/simulation/units/control-unit-rules.ts";
 import type { Params, ParamSchema } from "./ai-schema.ts";
 import type { MatchAiSpec } from "../match/match-types.ts";
 

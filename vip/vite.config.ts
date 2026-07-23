@@ -1,19 +1,177 @@
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { availableParallelism, cpus } from "node:os";
-import { resolve } from "node:path";
+import { resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 import { defineConfig } from "vite";
-import { parseTemplate } from "../packages/game-core/src/templates/template-schema.ts";
+import { parseDocument } from "yaml";
+import { parseTemplate } from "../game-core/src/templates/template-schema.ts";
 import {
   mergePartCatalogs,
   parsePartDefinition,
-} from "../packages/game-core/src/parts/part-schema.ts";
+} from "../game-core/src/parts/part-schema.ts";
 import { runMatch } from "../arena/src/match/run-match.ts";
 import { compareMirroredSeries } from "../arena/src/match/mirrored-series.ts";
 import { levelCompositeConfig } from "../arena/src/ai/composite-controller.ts";
 import { aiLevelCertificationSeed } from "../arena/src/eval/evaluate-ai-levels.ts";
-import { MAX_CERTIFIED_AI_LEVEL } from "../packages/game-core/src/ai/composite/level-modules.ts";
+import { MAX_CERTIFIED_AI_LEVEL } from "../game-core/src/ai/composite/level-modules.ts";
 import type { MatchAiSpec, MatchResult, MatchSpec } from "../arena/src/match/match-types.ts";
+import {
+  audioDir as gameCoreAudioDir,
+  configDir as gameCoreConfigDir,
+  generateGameConfig,
+  generatedConfigPath,
+} from "../game-core/scripts/generate-config.mjs";
+
+function gameCoreAudioPlugin() {
+  const allowedExtensions = new Set([".mp3", ".wav", ".ogg", ".flac", ".m4a", ".aac", ".md"]);
+  const mimeByExtension: Record<string, string> = {
+    ".mp3": "audio/mpeg",
+    ".wav": "audio/wav",
+    ".ogg": "audio/ogg",
+    ".flac": "audio/flac",
+    ".m4a": "audio/mp4",
+    ".aac": "audio/aac",
+    ".md": "text/markdown; charset=utf-8",
+  };
+  const listFiles = (directory: string): string[] => readdirSync(directory).flatMap((name) => {
+    const fullPath = resolve(directory, name);
+    return statSync(fullPath).isDirectory() ? listFiles(fullPath) : [fullPath];
+  });
+  const resolveAudioPath = (rawUrl: string): string | null => {
+    let decoded = "";
+    try {
+      decoded = decodeURIComponent(rawUrl.split("?")[0] ?? "").replace(/^\/+/, "");
+    } catch {
+      return null;
+    }
+    const target = resolve(gameCoreAudioDir, decoded);
+    if (target !== gameCoreAudioDir && !target.startsWith(`${gameCoreAudioDir}${sep}`)) return null;
+    return target;
+  };
+  return {
+    name: "game-core-audio",
+    buildStart(this: { emitFile: (asset: { type: "asset"; fileName: string; source: Buffer }) => void }) {
+      for (const filePath of listFiles(gameCoreAudioDir)) {
+        const extension = filePath.slice(filePath.lastIndexOf(".")).toLowerCase();
+        if (!allowedExtensions.has(extension)) continue;
+        const relativePath = filePath.slice(gameCoreAudioDir.length + 1).replaceAll("\\", "/");
+        this.emitFile({
+          type: "asset",
+          fileName: `assets/audio/${relativePath}`,
+          source: readFileSync(filePath),
+        });
+      }
+    },
+    configureServer(server: import("vite").ViteDevServer) {
+      server.middlewares.use("/assets/audio", (req, res, next) => {
+        const target = resolveAudioPath(req.url ?? "");
+        if (!target || !existsSync(target) || !statSync(target).isFile()) {
+          next();
+          return;
+        }
+        const extension = target.slice(target.lastIndexOf(".")).toLowerCase();
+        if (!allowedExtensions.has(extension)) {
+          res.statusCode = 403;
+          res.end("forbidden");
+          return;
+        }
+        res.setHeader("content-type", mimeByExtension[extension] ?? "application/octet-stream");
+        res.end(readFileSync(target));
+      });
+    },
+  };
+}
+
+function gameCoreSettingsPlugin() {
+  const battlefieldPath = resolve(gameCoreConfigDir, "balance", "battlefield.yaml");
+  const soundPath = resolve(gameCoreConfigDir, "sound", "battle.yaml");
+  const readSettings = () => {
+    const { config } = generateGameConfig();
+    return {
+      movementSpeedMultiplier: config.balance.battlefield.movement.defaultMultiplier,
+      minMovementSpeedMultiplier: config.balance.battlefield.movement.minMultiplier,
+      maxMovementSpeedMultiplier: config.balance.battlefield.movement.maxMultiplier,
+      battleSoundVolume: config.sound.battle.volume.default,
+      minBattleSoundVolume: config.sound.battle.volume.min,
+      maxBattleSoundVolume: config.sound.battle.volume.max,
+    };
+  };
+  const json = (res: import("node:http").ServerResponse, status: number, payload: unknown): void => {
+    res.statusCode = status;
+    res.setHeader("content-type", "application/json");
+    res.end(JSON.stringify(payload));
+  };
+  return {
+    name: "game-core-settings",
+    configureServer(server: import("vite").ViteDevServer) {
+      server.middlewares.use("/__config/global-settings", (req, res) => {
+        if (req.method === "GET") {
+          try {
+            json(res, 200, { ok: true, settings: readSettings() });
+          } catch (error) {
+            json(res, 500, { ok: false, reason: "config_read_failed", error: error instanceof Error ? error.message : String(error) });
+          }
+          return;
+        }
+        if (req.method !== "POST") {
+          json(res, 405, { ok: false, reason: "method_not_allowed" });
+          return;
+        }
+        let body = "";
+        req.on("data", (chunk) => {
+          body += String(chunk);
+          if (body.length > 32_768) req.destroy();
+        });
+        req.on("end", () => {
+          let payload: { movementSpeedMultiplier?: unknown; battleSoundVolume?: unknown };
+          try {
+            payload = JSON.parse(body || "{}") as typeof payload;
+          } catch {
+            json(res, 400, { ok: false, reason: "bad_json" });
+            return;
+          }
+          const payloadKeys = Object.keys(payload);
+          if (payloadKeys.length !== 2
+            || !payloadKeys.includes("movementSpeedMultiplier")
+            || !payloadKeys.includes("battleSoundVolume")) {
+            json(res, 400, { ok: false, reason: "unknown_or_missing_keys" });
+            return;
+          }
+          const current = readSettings();
+          const movement = payload.movementSpeedMultiplier;
+          const sound = payload.battleSoundVolume;
+          if (typeof movement !== "number" || !Number.isFinite(movement)
+            || movement < current.minMovementSpeedMultiplier || movement > current.maxMovementSpeedMultiplier
+            || typeof sound !== "number" || !Number.isFinite(sound)
+            || sound < current.minBattleSoundVolume || sound > current.maxBattleSoundVolume) {
+            json(res, 400, { ok: false, reason: "out_of_range", settings: current });
+            return;
+          }
+
+          const oldBattlefield = readFileSync(battlefieldPath, "utf8");
+          const oldSound = readFileSync(soundPath, "utf8");
+          const oldGenerated = existsSync(generatedConfigPath) ? readFileSync(generatedConfigPath, "utf8") : null;
+          try {
+            const battlefieldDocument = parseDocument(oldBattlefield, { uniqueKeys: true, strict: true });
+            const soundDocument = parseDocument(oldSound, { uniqueKeys: true, strict: true });
+            if (battlefieldDocument.errors.length || soundDocument.errors.length) throw new Error("Cannot update invalid YAML.");
+            battlefieldDocument.setIn(["movement", "defaultMultiplier"], movement);
+            soundDocument.setIn(["volume", "default"], sound);
+            writeFileSync(battlefieldPath, battlefieldDocument.toString(), "utf8");
+            writeFileSync(soundPath, soundDocument.toString(), "utf8");
+            generateGameConfig();
+            json(res, 200, { ok: true, settings: readSettings() });
+          } catch (error) {
+            writeFileSync(battlefieldPath, oldBattlefield, "utf8");
+            writeFileSync(soundPath, oldSound, "utf8");
+            if (oldGenerated !== null) writeFileSync(generatedConfigPath, oldGenerated, "utf8");
+            json(res, 500, { ok: false, reason: "config_write_failed", error: error instanceof Error ? error.message : String(error) });
+          }
+        });
+      });
+    },
+  };
+}
 
 function debugLogPlugin() {
   const logDir = resolve(process.cwd(), ".debug");
@@ -1627,5 +1785,20 @@ function arenaModelPlugin() {
 }
 
 export default defineConfig({
-  plugins: [debugLogPlugin(), templateStorePlugin(), partStorePlugin(), debugProbePlugin(), arenaModelPlugin()],
+  server: {
+    // Global Settings regenerates this file after applying values through live
+    // runtime hooks; ignoring it prevents an unnecessary full-page reload.
+    watch: {
+      ignored: ["**/game-core/src/config/generated/**"],
+    },
+  },
+  plugins: [
+    gameCoreAudioPlugin(),
+    gameCoreSettingsPlugin(),
+    debugLogPlugin(),
+    templateStorePlugin(),
+    partStorePlugin(),
+    debugProbePlugin(),
+    arenaModelPlugin(),
+  ],
 });

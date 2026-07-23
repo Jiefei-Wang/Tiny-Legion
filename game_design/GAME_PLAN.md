@@ -55,7 +55,7 @@ Lose condition chain:
 - Test Arena options panel is organized as collapsible tabs to save space: battle start/stop actions are always in the first row, `Unit` is expanded by default, and `Manual Spawn`, `AI Selection`, and `UI Configuration` are collapsed by default. `Manual Spawn` deploys exactly one chosen craft immediately for either Player or Enemy during an active Test Arena.
 - Developer-only destinations (`Test Arena`, `Leaderboard`, `Craft Designer`, `Part Designer`, and `Global Settings`) live in the top-bar `Developer Tools` dropdown. The campaign sidebar is reserved for Base/Map/Battle, and its navigation/panel split can be dragged vertically and is persisted locally.
 - Runtime debug controls live in a compact top-bar dropdown that matches the `Developer Tools` trigger and popover presentation.
-- Global Settings includes a unit movement-speed multiplier for every ground and air unit plus a battle sound-volume multiplier for impacts, explosions, deployment, and engines. Movement defaults to `2x`; sound defaults to a louder `3x` and supports `0x` mute through `5x`. Saving applies both immediately and persists them locally for future game sessions.
+- The development-only Global Settings authoring panel includes a unit movement-speed multiplier for every ground and air unit plus a battle sound-volume multiplier for impacts, explosions, deployment, and engines. Movement defaults to `2x`; sound defaults to a louder `3x` and supports `0x` mute through `5x`. Saving writes each value to its domain YAML under `game-core/src/config/` and applies both immediately through explicit live runtime hooks; these values are no longer browser-local preferences.
 - Test Arena AI presets are local JS/TS-only and run without external Python bridge/service dependencies.
 - Browser battles are presented by Phaser while the shared simulation remains renderer-independent for headless training and verification.
 - Test Arena parameter inputs apply on `Enter` or input blur (no separate apply button).
@@ -523,10 +523,10 @@ Display layer provides optional visual mesh/sprite styling and silhouette polish
 - Player-created object designs are stored separately under `vip/templates/user/`.
 - On startup, game loads templates from both folders (user templates override same-id defaults).
 - Template filenames are derived from sanitized `template.name` (invalid filename characters removed); runtime identity remains integer `id`.
-- Template parse/validation/merge rules are shared in `packages/game-core/src/templates/template-schema.ts` so game UI and arena tooling use identical template behavior.
+- Template parse/validation/merge rules are shared in `game-core/src/templates/template-schema.ts` so game UI and arena tooling use identical template behavior.
 - File-backed template load normalizes placement and loader coverage, and normalized JSON is written back to disk so editor, headless checks, and battle runtime read the same corrected shape.
 - Loader auto-injection is part of persisted template normalization; injected loaders are placed on available structure cells to avoid overlapping existing functional footprints and existing attachment anchor cells when possible.
-- Detailed template validation severity logic is isolated in `packages/game-core/src/templates/template-validation.ts`.
+- Detailed template validation severity logic is isolated in `game-core/src/templates/template-validation.ts`.
 - Headless smoke includes default-template validation to ensure all system default templates are warning/error free.
 
 ### 4.5 Part Storage
@@ -905,7 +905,7 @@ The current playable implementation already includes:
 - Projectile gravity, range-limited lifetime, and debris persistence.
 - Ground-vehicle-fired non-tracking projectiles now auto-terminate after falling `200` Y-units below their firing Y origin only when the shot was fired above horizontal (`initialVy < 0`); downward-fired shots are excluded.
 - Runtime now applies soft same-layer unit separation (ground-ground, air-air) with overlap allowance, inverse-mass push-out, and broad-phase spatial grid lookup to prevent full unit stacking while preserving movement flow.
-- AI split into targeting, movement, and shooting modules with a shared composite interface in `packages/game-core/src/ai/composite/`.
+- AI split into targeting, movement, and shooting modules with a shared composite interface in `game-core/src/ai/composite/`.
 - Baseline combat AI now runs through `createCompositeAiController(...)` (target -> movement -> shoot), and the legacy decision-tree entrypoint is kept as a compatibility wrapper.
 - Baseline shoot AI now receives per-slot runtime fire inputs from battle runtime (`effectiveRange`, resolved projectile speed/gravity, and world-space firepoint), and no longer assumes a global projectile model.
 - Default rapid weapons use quieter per-part muzzle levels (`0.5x` twin cycler, `0.45x` anti-air machine gun); other default weapon parts remain `1x`.

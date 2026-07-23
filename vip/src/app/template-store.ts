@@ -8,9 +8,9 @@ export {
   parseTemplate,
   validateTemplateDetailed,
   validateTemplate,
-} from "../../../packages/game-core/src/templates/template-schema.ts";
+} from "../../../game-core/src/templates/template-schema.ts";
 
-import { parseTemplate } from "../../../packages/game-core/src/templates/template-schema.ts";
+import { parseTemplate } from "../../../game-core/src/templates/template-schema.ts";
 
 function serializeTemplateForStore(template: UnitTemplate): Record<string, unknown> {
   return {

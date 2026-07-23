@@ -1,1 +1,1 @@
-export * from "../../../../packages/game-core/src/simulation/units/functional-attachments.ts";
+export * from "../../../../game-core/src/simulation/units/functional-attachments.ts";

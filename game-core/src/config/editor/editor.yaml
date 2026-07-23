@@ -1,0 +1,9 @@
+grid:
+  maxColumns: 10
+  maxRows: 10
+displayKinds: [panel, stripe, glass]
+gameLoop:
+  stepsPerSecond: 60
+  maxFrameSeconds: 0.033
+  minTimeScale: 0.5
+  maxTimeScale: 5

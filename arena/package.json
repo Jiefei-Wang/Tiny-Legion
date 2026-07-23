@@ -4,6 +4,7 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
+    "prebuild": "npm --prefix .. run config:generate",
     "build": "tsc -p tsconfig.json",
     "match": "npm run build && node .dist/arena/src/cli.js match",
     "train:composite": "npm run build && node .dist/arena/src/cli.js train-composite",

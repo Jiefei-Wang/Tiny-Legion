@@ -1,0 +1,31 @@
+battlefield:
+  width: 2000
+  height: 1000
+  groundHeightRatio: 0.4
+  airMinZRatio: 0.07
+  airGroundGapRatio: 0.03
+  airTargetZToleranceRatio: 0.022
+movement:
+  defaultMultiplier: 2
+  minMultiplier: 0.1
+  maxMultiplier: 10
+air:
+  holdGravity: 110
+  dropGravity: 210
+  dropSpeedCap: 260
+  thrustAccelScale: 70
+combat:
+  groundProjectileMaxDropBelowFireY: 200
+  salvageRefundFactor: 0.6
+  impulseDamageStressFactor: 2.2
+  penetrationArmorScaler: 2
+structure:
+  minCellSize: 18
+  maxCellSize: 28
+separation:
+  enabled: true
+  overlapAllowanceRatio: 0.35
+  positionFactor: 0.85
+  velocityDamping: 0.55
+  gridSize: 120
+  spawnPlacementAttempts: 8

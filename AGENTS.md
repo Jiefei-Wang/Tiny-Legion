@@ -11,11 +11,22 @@ If you are a new coding agent/session, read this file first, then read:
 
 - Project root: `physics god`
 - Active game app: `vip/` (TypeScript + Vite + Canvas)
-- Shared game logic: `packages/game-core/`
+- Shared game logic: `game-core/`
+- Authored static game settings: `game-core/src/config/**/*.yaml`
+- Generated typed config: `game-core/src/config/generated/game-config.generated.ts` (do not edit directly)
+- Canonical audio sources and attribution: `game-core/assets/audio/`
 - Legacy prototype: `webgame/` (reference only)
 - Command reference: `game_design/game_command.md`
 - Composite AI arena training command: `npm --prefix arena run train:composite -- --phaseSeeds 16 --nUnits 4`
 - Unified training wrapper script: `./train_ai.sh help` (module-only and full composite compare/optimization with per-module source selection)
+
+## Static Configuration Workflow
+
+- Edit domain YAML under `game-core/src/config/` (`balance`, `ai`, `display`, `editor`, or `sound`); do not add a `global` config folder.
+- Run `npm run config:generate` after YAML edits. `npm run config:check` validates YAML, generated output, and audio ownership without rewriting files.
+- VIP dev/build/headless and Arena builds run generation automatically.
+- The development-only Global Settings panel writes movement to `balance/battlefield.yaml` and sound volume to `sound/battle.yaml`, then applies both through live runtime hooks.
+- All repository audio source files must remain under `game-core/assets/audio/`; VIP serves and bundles them through its Vite plugin.
 
 ## Current Runtime/Feature Reality
 

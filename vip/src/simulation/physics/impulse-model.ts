@@ -1,1 +1,1 @@
-export * from "../../../../packages/game-core/src/simulation/physics/impulse-model.ts";
+export * from "../../../../game-core/src/simulation/physics/impulse-model.ts";

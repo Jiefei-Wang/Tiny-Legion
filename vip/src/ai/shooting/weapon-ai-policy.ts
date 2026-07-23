@@ -1,1 +1,1 @@
-export * from "../../../../packages/game-core/src/ai/shooting/weapon-ai-policy.ts";
+export * from "../../../../game-core/src/ai/shooting/weapon-ai-policy.ts";

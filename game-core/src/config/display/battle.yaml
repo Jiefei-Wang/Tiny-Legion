@@ -1,0 +1,10 @@
+view:
+  minScale: 0.1
+  maxScale: 2.4
+  verticalPadding: 16
+  cameraMargin: 80
+  designerBorderMargin: 72
+renderer:
+  statusX: 16
+  statusY: 14
+  statusDepth: 1000

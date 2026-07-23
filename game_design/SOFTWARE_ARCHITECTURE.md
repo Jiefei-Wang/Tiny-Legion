@@ -10,7 +10,7 @@ Current active stack/runtime:
 - Language: `TypeScript`
 - Build tool: `Vite`
 - Active app path: `vip/`
-- Shared logic package: `packages/game-core/`
+- Shared logic package: `game-core/`
 - Legacy prototype path: `webgame/` (reference only)
 
 Implemented gameplay architecture highlights:
@@ -45,7 +45,7 @@ Implemented gameplay architecture highlights:
 - Battle simulation defaults are centralized in shared balance config (`battlefield.ts`) including dimensions, ground height, air layer ratios, air physics constants, battle rules (salvage refund factor), and unit soft-separation tuning constants - all reused by browser + headless/arena paths
 - Test Arena supports runtime battlefield simulation-size overrides (`W`/`H`) and ground-height tuning in the browser app; display zoom remains a separate view-only transform. Battle entry derives its default zoom from the live viewport and lane bounds (`airMinZ` through `groundMaxY`), and Test Arena recomputes that vertical fit when runtime battlefield dimensions change.
 - Strategic layer uses `RealTimeCampaign`: the fixed game loop advances continuous income, timed building/research jobs, deployment ETAs, and off-screen campaign battles (Test Arena behavior remains isolated)
-- `packages/game-core/src/gameplay/campaign/real-time-campaign.ts` owns building catalogs, four sized Main Base slots, timed jobs, delivery capacity, nearest-base logistics quotes, distance cost, and outpost support rules
+- `game-core/src/gameplay/campaign/real-time-campaign.ts` owns building catalogs, four sized Main Base slots, timed jobs, delivery capacity, nearest-base logistics quotes, distance cost, and outpost support rules
 - `MapNode` carries optional strategic metadata (`kind`, routed `links`, map coordinates, home distance, yields, deposits, outpost roster/range); remote bases are logistics-only and never receive building slots
 - Campaign art assets live under `vip/public/assets/campaign/` as optimized WebP scene/facility art plus an alpha PNG command-bunker sprite. Base and Map consume scene/facility assets through DOM/CSS composition. Phaser independently preloads `battle-air-layer.webp` and `battle-ground-layer.webp`, resizes their boundary from the runtime `groundMinY`, positions side-specific bunker instances behind its immediate-mode effects layer, and keeps simulation state renderer-independent.
 - Phaser's tactical overlay reads renderer-safe `BattleSession` state: per-cell structure geometry for hitboxes, `getSelectedWeaponRange(...)` for each craft's effective range ring, velocity for movement vectors, and `aiDebugTargetId` for faction-colored aim lines/reticles. Selected/controlled range rings receive stronger emphasis; the two related Runtime Debug checkboxes default ON outside replay mode.
@@ -133,7 +133,7 @@ Integration surfaces:
    - Runtime inspection without changing gameplay logic modules.
 2. **AI Arena Interface**
    - Headless match/training/eval/replay in `arena/`.
-   - Consumes shared logic from `packages/game-core` directly.
+   - Consumes shared logic from `game-core` directly.
 
 Rule: presentation can read simulation state, but simulation cannot depend on rendering classes.
 
@@ -144,21 +144,30 @@ Rule: presentation can read simulation state, but simulation cannot depend on re
 Current implemented structure (abridged):
 
 ```text
-packages/game-core/src/
-  ai/
-  config/balance/
-  core/ids/
-  gameplay/
-    battle/battle-session.ts
-    map/
-  parts/
-    part-geometry.ts
-    part-schema.ts
-    part-validation.ts
-  simulation/
-  templates/template-schema.ts
-  templates/template-validation.ts
-  types.ts
+game-core/
+  assets/audio/              (canonical recorded samples + attribution)
+  scripts/generate-config.mjs
+  src/
+    ai/
+    config/
+      ai/*.yaml
+      balance/*.yaml
+      display/*.yaml
+      editor/*.yaml
+      sound/*.yaml
+      generated/game-config.generated.ts
+    core/ids/
+    gameplay/
+      battle/battle-session.ts
+      map/
+    parts/
+      part-geometry.ts
+      part-schema.ts
+      part-validation.ts
+    simulation/
+    templates/template-schema.ts
+    templates/template-validation.ts
+    types.ts
 
 vip/src/
   app/
@@ -167,7 +176,7 @@ vip/src/
     part-store.ts          (fetch/save adapter over game-core part schema/validation)
     template-store.ts      (fetch/save adapter over game-core template schema/validation)
   ai|config|core|gameplay|simulation|types.ts
-    (thin re-exports to packages/game-core)
+    (thin re-exports to game-core)
 
 vip/templates/
   default/*.json
@@ -215,7 +224,7 @@ Notes:
 
 Arena-specific architecture notes:
 
-- Arena runtime imports battle/simulation/template domain code directly from `packages/game-core/src/*` (no dynamic loading from `vip/.headless-dist`).
+- Arena runtime imports battle/simulation/template domain code directly from `game-core/src/*` (no dynamic loading from `vip/.headless-dist`).
 - Training and evaluation run headless through `WorkerPool` + `match-worker.ts` for parallel CPU usage.
 - Model ranking now prioritizes `winRateLowerBound` then `winRate`, then `score`.
 - Arena composite AI path can supply per-side `{ target, movement, shoot }` module specs that instantiate game-core `createCompositeAiController(...)`.
@@ -234,7 +243,7 @@ Arena-specific architecture notes:
   - optional seed composite loading (`--seedComposite`).
 - `cli.ts` lazy-loads command implementations and supports `match`, `train-composite`, `eval-levels`, `eval-tiers`, and `replay` commands.
 - `match` runtime is composite-only (`familyId: "composite"`); baseline-vs-baseline test matches are represented by baseline module bundles on both sides.
-- Replay UI (`arena-ui/src/main.ts`) still uses game interface bootstrap (`vip/src/app/bootstrap.ts`) while consuming AI/simulation primitives from `packages/game-core`.
+- Replay UI (`arena-ui/src/main.ts`) still uses game interface bootstrap (`vip/src/app/bootstrap.ts`) while consuming AI/simulation primitives from `game-core`.
 - Game dev server exposes `/__arena/composite/latest` for Test Arena to load latest trained composite spec from `arena/.arena-data/runs/*/best-composite.json`.
 - Game dev server exposes `/__arena/composite/leaderboard` for in-game ranking entries backed by persistent match-based rating storage (`arena/.arena-data/leaderboard/composite-elo.json`).
 - Game dev server exposes `/__arena/composite/models` for genuine saved composed-model artifacts only. The local composed selector supplies certified L1-L5 built-ins, while `/__arena/composite/leaderboard/compete` ranks the same five-level pool without duplicating built-ins as saved models.
@@ -480,7 +489,7 @@ Editor UX implementation details:
 - `src/rendering/phaser-battle-renderer.ts` is the browser-only presentation adapter. It reads `BattleSession` state without owning game rules, preserving browser/headless combat parity.
 - `BattleSession.getDebugSnapshot()` publishes battlefield, entity counts, selection, craft motion/health, and AI target/evasion/lead/fire-block telemetry. The dev probe exposes it at `battle.debug`.
 - `BattleSession.consumeBattleAudioEvents()` bridges weapon-fire, impact, and explosion events to Phaser audio. Fire events include muzzle position, weapon class, damage, projectile speed, and the exact firing part's validated `partProperties.fireSoundVolume` (`0x..2x`, default `1x`); impact events include projectile class, struck structure material/armor, incoming damage, and actual post-armor delivered damage.
-- Phaser combines preloaded CC0 recorded samples with synthesized fallbacks for spatial weapon-fire and impacts, while explosion, deployment, and movement remain synthesized through Web Audio. Fire sample pools and playback-rate profiles are keyed by all five weapon classes; rapid-fire uses shortened broadband bullet-on-metal transients, heavy cannon adds a synthesized sub-bass recoil tail to a true cannon source, and tracking missiles use processed variants of a broadband rocket-launch recording without an extra synthesized layer. Light-projectile impacts use four individually segmented hard-surface ricochet variants with descending metallic tails and a lower mix level than heavy impacts; heavy impacts retain a separate pool. Impact playback rate still varies by material acoustics. The listener center and width come from the active CSS pan/zoom view rather than the fixed logical battlefield center. A live global sound multiplier (`0x..5x`, default `3x`) is applied to each event. Browser gesture listeners explicitly resume the Phaser Web Audio context, and combat events remain queued while autoplay policy keeps that context suspended. Asset provenance is recorded beside the files under `public/assets/audio/battle/`.
+- Phaser combines preloaded CC0 recorded samples with synthesized fallbacks for spatial weapon-fire and impacts, while explosion, deployment, and movement remain synthesized through Web Audio. Fire sample pools and playback-rate profiles are keyed by all five weapon classes; rapid-fire uses shortened broadband bullet-on-metal transients, heavy cannon adds a synthesized sub-bass recoil tail to a true cannon source, and tracking missiles use processed variants of a broadband rocket-launch recording without an extra synthesized layer. Light-projectile impacts use four individually segmented hard-surface ricochet variants with descending metallic tails and a lower mix level than heavy impacts; heavy impacts retain a separate pool. Impact playback rate still varies by material acoustics. The listener center and width come from the active CSS pan/zoom view rather than the fixed logical battlefield center. A live global sound multiplier (`0x..5x`, default `3x`) is applied to each event. Browser gesture listeners explicitly resume the Phaser Web Audio context, and combat events remain queued while autoplay policy keeps that context suspended. Recorded samples and attribution live only under `game-core/assets/audio/`; the VIP Vite plugin serves them in development and emits them under `/assets/audio/` for builds.
 - Display attachments are visual-only paint and render in the normal Phaser craft pass; functional attachments render component-family glyphs independently of paint.
 - `StructureCellTemplate.color` is an optional per-cell Craft Designer tint. Unit instancing falls back to the referenced structure part's `materialColor`, so existing templates retain their defaults. Phaser renders every cell with the same code-drawn armor-panel texture and applies the resolved cell color; it does not add vehicle- or aircraft-sized silhouette art behind the grid.
 - The Craft Designer functional palette and grid render per-component icons through `getFunctionalThumbGlyph(...)` and `drawFunctionalPartIcon(...)`, while the Phaser renderer uses its own world-scale functional glyph pass.
@@ -508,7 +517,8 @@ Editor UX implementation details:
 - Runtime mobility derives from current engine power and current mass (power-to-mass), recalculated during battle updates.
 - Runtime mobility also applies per-engine max-speed caps; multiple-engine cap is computed as a power-weighted average, then used as a hard upper bound on computed speed.
 - `BattleSessionOptions.movementSpeedMultiplier` and the live `BattleSession.setMovementSpeedMultiplier(...)` setter scale commanded ground acceleration/velocity caps and commanded air speed without changing lift eligibility, gravity, recoil, or projectile physics. The shared default is `2x` and is bounded to `0.1x..10x` in `config/balance/battlefield.ts`.
-- Browser bootstrap persists the Global Settings payload under `forge-command.global-settings.v1`; the Developer Tools -> Global Settings panel saves the movement and battle-sound multipliers, applies movement to the active `BattleSession`, and exposes sound to the Phaser renderer through a live getter.
+- Authored static settings live in domain YAML under `game-core/src/config/`. `game-core/scripts/generate-config.mjs` rejects malformed/unknown top-level configuration, inconsistent default ranges, missing/escaping audio paths, and repository audio sources outside game-core, then deterministically emits the typed runtime tree. VIP and Arena build hooks run generation; `npm run config:check` verifies drift without writing.
+- The development-only Developer Tools -> Global Settings panel reads and writes `balance/battlefield.yaml` plus `sound/battle.yaml` through `/__config/global-settings`. A successful transaction regenerates typed config and applies movement to the active `BattleSession` plus sound through the Phaser live getter without browser persistence or a page reload.
 - Projectile runtime state now carries firing origin metadata (`sourceUnitType`, `fireOriginY`, `initialVy`) so ground-vehicle non-tracking shots fired above horizontal can be terminated when they fall too far below the firing origin, while downward-fired shots remain unaffected.
 - Projectile runtime state carries `initialPenetration`, `remainingPenetration`, residual `currentDamage`, and per-part hit keys. The first hit uses full damage; later hits scale by remaining/initial penetration, and the same projectile never damages one part twice.
 - Precision-beam fire is resolved as an instant full-range projectile sweep. A separate short-lived `beamEffects` snapshot renders the complete straight laser line without coupling visual lifetime to collision lifetime.

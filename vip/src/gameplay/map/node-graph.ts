@@ -1,1 +1,1 @@
-export * from "../../../../packages/game-core/src/gameplay/map/node-graph.ts";
+export * from "../../../../game-core/src/gameplay/map/node-graph.ts";

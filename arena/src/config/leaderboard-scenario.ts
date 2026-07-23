@@ -3,7 +3,7 @@ import { resolve } from "node:path";
 import {
   BATTLEFIELD_HEIGHT,
   BATTLEFIELD_WIDTH,
-} from "../../../packages/game-core/src/config/balance/battlefield.ts";
+} from "../../../game-core/src/config/balance/battlefield.ts";
 
 export type LeaderboardScenario = {
   withBase: boolean;

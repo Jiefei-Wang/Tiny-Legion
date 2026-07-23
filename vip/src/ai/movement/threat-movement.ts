@@ -1,1 +1,1 @@
-export * from "../../../../packages/game-core/src/ai/movement/threat-movement.ts";
+export * from "../../../../game-core/src/ai/movement/threat-movement.ts";

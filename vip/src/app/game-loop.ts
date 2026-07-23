@@ -1,3 +1,5 @@
+import { EDITOR_CONFIG } from "../../../game-core/src/config/editor/editor.ts";
+
 export class GameLoop {
   private readonly stepSeconds: number;
   private readonly maxFrameSeconds: number;
@@ -8,8 +10,8 @@ export class GameLoop {
   private lastTs: number;
 
   constructor(update: (dt: number) => void, render: (alpha: number, now: number) => void) {
-    this.stepSeconds = 1 / 60;
-    this.maxFrameSeconds = 0.033;
+    this.stepSeconds = 1 / EDITOR_CONFIG.gameLoop.stepsPerSecond;
+    this.maxFrameSeconds = EDITOR_CONFIG.gameLoop.maxFrameSeconds;
     this.update = update;
     this.render = render;
     this.timeScale = 1;
@@ -21,7 +23,10 @@ export class GameLoop {
     if (!Number.isFinite(scale)) {
       return;
     }
-    this.timeScale = Math.max(0.5, Math.min(5, scale));
+    this.timeScale = Math.max(
+      EDITOR_CONFIG.gameLoop.minTimeScale,
+      Math.min(EDITOR_CONFIG.gameLoop.maxTimeScale, scale),
+    );
   }
 
   public start(): void {

@@ -1,1 +1,1 @@
-export * from "../../../../packages/game-core/src/config/balance/materials.ts";
+export * from "../../../../game-core/src/config/balance/materials.ts";

@@ -1,1 +1,1 @@
-export * from "../../../../packages/game-core/src/simulation/combat/damage-model.ts";
+export * from "../../../../game-core/src/simulation/combat/damage-model.ts";

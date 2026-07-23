@@ -1,1 +1,1 @@
-export * from "../../../../packages/game-core/src/ai/targeting/target-selector.ts";
+export * from "../../../../game-core/src/ai/targeting/target-selector.ts";

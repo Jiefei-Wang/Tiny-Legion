@@ -1,0 +1,8 @@
+weaponRangeMultiplier: 1.5
+aircraftRangeBonusMax: 0
+projectileSpeed: 260
+projectileGravity: 95
+groundFireYTolerance: 92
+targetHistory:
+  windowSeconds: 1
+  samples: 10

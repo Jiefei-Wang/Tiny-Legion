@@ -3,19 +3,19 @@ import { setMathRandomSeed } from "../lib/seeded-rng.ts";
 import { loadRuntimeMergedParts, loadRuntimeMergedTemplates } from "./templates.ts";
 import { mulberry32 } from "../lib/seeded-rng.ts";
 import { getSpawnFamily } from "../spawn/families.ts";
-import { BattleSession } from "../../../packages/game-core/src/gameplay/battle/battle-session.ts";
+import { BattleSession } from "../../../game-core/src/gameplay/battle/battle-session.ts";
 import {
   BATTLEFIELD_HEIGHT,
   BATTLEFIELD_WIDTH,
   BATTLE_SALVAGE_REFUND_FACTOR,
-} from "../../../packages/game-core/src/config/balance/battlefield.ts";
+} from "../../../game-core/src/config/balance/battlefield.ts";
 import { makeCompositeAiController } from "../ai/composite-controller.ts";
-import { structureIntegrity } from "../../../packages/game-core/src/simulation/units/structure-grid.ts";
-import { canOperate } from "../../../packages/game-core/src/simulation/units/control-unit-rules.ts";
-import { validateTemplateDetailed } from "../../../packages/game-core/src/templates/template-validation.ts";
-import type { UnitTemplate } from "../../../packages/game-core/src/types.ts";
+import { structureIntegrity } from "../../../game-core/src/simulation/units/structure-grid.ts";
+import { canOperate } from "../../../game-core/src/simulation/units/control-unit-rules.ts";
+import { validateTemplateDetailed } from "../../../game-core/src/templates/template-validation.ts";
+import type { UnitTemplate } from "../../../game-core/src/types.ts";
 import type { SpawnRosterEntry } from "../spawn/spawn-schema.ts";
-import { resetUidCounter } from "../../../packages/game-core/src/core/ids/uid.ts";
+import { resetUidCounter } from "../../../game-core/src/core/ids/uid.ts";
 
 type GameBattleHooks = {
   addLog: (text: string, tone?: any) => void;

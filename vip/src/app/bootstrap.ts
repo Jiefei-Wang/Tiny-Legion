@@ -74,7 +74,18 @@ import {
   getStructureMaterialDefaults,
 } from "./part-default-config.ts";
 import { levelCompositeConfig, makeCompositeAiController, type CompositeModuleSpec } from "../../../arena/src/ai/composite-controller.ts";
-import { MAX_CERTIFIED_AI_LEVEL } from "../../../packages/game-core/src/ai/composite/level-modules.ts";
+import { MAX_CERTIFIED_AI_LEVEL } from "../../../game-core/src/ai/composite/level-modules.ts";
+import {
+  DEFAULT_BATTLE_VERTICAL_PADDING,
+  MAX_BATTLE_VIEW_SCALE,
+  MIN_BATTLE_VIEW_SCALE,
+  BATTLE_DISPLAY_CONFIG,
+} from "../../../game-core/src/config/display/battle.ts";
+import {
+  EDITOR_CONFIG,
+  EDITOR_GRID_MAX_COLS,
+  EDITOR_GRID_MAX_ROWS,
+} from "../../../game-core/src/config/editor/editor.ts";
 import type { MatchAiSpec } from "../../../arena/src/match/match-types.ts";
 import type {
   ComponentId,
@@ -124,6 +135,7 @@ export type BootstrapOptions = {
 };
 
 export function bootstrap(options: BootstrapOptions = {}): void {
+  const isViteDevelopment = Boolean((import.meta as ImportMeta & { env?: { DEV?: boolean } }).env?.DEV);
   const root = document.querySelector<HTMLDivElement>("#app");
   if (!root) {
     throw new Error("App root not found");
@@ -180,7 +192,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
             <button id="tabLeaderboard"><span>L</span><strong>Leaderboard</strong><small>AI evaluation</small></button>
             <button id="tabTemplateEditor"><span>O</span><strong>Craft Designer</strong><small>Assemble objects</small></button>
             <button id="tabPartEditor"><span>P</span><strong>Part Designer</strong><small>Author components</small></button>
-            <button id="btnOpenGlobalSettings"><span>G</span><strong>Global Settings</strong><small>Runtime defaults</small></button>
+            <button id="btnOpenGlobalSettings" ${isViteDevelopment ? "" : "hidden"}><span>G</span><strong>Global Settings</strong><small>YAML runtime defaults</small></button>
           </div>
         </details>
         <div class="topbar-status">
@@ -264,7 +276,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
           <div class="panel-heading">
             <div><span class="eyebrow">Developer tools</span><h2 id="globalSettingsTitle">Global Settings</h2></div>
           </div>
-          <p class="small">Saved settings apply immediately to the current game and are restored the next time the game opens.</p>
+          <p class="small">Developer authoring tool: saves update game-core YAML and apply immediately to this session.</p>
           <label class="global-setting-field" for="globalMovementSpeedMultiplier">
             <span><strong>Unit movement speed</strong><small>Scales commanded movement for every ground and air unit.</small></span>
             <span class="global-setting-value"><input id="globalMovementSpeedMultiplier" type="number" min="${MIN_UNIT_MOVEMENT_SPEED_MULTIPLIER}" max="${MAX_UNIT_MOVEMENT_SPEED_MULTIPLIER}" step="0.1" /> ×</span>
@@ -275,7 +287,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
           </label>
           <div id="globalSettingsError" class="small global-settings-error" aria-live="polite"></div>
           <div class="row global-settings-actions">
-            <button id="btnResetGlobalSettings" type="button">Use Default (${DEFAULT_UNIT_MOVEMENT_SPEED_MULTIPLIER}×)</button>
+            <button id="btnResetGlobalSettings" type="button">Reload YAML</button>
             <button id="btnCancelGlobalSettings" type="button">Cancel</button>
             <button id="btnSaveGlobalSettings" class="button-primary" type="button">Save & Apply</button>
           </div>
@@ -333,33 +345,24 @@ export function bootstrap(options: BootstrapOptions = {}): void {
   });
 
   const SIDEBAR_SPLIT_STORAGE_KEY = "forge-command.sidebar-nav-height";
-  const GLOBAL_SETTINGS_STORAGE_KEY = "forge-command.global-settings.v1";
   const TEST_ARENA_SETTINGS_STORAGE_KEY = "forge-command.test-arena-settings.v1";
-  interface StoredGlobalSettings {
-    movementSpeedMultiplier?: unknown;
-    battleSoundVolume?: unknown;
+  interface GlobalSettingsValues {
+    movementSpeedMultiplier: number;
+    battleSoundVolume: number;
   }
-  const loadGlobalSettings = (): { movementSpeedMultiplier: number; battleSoundVolume: number } => {
-    try {
-      const stored = JSON.parse(localStorage.getItem(GLOBAL_SETTINGS_STORAGE_KEY) ?? "null") as StoredGlobalSettings | null;
-      const movementSpeedMultiplier = typeof stored?.movementSpeedMultiplier === "number" && Number.isFinite(stored.movementSpeedMultiplier)
-        ? Math.max(MIN_UNIT_MOVEMENT_SPEED_MULTIPLIER, Math.min(MAX_UNIT_MOVEMENT_SPEED_MULTIPLIER, stored.movementSpeedMultiplier))
-        : DEFAULT_UNIT_MOVEMENT_SPEED_MULTIPLIER;
-      const battleSoundVolume = typeof stored?.battleSoundVolume === "number" && Number.isFinite(stored.battleSoundVolume)
-        ? Math.max(MIN_BATTLE_SOUND_VOLUME, Math.min(MAX_BATTLE_SOUND_VOLUME, stored.battleSoundVolume))
-        : DEFAULT_BATTLE_SOUND_VOLUME;
-      return { movementSpeedMultiplier, battleSoundVolume };
-    } catch {
-      // Ignore malformed/blocked storage and use the game default.
+  const fetchGlobalSettingsFromYaml = async (): Promise<GlobalSettingsValues> => {
+    const response = await fetch("/__config/global-settings");
+    if (!response.ok) throw new Error(`Global settings request failed (${response.status}).`);
+    const payload = await response.json() as { ok?: boolean; settings?: Partial<GlobalSettingsValues> };
+    const movementSpeedMultiplier = payload.settings?.movementSpeedMultiplier;
+    const battleSoundVolume = payload.settings?.battleSoundVolume;
+    if (!payload.ok || typeof movementSpeedMultiplier !== "number" || typeof battleSoundVolume !== "number") {
+      throw new Error("Global settings response was invalid.");
     }
-    return {
-      movementSpeedMultiplier: DEFAULT_UNIT_MOVEMENT_SPEED_MULTIPLIER,
-      battleSoundVolume: DEFAULT_BATTLE_SOUND_VOLUME,
-    };
+    return { movementSpeedMultiplier, battleSoundVolume };
   };
-  const initialGlobalSettings = loadGlobalSettings();
-  let globalMovementSpeedMultiplier = initialGlobalSettings.movementSpeedMultiplier;
-  let globalBattleSoundVolume = initialGlobalSettings.battleSoundVolume;
+  let globalMovementSpeedMultiplier: number = DEFAULT_UNIT_MOVEMENT_SPEED_MULTIPLIER;
+  let globalBattleSoundVolume: number = DEFAULT_BATTLE_SOUND_VOLUME;
   const setSidebarNavHeight = (height: number): number => {
     const maxHeight = Math.max(150, leftPanel.clientHeight - 180);
     const normalized = Math.max(128, Math.min(maxHeight, Math.round(height)));
@@ -708,10 +711,8 @@ export function bootstrap(options: BootstrapOptions = {}): void {
   const debugDisplayLayer = true;
   let debugPartHpOverlay = false;
   let debugServerEnabled = false;
-  const EDITOR_GRID_MAX_COLS = 10;
-  const EDITOR_GRID_MAX_ROWS = 10;
   const EDITOR_GRID_MAX_SIZE = EDITOR_GRID_MAX_COLS * EDITOR_GRID_MAX_ROWS;
-  const EDITOR_DISPLAY_KINDS: DisplayAttachmentTemplate["kind"][] = ["panel", "stripe", "glass"];
+  const EDITOR_DISPLAY_KINDS = [...EDITOR_CONFIG.displayKinds] as DisplayAttachmentTemplate["kind"][];
   type EditorFunctionalSlot = {
     component: ComponentId;
     partId?: number;
@@ -781,9 +782,6 @@ export function bootstrap(options: BootstrapOptions = {}): void {
   let battleViewOffsetX = 0;
   let battleViewOffsetY = 0;
   let battleViewScale = 1;
-  const MIN_BATTLE_VIEW_SCALE = 0.1;
-  const MAX_BATTLE_VIEW_SCALE = 2.4;
-  const DEFAULT_BATTLE_VERTICAL_PADDING = 16;
   let battleViewDragActive = false;
   let battleViewDragMoved = false;
   let battleViewDragStartClientX = 0;
@@ -898,7 +896,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     const viewportHeight = Math.max(0, canvasViewport.clientHeight);
     const scaledCanvasWidth = getCanvasDisplayWidth() * battleViewScale;
     const scaledCanvasHeight = getCanvasDisplayHeight() * battleViewScale;
-    const VIEW_MARGIN = 80;
+    const VIEW_MARGIN = BATTLE_DISPLAY_CONFIG.view.cameraMargin;
 
     let minOffsetX = 0;
     let maxOffsetX = 0;
@@ -1769,6 +1767,17 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     },
     () => globalBattleSoundVolume,
   );
+  // Maintenance rule: every setting added to Global Settings must update its
+  // corresponding domain YAML and add an explicit live runtime hook here.
+  const applyGlobalSettingsLive = (settings: GlobalSettingsValues): void => {
+    globalMovementSpeedMultiplier = battle.setMovementSpeedMultiplier(settings.movementSpeedMultiplier);
+    globalBattleSoundVolume = settings.battleSoundVolume;
+  };
+  if (isViteDevelopment) {
+    void fetchGlobalSettingsFromYaml()
+      .then(applyGlobalSettingsLive)
+      .catch((error) => addLog(`Could not load YAML global settings: ${error instanceof Error ? error.message : String(error)}`, "warn"));
+  }
   void fetchLatestCompositeSpec()
     .then(async () => {
       await refreshTestArenaLeaderboard();
@@ -2525,7 +2534,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       return;
     }
     const viewportHeight = canvasViewport.clientHeight;
-    const BORDER_MARGIN = 72;
+    const BORDER_MARGIN = BATTLE_DISPLAY_CONFIG.view.designerBorderMargin;
     const screenX = battleViewOffsetX + toDisplayX(tracked.x) * battleViewScale;
     const screenY = battleViewOffsetY + toDisplayY(tracked.y) * battleViewScale;
 
@@ -7132,16 +7141,27 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     globalSettingsOverlay.classList.add("hidden");
     globalSettingsError.textContent = "";
   };
+  const loadGlobalSettingsForm = async (): Promise<void> => {
+    const settings = await fetchGlobalSettingsFromYaml();
+    globalMovementSpeedInput.value = `${settings.movementSpeedMultiplier}`;
+    globalBattleSoundInput.value = `${settings.battleSoundVolume}`;
+  };
   const openGlobalSettings = (): void => {
     developerMenu.open = false;
     globalMovementSpeedInput.value = `${globalMovementSpeedMultiplier}`;
     globalBattleSoundInput.value = `${globalBattleSoundVolume}`;
     globalSettingsError.textContent = "";
     globalSettingsOverlay.classList.remove("hidden");
-    globalMovementSpeedInput.focus();
-    globalMovementSpeedInput.select();
+    void loadGlobalSettingsForm()
+      .then(() => {
+        globalMovementSpeedInput.focus();
+        globalMovementSpeedInput.select();
+      })
+      .catch((error) => {
+        globalSettingsError.textContent = error instanceof Error ? error.message : String(error);
+      });
   };
-  const saveGlobalSettings = (): void => {
+  const saveGlobalSettings = async (): Promise<void> => {
     const requestedMovementSpeed = Number(globalMovementSpeedInput.value);
     if (!Number.isFinite(requestedMovementSpeed)
       || requestedMovementSpeed < MIN_UNIT_MOVEMENT_SPEED_MULTIPLIER
@@ -7158,16 +7178,28 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       globalBattleSoundInput.focus();
       return;
     }
-    globalMovementSpeedMultiplier = battle.setMovementSpeedMultiplier(requestedMovementSpeed);
-    globalBattleSoundVolume = requestedSoundVolume;
     try {
-      localStorage.setItem(GLOBAL_SETTINGS_STORAGE_KEY, JSON.stringify({
-        movementSpeedMultiplier: globalMovementSpeedMultiplier,
-        battleSoundVolume: globalBattleSoundVolume,
-      }));
-    } catch {
-      globalSettingsError.textContent = "The setting is active, but browser storage could not save it.";
-      addLog(`Global settings applied, but could not be persisted.`, "warn");
+      const response = await fetch("/__config/global-settings", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          movementSpeedMultiplier: requestedMovementSpeed,
+          battleSoundVolume: requestedSoundVolume,
+        }),
+      });
+      const payload = await response.json() as { ok?: boolean; settings?: Partial<GlobalSettingsValues>; error?: string };
+      if (!response.ok || !payload.ok
+        || typeof payload.settings?.movementSpeedMultiplier !== "number"
+        || typeof payload.settings?.battleSoundVolume !== "number") {
+        throw new Error(payload.error ?? `Global settings save failed (${response.status}).`);
+      }
+      applyGlobalSettingsLive({
+        movementSpeedMultiplier: payload.settings.movementSpeedMultiplier,
+        battleSoundVolume: payload.settings.battleSoundVolume,
+      });
+    } catch (error) {
+      globalSettingsError.textContent = error instanceof Error ? error.message : String(error);
+      addLog("Global settings YAML was not changed.", "warn");
       return;
     }
     closeGlobalSettings();
@@ -7176,11 +7208,14 @@ export function bootstrap(options: BootstrapOptions = {}): void {
   btnOpenGlobalSettings.addEventListener("click", openGlobalSettings);
   btnCancelGlobalSettings.addEventListener("click", closeGlobalSettings);
   btnResetGlobalSettings.addEventListener("click", () => {
-    globalMovementSpeedInput.value = `${DEFAULT_UNIT_MOVEMENT_SPEED_MULTIPLIER}`;
-    globalBattleSoundInput.value = `${DEFAULT_BATTLE_SOUND_VOLUME}`;
     globalSettingsError.textContent = "";
+    void loadGlobalSettingsForm().catch((error) => {
+      globalSettingsError.textContent = error instanceof Error ? error.message : String(error);
+    });
   });
-  btnSaveGlobalSettings.addEventListener("click", saveGlobalSettings);
+  btnSaveGlobalSettings.addEventListener("click", () => {
+    void saveGlobalSettings();
+  });
   globalSettingsOverlay.addEventListener("click", (event) => {
     if (event.target === globalSettingsOverlay) closeGlobalSettings();
   });

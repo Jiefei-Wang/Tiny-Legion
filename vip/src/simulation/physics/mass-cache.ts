@@ -1,1 +1,1 @@
-export * from "../../../../packages/game-core/src/simulation/physics/mass-cache.ts";
+export * from "../../../../game-core/src/simulation/physics/mass-cache.ts";

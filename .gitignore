@@ -1,24 +1,91 @@
-arena/.arena-data/
-arena/.dist/
+# Dependencies
 node_modules/
-*/node_modules/
-vip/.headless-dist/
-.tmp/
-arena-ui/dist/
 
-# Build outputs
+# Compiler and bundler output
 dist/
 build/
+out/
+.dist/
+.headless-dist/
+.vite/
+.cache/
+.parcel-cache/
+.turbo/
 coverage/
+.nyc_output/
 *.tsbuildinfo
-vip/dist/
-arena-ui/dist/
-arena/dist/
-packages/*/dist/
-packages/*/build/
-vip/.headless-dist/
-arena/.dist/
-arena/modules
+*.js.map
+*.css.map
+*.d.ts.map
+
+# Test and browser automation output
+test-results/
+playwright-report/
+blob-report/
+.playwright-mcp/
+
+# Logs, runtime state, and temporary files
+logs/
+*.log
+*.log.*
+*.pid
+*.seed
+*.tmp
+*.temp
+*.bak
+*.orig
+*~
+.tmp/
+tmp/
+temp/
+.debug/
+
+# Local environment and secret files
+.env
+.env.*
+!.env.example
+!.env.sample
+*.local
+
+# Editor and IDE settings
+.idea/
+.vscode/
+.vs/
+.fleet/
+.history/
+*.code-workspace
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+*.sw?
+
+# OS and filesystem metadata
 .DS_Store
-**__pycache__
-.playwright-mcp/*
+.AppleDouble
+.LSOverride
+._*
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# Local development-agent state
+.omo/
+.codex/
+.claude/
+
+# Python bytecode, caches, and local environments
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+
+# Generated Arena artifacts and modules
+arena/.arena-data/
+arena/modules/

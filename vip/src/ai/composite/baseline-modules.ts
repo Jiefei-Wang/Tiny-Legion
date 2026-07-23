@@ -1,1 +1,1 @@
-export * from "../../../../packages/game-core/src/ai/composite/baseline-modules.ts";
+export * from "../../../../game-core/src/ai/composite/baseline-modules.ts";

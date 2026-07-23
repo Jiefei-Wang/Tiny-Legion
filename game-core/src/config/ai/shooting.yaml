@@ -1,0 +1,20 @@
+baseline:
+  velocityFilterRatePerSecond: 6
+  leadGainNear: 0.32
+  leadGainFar: 0.82
+  accelerationSoftCap: 180
+  accelerationHardCap: 520
+  accelerationMinGain: 0.35
+  aimSlewDegreesPerSecond: 92
+  aimDeadbandDegrees: 0.5
+ballisticSolver:
+  minTimeSeconds: 0.08
+  horizonRangeScale: 1.12
+  minHorizonSeconds: 0.14
+  maxHorizonSeconds: 6
+  bracketSteps: 28
+  bisectionSteps: 26
+  speedErrorTolerance: 0.001
+  directRangeTolerance: 1.05
+  travelRangeTolerance: 1.08
+  minimumDivisor: 0.001

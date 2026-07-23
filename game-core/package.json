@@ -1,0 +1,10 @@
+{
+  "name": "@tiny-legion/game-core",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "config:generate": "node scripts/generate-config.mjs",
+    "config:check": "node scripts/generate-config.mjs --check"
+  }
+}

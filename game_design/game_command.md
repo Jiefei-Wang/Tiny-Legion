@@ -132,6 +132,17 @@ npm --prefix arena-ui run build
 
 Shared gameplay/AI/simulation code lives in:
 
-- `packages/game-core/src/`
+- `game-core/src/`
 
 `vip/` and `arena/` both consume this package to keep battle logic consistent.
+
+Static configuration and audio:
+
+```bash
+npm run config:generate
+npm run config:check
+```
+
+- Author settings in `game-core/src/config/**/*.yaml`.
+- Keep recorded audio and attribution under `game-core/assets/audio/`.
+- Do not edit `game-core/src/config/generated/game-config.generated.ts` directly.

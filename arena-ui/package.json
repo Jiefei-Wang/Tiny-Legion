@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "prebuild": "npm --prefix .. run config:generate",
     "build": "tsc -p tsconfig.json && vite build",
     "preview": "vite preview"
   },

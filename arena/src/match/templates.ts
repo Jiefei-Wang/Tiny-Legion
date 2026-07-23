@@ -1,12 +1,12 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { resolve } from "node:path";
-import { createInitialTemplates } from "../../../packages/game-core/src/simulation/units/unit-builder.ts";
+import { createInitialTemplates } from "../../../game-core/src/simulation/units/unit-builder.ts";
 import {
   mergePartCatalogs,
   parsePartDefinition,
-} from "../../../packages/game-core/src/parts/part-schema.ts";
-import { mergeTemplates, parseTemplate } from "../../../packages/game-core/src/templates/template-schema.ts";
-import type { PartDefinition, UnitTemplate } from "../../../packages/game-core/src/types.ts";
+} from "../../../game-core/src/parts/part-schema.ts";
+import { mergeTemplates, parseTemplate } from "../../../game-core/src/templates/template-schema.ts";
+import type { PartDefinition, UnitTemplate } from "../../../game-core/src/types.ts";
 
 function locateVipDir(): string {
   const candidates = [

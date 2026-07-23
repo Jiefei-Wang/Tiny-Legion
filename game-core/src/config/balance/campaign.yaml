@@ -1,0 +1,22 @@
+buildings:
+  refinery: { name: Gas Refinery, size: small, gasCost: 90, buildSeconds: 35, description: Processes local gas deposits into continuous income. }
+  research-lab: { name: Research Lab, size: small, gasCost: 110, buildSeconds: 50, description: Runs timed material and weapon research. }
+  workshop: { name: Workshop, size: medium, gasCost: 100, buildSeconds: 45, description: Maintains and fabricates selected craft designs. }
+  delivery-center: { name: Delivery Center, size: medium, gasCost: 140, buildSeconds: 60, description: Raises the number of friendly units supported in one battle. }
+research:
+  reinforced: { name: Reinforced structures, gasCost: 130, durationSeconds: 55 }
+  combined: { name: Combined composite, gasCost: 180, durationSeconds: 85 }
+  mediumWeapons: { name: Explosive cannon, gasCost: 170, durationSeconds: 75 }
+simulation:
+  maxUpdateSeconds: 1
+  refineryIncomePerSecond: 6
+  baseDeliveryCapacity: 2
+  deliveryCenterCapacity: 3
+logistics:
+  defaultDistance: 20
+  outpostTravelSeconds: 3
+  minTravelSeconds: 4
+  distanceSecondsFactor: 70
+  minUnitSpeed: 20
+  maxDistanceCost: 0.6
+  distanceCostDivisor: 180

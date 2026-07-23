@@ -1,1 +1,1 @@
-export * from "../../packages/game-core/src/types.ts";
+export * from "../../game-core/src/types.ts";
