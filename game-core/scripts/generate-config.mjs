@@ -106,7 +106,14 @@ export function validateGameConfig(config) {
   validateScalarObject(battlefield, ["battlefield", "movement", "air", "combat", "wreck", "structure", "separation"], "balance/battlefield.yaml");
   validateScalarObject(battlefield.battlefield, ["width", "height", "groundHeightRatio", "airMinZRatio", "airGroundGapRatio", "airTargetZToleranceRatio"], "balance/battlefield.yaml.battlefield");
   validateScalarObject(battlefield.movement, ["defaultMultiplier"], "balance/battlefield.yaml.movement");
-  validateScalarObject(battlefield.air, ["holdGravity", "dropGravity", "dropSpeedCap", "powerToSpeedScale"], "balance/battlefield.yaml.air");
+  const air = validateScalarObject(
+    battlefield.air,
+    ["holdGravity", "dropGravity", "dropSpeedCap", "powerToSpeedScale", "aircraft_acceleration_ratio"],
+    "balance/battlefield.yaml.air",
+  );
+  if (!(numberAt(air, "aircraft_acceleration_ratio", "balance/battlefield.yaml.air") >= 0)) {
+    fail("balance/battlefield.yaml.air.aircraft_acceleration_ratio", "expected a non-negative number");
+  }
   validateScalarObject(battlefield.combat, ["groundProjectileMaxDropBelowFireY", "salvageRefundFactor", "penetrationArmorScaler"], "balance/battlefield.yaml.combat");
   const wreck = validateScalarObject(battlefield.wreck, ["groundLifetimeSeconds", "minInitialHpLossRatio", "maxInitialHpLossRatio"], "balance/battlefield.yaml.wreck");
   if (!(numberAt(wreck, "groundLifetimeSeconds", "balance/battlefield.yaml.wreck") > 0)) fail("balance/battlefield.yaml.wreck.groundLifetimeSeconds", "expected a positive number");

@@ -26,7 +26,7 @@ declare const process: { exit: (code?: number) => void; cwd: () => string };
 type Failure = {
   templateId: number;
   templateName: string;
-  check: "validation" | "movement" | "firing" | "overlap" | "functional-support" | "weapon-capacity" | "air-isotropic" | "escape-mode" | "control-loss-crash" | "structure-origin" | "penetration-scaling" | "wreck-damage" | "wreck-lifecycle" | "projectile-collision";
+  check: "validation" | "movement" | "firing" | "overlap" | "functional-support" | "weapon-capacity" | "air-isotropic" | "air-inertia" | "escape-mode" | "control-loss-crash" | "structure-origin" | "penetration-scaling" | "wreck-damage" | "wreck-lifecycle" | "projectile-collision";
   detail: string;
 };
 
@@ -613,8 +613,12 @@ function runSmoke(): Failure[] {
     const startX = unit.x;
     battle.clearControlSelection();
     battle.setControlByClick(unit.x, unit.y);
+    let firstMovementSpeed = 0;
     for (let i = 0; i < 120; i += 1) {
       battle.update(dt, moveRightKeys);
+      if (i === 0) {
+        firstMovementSpeed = Math.hypot(unit.vx, unit.vy);
+      }
     }
     const movedUnit = battle.getState().units.find((entry) => entry.id === unitId);
     if (!movedUnit) {
@@ -629,13 +633,31 @@ function runSmoke(): Failure[] {
     unit = movedUnit;
     if (unit.type === "air") {
       const rightSpeed = Math.hypot(unit.vx, unit.vy);
+      const commandedSpeed = unit.maxSpeed * battle.getMovementSpeedMultiplier();
+      battle.update(dt, idleKeys);
+      const deceleratedSpeed = Math.hypot(unit.vx, unit.vy);
+      if (
+        firstMovementSpeed <= 0
+        || firstMovementSpeed >= commandedSpeed
+        || deceleratedSpeed >= rightSpeed
+        || deceleratedSpeed <= 0
+      ) {
+        failures.push({
+          templateId: template.id,
+          templateName: template.name,
+          check: "air-inertia",
+          detail: `expected gradual acceleration and idle deceleration: first=${firstMovementSpeed.toFixed(2)}, commanded=${commandedSpeed.toFixed(2)}, cruising=${rightSpeed.toFixed(2)}, decelerated=${deceleratedSpeed.toFixed(2)}, accel=${unit.accel.toFixed(2)}`,
+        });
+      }
       battle.update(dt, moveUpKeys);
       const upUnit = battle.getState().units.find((entry) => entry.id === unitId);
       const upSpeed = upUnit ? Math.hypot(upUnit.vx, upUnit.vy) : 0;
       battle.update(dt, moveUpRightKeys);
       const diagonalUnit = battle.getState().units.find((entry) => entry.id === unitId);
       const diagonalSpeed = diagonalUnit ? Math.hypot(diagonalUnit.vx, diagonalUnit.vy) : 0;
-      const tolerance = Math.max(0.1, rightSpeed * 0.01);
+      // Direction changes now rotate the velocity vector through finite thrust,
+      // so compare magnitudes with enough tolerance for the brief turn transient.
+      const tolerance = Math.max(0.1, rightSpeed * 0.08);
       if (Math.abs(rightSpeed - upSpeed) > tolerance || Math.abs(rightSpeed - diagonalSpeed) > tolerance) {
         failures.push({
           templateId: template.id,

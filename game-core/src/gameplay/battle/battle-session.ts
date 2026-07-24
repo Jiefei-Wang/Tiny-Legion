@@ -9,6 +9,7 @@ import {
   AIR_DROP_GRAVITY,
   AIR_DROP_SPEED_CAP,
   AIR_POWER_TO_SPEED_SCALE,
+  AIRCRAFT_ACCELERATION_RATIO,
   GROUND_PROJECTILE_MAX_DROP_BELOW_FIRE_Y,
   BATTLE_SALVAGE_REFUND_FACTOR,
   PENETRATION_ARMOR_SCALER,
@@ -2412,7 +2413,9 @@ export class BattleSession {
       ? powerToMass * 74
       : Math.max(0, powerToMass * AIR_POWER_TO_SPEED_SCALE - AIR_HOLD_GRAVITY);
     unit.maxSpeed = clamp(Math.min(rawSpeed, speedCap), 0, speedCap);
-    unit.accel = clamp(rawSpeed * 0.92, 0, Math.max(16, unit.maxSpeed * 1.6));
+    unit.accel = unit.type === "air"
+      ? Math.max(0, powerToMass * AIR_POWER_TO_SPEED_SCALE * AIRCRAFT_ACCELERATION_RATIO)
+      : clamp(rawSpeed * 0.92, 0, Math.max(16, unit.maxSpeed * 1.6));
     const speedRatio = unit.maxSpeed / Math.max(1, speedCap);
     unit.turnDrag = clamp(0.8 + speedRatio * 0.14, 0.8, 0.94);
   }
@@ -2536,9 +2539,19 @@ export class BattleSession {
     const ux = moveLen > 1e-6 ? clampedX / moveLen : 0;
     const uy = moveLen > 1e-6 ? clampedY / moveLen : 0;
     const moveSpeed = this.scaleMovementSpeed(unit.maxSpeed);
-
-    unit.vx = ux * moveSpeed;
-    unit.vy = uy * moveSpeed;
+    const targetVx = ux * moveSpeed;
+    const targetVy = uy * moveSpeed;
+    const deltaVx = targetVx - unit.vx;
+    const deltaVy = targetVy - unit.vy;
+    const deltaSpeed = Math.hypot(deltaVx, deltaVy);
+    const accelerationStep = Math.max(0, unit.accel) * dt;
+    if (deltaSpeed <= accelerationStep || deltaSpeed <= 1e-6) {
+      unit.vx = targetVx;
+      unit.vy = targetVy;
+    } else if (accelerationStep > 0) {
+      unit.vx += deltaVx / deltaSpeed * accelerationStep;
+      unit.vy += deltaVy / deltaSpeed * accelerationStep;
+    }
 
     const fallAccel = Math.max(0, AIR_HOLD_GRAVITY - this.computeAirThrustSpeed(unit));
     if (fallAccel > 0) {

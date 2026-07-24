@@ -3,8 +3,8 @@ export const GAME_CONFIG = {
   "balance": {
     "battlefield": {
       "battlefield": {
-        "width": 2000,
-        "height": 1000,
+        "width": 3000,
+        "height": 4000,
         "groundHeightRatio": 0.4,
         "airMinZRatio": 0.07,
         "airGroundGapRatio": 0.03,
@@ -17,7 +17,8 @@ export const GAME_CONFIG = {
         "holdGravity": 110,
         "dropGravity": 210,
         "dropSpeedCap": 260,
-        "powerToSpeedScale": 70
+        "powerToSpeedScale": 70,
+        "aircraft_acceleration_ratio": 1
       },
       "combat": {
         "groundProjectileMaxDropBelowFireY": 200,
@@ -674,6 +675,7 @@ export const GAME_CONFIG_DESCRIPTIONS = {
       "air.dropGravity": "Gravity acceleration applied to an air unit that can no longer sustain flight.",
       "air.dropSpeedCap": "Maximum downward speed of a falling air unit.",
       "air.powerToSpeedScale": "Conversion factor from air-engine power per unit mass to speed and lift capacity; it does not change speed by direction.",
+      "air.aircraft_acceleration_ratio": "Global multiplier applied to aircraft thrust-to-mass acceleration and default deceleration.",
       "combat.groundProjectileMaxDropBelowFireY": "Downward distance below its firing point after which an upward-fired ground projectile is removed.",
       "combat.salvageRefundFactor": "Fraction of deployment gas refunded when a living player unit returns to base.",
       "combat.penetrationArmorScaler": "Armor-to-penetration-cost multiplier used before a projectile spends penetration on cell HP.",

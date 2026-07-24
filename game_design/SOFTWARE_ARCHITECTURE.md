@@ -331,7 +331,9 @@ Encode your game rules as explicit modules (not scattered checks):
   - aircraft only gain propulsion from `jetEngine` components.
   - pre-gravity speed/lift capacity is total jet power-to-mass scaled by `AIR_POWER_TO_SPEED_SCALE`; command direction is normalized separately.
   - effective movement speed is pre-gravity thrust speed minus `AIR_HOLD_GRAVITY`, capped by aggregate engine max speed.
-  - normalized horizontal, vertical, and diagonal commands receive the same speed magnitude.
+  - normalized horizontal, vertical, and diagonal commands target the same speed magnitude.
+  - velocity approaches the commanded vector over time; acceleration is live jet thrust-to-mass scaled by `AIR_POWER_TO_SPEED_SCALE` and the YAML-authored `aircraft_acceleration_ratio`.
+  - a zero movement command targets zero velocity, providing default aircraft deceleration through the same acceleration limiter.
 - `battle-session.ts` (unit overlap management)
   - same-layer units (`ground-ground`, `air-air`) use soft separation after movement integration.
   - partial overlap is allowed via configurable overlap allowance ratio, but deep stacking is pushed apart.
@@ -541,7 +543,7 @@ Editor UX implementation details:
 - `train-composite` supports `--shootFamily history-shoot`, `--shootFamily w11-shoot`, and `--shootFamily autoreg-shoot`; when `shootSource=new`, Arena seeds default params (`history`: `history.recencyPower=1.0`, `w11`: descending alpha weights, `autoreg`: `alpha=0.5`) and mutates them during optimization.
 - Dev leaderboard model inventory keeps the five certified level built-ins. `history-shoot`, `autoreg-shoot`, and other trainable families remain reusable through saved run artifacts and the per-module selector.
 - Air units compare isotropic jet thrust speed against gravity; only the post-gravity remainder becomes movement speed.
-- Horizontal, vertical, and diagonal movement share that same speed magnitude.
+- Horizontal, vertical, and diagonal commands share that target speed magnitude, while finite thrust rotates or grows the live velocity vector over time.
 - If jet thrust cannot overcome gravity, units transition into the air-drop crash path.
 - Loader subsystem is selected per weapon with `needLoader`, while loader compatibility is expressed with `bullet|missile|laser` projectile classes:
 - Loader components (`cannonLoader`, `missileLoader`) are functional modules with per-loader capabilities.

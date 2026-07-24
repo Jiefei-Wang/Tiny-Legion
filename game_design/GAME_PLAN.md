@@ -607,7 +607,9 @@ Recommended starter values:
   - Aircraft use only engines with `power air = true` for movement and anti-gravity.
   - Pre-gravity thrust speed is total air-engine power divided by current mass and scaled by the shared air-thrust factor.
   - Effective movement speed is `max(0, preGravityThrustSpeed - gravity)`, capped by the aggregate engine speed cap.
-  - Horizontal, vertical, and diagonal commands all use the same speed magnitude; only the normalized direction vector changes. Air-engine power-to-mass uses a shared conversion factor to determine speed/lift capacity, not directional acceleration.
+  - Aircraft accelerate toward commanded velocity instead of changing velocity instantly. Acceleration is proportional to live air-engine thrust divided by current mass, scaled by the global `aircraft_acceleration_ratio`.
+  - With no movement input, aircraft default to decelerating toward zero velocity at the same thrust-to-mass rate.
+  - Horizontal, vertical, and diagonal commands all target the same speed magnitude; only the normalized direction vector changes.
   - If pre-gravity thrust cannot overcome gravity, the aircraft enters a crash state and falls toward the ground.
 - Altitude affects:
   - weapon effectiveness

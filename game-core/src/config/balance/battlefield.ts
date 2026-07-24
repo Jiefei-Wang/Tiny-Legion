@@ -65,6 +65,12 @@ export const AIR_DROP_SPEED_CAP: number = config.air.dropSpeedCap;
 export const AIR_POWER_TO_SPEED_SCALE: number = config.air.powerToSpeedScale;
 
 /**
+ * Global multiplier for aircraft acceleration and passive deceleration.
+ * Aircraft acceleration is derived from live air-engine thrust divided by live mass.
+ */
+export const AIRCRAFT_ACCELERATION_RATIO: number = config.air.aircraft_acceleration_ratio;
+
+/**
  * Additional downward distance threshold for terminating certain ground-fired projectiles.
  * Applies to non-tracking shots fired above horizontal to stop endless off-lane travel.
  */
