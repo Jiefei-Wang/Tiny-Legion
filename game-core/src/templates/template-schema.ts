@@ -247,11 +247,17 @@ function ensureLoaderCoverage(
   const catalog = resolveCatalog(partCatalog);
   const next = template.attachments.map((attachment) => ({ ...attachment }));
   const occupiedAnchorKeys = new Set<string>();
-  const weaponClasses = new Set(
+  const loaderRequiredClasses = new Set(
     next
-      .map((attachment) => COMPONENTS[attachment.component])
-      .filter((stats) => stats.type === "weapon")
-      .map((stats) => stats.weaponClass ?? "rapid-fire"),
+      .filter((attachment) => {
+        const part = resolvePartDefinitionForAttachment({ partId: attachment.partId, component: attachment.component }, catalog);
+        return part?.partProperties?.needLoader
+          ?? (attachment.component === "heavyCannon" || attachment.component === "explosiveShell" || attachment.component === "trackingMissile");
+      })
+      .map((attachment) => {
+        const part = resolvePartDefinitionForAttachment({ partId: attachment.partId, component: attachment.component }, catalog);
+        return part?.partProperties?.projectileClass ?? COMPONENTS[attachment.component].projectileClass ?? "bullet";
+      }),
   );
   const supportedClasses = new Set<string>();
   for (const attachment of next) {
@@ -297,8 +303,8 @@ function ensureLoaderCoverage(
     }
   }
 
-  const injectLoader = (component: ComponentId, supportedClass: "tracking" | "heavy-shot" | "explosive"): void => {
-    if (!weaponClasses.has(supportedClass) || supportedClasses.has(supportedClass)) {
+  const injectLoader = (component: ComponentId, supportedClass: "bullet" | "missile" | "laser"): void => {
+    if (!loaderRequiredClasses.has(supportedClass) || supportedClasses.has(supportedClass)) {
       return;
     }
     const loaderPart = resolvePartDefinitionForAttachment({ component }, catalog);
@@ -308,7 +314,9 @@ function ensureLoaderCoverage(
 
     const anchor = next.find((attachment) => {
       const stats = COMPONENTS[attachment.component];
-      return stats.type === "weapon" && (stats.weaponClass ?? "rapid-fire") === supportedClass;
+      const part = resolvePartDefinitionForAttachment({ partId: attachment.partId, component: attachment.component }, catalog);
+      return stats.type === "weapon"
+        && (part?.partProperties?.projectileClass ?? stats.projectileClass ?? "bullet") === supportedClass;
     });
     if (!anchor) {
       return;
@@ -395,9 +403,8 @@ function ensureLoaderCoverage(
     }
   };
 
-  injectLoader("missileLoader", "tracking");
-  injectLoader("cannonLoader", "heavy-shot");
-  injectLoader("cannonLoader", "explosive");
+  injectLoader("missileLoader", "missile");
+  injectLoader("cannonLoader", "bullet");
 
   return next;
 }

@@ -56,13 +56,19 @@
     "projectileSpeed": 650,
     "projectileGravity": 20,
     "penetration": 0,
-    "spreadDeg": 2.4
+    "spreadDeg": 2.4,
+    "projectileClass": "bullet",
+    "projectileShape": "bullet-tracer",
+    "projectileSizeRatio": 1
   },
   "partProperties": {
     "computingConsumption": 1,
     "hasAngleLimit": false,
-    "bulletType": "bullet",
+    "projectileClass": "bullet",
+    "projectileShape": "bullet-tracer",
+    "projectileSizeRatio": 1,
     "fireSoundVolume": 0.5,
+    "fireSoundPool": "rapid-fire",
     "explodeOnHit": false,
     "needLoader": false,
     "maxCapacity": 1
@@ -74,6 +80,7 @@
     "isWeapon": true,
     "isLoader": false,
     "isArmor": false,
+    "projectileClass": "bullet",
     "hasCoreTuning": false
   },
   "tags": [

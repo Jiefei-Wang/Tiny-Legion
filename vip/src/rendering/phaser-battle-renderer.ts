@@ -1,7 +1,8 @@
 import Phaser from "phaser";
 import { COMPONENTS } from "../config/balance/weapons.ts";
 import { getStructureCellSize } from "../config/balance/battlefield.ts";
-import type { BattleState, UnitInstance, UnitTemplate, WeaponClass } from "../types.ts";
+import { PROJECTILE_ASSETS } from "../../../game-core/src/projectiles/generated/projectile-assets.generated.ts";
+import type { BattleState, FireSoundPool, UnitInstance, UnitTemplate } from "../types.ts";
 import type { BattleAudioEvent, BattleSession } from "../gameplay/battle/battle-session.ts";
 import {
   BATTLE_SAMPLE_URLS,
@@ -62,6 +63,7 @@ class BattleScene extends Phaser.Scene {
   private noiseBuffer: AudioBuffer | null = null;
   private audioResumePending = false;
   private readonly lastSampleByGroup = new Map<string, BattleSampleKey>();
+  private projectileSprites: Phaser.GameObjects.Image[] = [];
 
   public constructor(
     battle: BattleSession,
@@ -80,6 +82,7 @@ class BattleScene extends Phaser.Scene {
     this.load.image("battle-air-layer", "/assets/campaign/battle-air-layer.webp");
     this.load.image("battle-ground-layer", "/assets/campaign/battle-ground-layer.webp");
     this.load.image("battle-command-base", "/assets/campaign/battle-base.png");
+    for (const [shape, asset] of Object.entries(PROJECTILE_ASSETS)) this.load.svg(`projectile:${shape}`, asset.url);
     for (const [key, url] of Object.entries(BATTLE_SAMPLE_URLS)) this.load.audio(key, url);
   }
 
@@ -127,6 +130,8 @@ class BattleScene extends Phaser.Scene {
     this.airBackground.setPosition(0, 0).setDisplaySize(width, groundY);
     this.groundBackground.setPosition(0, groundY).setDisplaySize(width, Math.max(1, height - groundY));
     g.clear();
+    for (const sprite of this.projectileSprites) sprite.destroy();
+    this.projectileSprites = [];
     g.fillStyle(0x06101a, 0.08).fillRect(0, 0, width, groundY);
     g.fillStyle(0x06130f, 0.08).fillRect(0, groundY, width, height - groundY);
     g.fillStyle(0xb5eff4, 0.14).fillRect(0, groundY - 2, width, 4);
@@ -164,15 +169,50 @@ class BattleScene extends Phaser.Scene {
     for (const beam of state.beamEffects) {
       const alpha = Math.max(0, Math.min(1, beam.life / beam.maxLife));
       const beamColor = beam.side === "player" ? 0x8ff6ff : 0xff8fa8;
-      g.lineStyle(7, beamColor, alpha * 0.18).lineBetween(beam.x1, beam.y1, beam.x2, beam.y2);
-      g.lineStyle(2, 0xffffff, alpha * 0.92).lineBetween(beam.x1, beam.y1, beam.x2, beam.y2);
+      const asset = PROJECTILE_ASSETS[beam.shape];
+      const collider = asset.collider;
+      const visualHeight = collider.kind === "beam-rect" ? beam.halfWidth / Math.max(0.001, collider.halfHeight) : beam.halfWidth * 2;
+      const length = Math.hypot(beam.x2 - beam.x1, beam.y2 - beam.y1);
+      this.projectileSprites.push(
+        this.add.image((beam.x1 + beam.x2) / 2, (beam.y1 + beam.y2) / 2, `projectile:${beam.shape}`)
+          .setDisplaySize(length, visualHeight)
+          .setRotation(Math.atan2(beam.y2 - beam.y1, beam.x2 - beam.x1))
+          .setTint(beamColor)
+          .setAlpha(alpha)
+          .setDepth(0.9),
+      );
+      if (options.debugDraw) {
+        const px = -(beam.y2 - beam.y1) / Math.max(1, length);
+        const py = (beam.x2 - beam.x1) / Math.max(1, length);
+        g.lineStyle(1, 0xffeb96, 0.9)
+          .lineBetween(beam.x1 + px * beam.halfWidth, beam.y1 + py * beam.halfWidth, beam.x2 + px * beam.halfWidth, beam.y2 + py * beam.halfWidth)
+          .lineBetween(beam.x1 - px * beam.halfWidth, beam.y1 - py * beam.halfWidth, beam.x2 - px * beam.halfWidth, beam.y2 - py * beam.halfWidth);
+      }
     }
     for (const p of state.projectiles) {
       const projectileColor = p.side === "player" ? 0x9bd5ff : 0xff9d81;
-      g.lineStyle(Math.max(1.5, p.r * 0.8), projectileColor, 0.42).lineBetween(p.prevX, p.prevY, p.x, p.y);
-      g.fillStyle(projectileColor, 0.18).fillCircle(p.x, p.y, p.r * 3.2);
-      g.fillStyle(projectileColor, 1).fillCircle(p.x, p.y, Math.max(1.5, p.r));
-      if (options.debugDraw) g.lineStyle(1, 0xffeb96, 0.8).lineBetween(p.prevX, p.prevY, p.x, p.y);
+      if (p.projectileClass === "laser") continue;
+      const asset = PROJECTILE_ASSETS[p.projectileShape];
+      const angle = Math.atan2(p.vy, p.vx);
+      this.projectileSprites.push(
+        this.add.image(p.x, p.y, `projectile:${p.projectileShape}`)
+          .setDisplaySize(p.visualHeight * asset.aspect, p.visualHeight)
+          .setRotation(angle)
+          .setTint(projectileColor)
+          .setDepth(0.9),
+      );
+      if (options.debugDraw) {
+        const ux = Math.cos(angle);
+        const uy = Math.sin(angle);
+        const px = -uy;
+        const py = ux;
+        const cx = p.x + ux * p.capsuleCenterX + px * p.capsuleCenterY;
+        const cy = p.y + uy * p.capsuleCenterX + py * p.capsuleCenterY;
+        g.lineStyle(1, 0xffeb96, 0.9)
+          .lineBetween(cx - ux * p.capsuleHalfLength, cy - uy * p.capsuleHalfLength, cx + ux * p.capsuleHalfLength, cy + uy * p.capsuleHalfLength)
+          .strokeCircle(cx - ux * p.capsuleHalfLength, cy - uy * p.capsuleHalfLength, p.capsuleRadius)
+          .strokeCircle(cx + ux * p.capsuleHalfLength, cy + uy * p.capsuleHalfLength, p.capsuleRadius);
+      }
     }
     for (const d of state.debris) g.fillStyle(color(d.color), 1).fillRect(d.x - d.size / 2, d.y - d.size / 2, d.size, d.size);
     for (const unit of state.units) this.drawUnit(unit, options, selection, state.projectiles);
@@ -227,7 +267,7 @@ class BattleScene extends Phaser.Scene {
 
   private drawUnit(unit: UnitInstance, options: ReturnType<BattleSession["getRenderOptions"]>, selection: ReturnType<BattleSession["getSelection"]>, projectiles: BattleState["projectiles"]): void {
     const g = this.graphics;
-    const size = getStructureCellSize(unit.radius);
+    const size = getStructureCellSize(unit.radius, unit.type);
     const xs = unit.structure.map((cell) => cell.x);
     const ys = unit.structure.map((cell) => cell.y);
     const minX = Math.min(...xs), maxX = Math.max(...xs), minY = Math.min(...ys), maxY = Math.max(...ys);
@@ -311,7 +351,11 @@ class BattleScene extends Phaser.Scene {
       for (const cell of unit.structure) {
         if (cell.destroyed) continue;
         const p = at(cell.x, cell.y);
-        g.lineStyle(1.25, hitboxColor, 0.88).strokeRect(p.x - size / 2, p.y - size / 2, size, size);
+        // Keep the debug hitbox inside the cell so it cannot paint over the
+        // faction-colored silhouette border drawn on the exact cell edge.
+        const inset = Math.max(1.5, size * 0.07);
+        g.lineStyle(1.25, hitboxColor, 0.88)
+          .strokeRect(p.x - size / 2 + inset, p.y - size / 2 + inset, size - inset * 2, size - inset * 2);
       }
       g.lineStyle(1, hitboxColor, 0.34).strokeCircle(unit.x, unit.y, unit.radius);
       g.lineStyle(1, 0xffffff, 0.35).lineBetween(unit.x, unit.y, unit.x + unit.vx * 0.25, unit.y + unit.vy * 0.25);
@@ -662,20 +706,21 @@ class BattleScene extends Phaser.Scene {
     const partVolume = Math.max(0, Math.min(fireConfig.partMaxVolume, event.volume));
     if (partVolume <= 0) return;
     const strength = Math.max(0, Math.min(1, event.damage / fireConfig.strengthDamageScale));
+    const fireSoundPool = event.fireSoundPool;
     const samplePlayed = this.playSpatialSample(
-      `fire:${event.weaponClass}`,
-      FIRE_SAMPLE_KEYS[event.weaponClass],
+      `fire:${fireSoundPool}`,
+      FIRE_SAMPLE_KEYS[fireSoundPool],
       event.x,
       (fireConfig.sampleBaseVolume + strength * fireConfig.sampleStrengthVolume) * partVolume,
-      FIRE_SAMPLE_RATE[event.weaponClass],
+      FIRE_SAMPLE_RATE[fireSoundPool],
       true,
     );
     if (samplePlayed) {
-      if (event.weaponClass === "heavy-shot") this.playCannonRecoilTail(context, event.x, strength);
+      if (fireSoundPool === "heavy-shot") this.playCannonRecoilTail(context, event.x, strength);
       return;
     }
-    const profiles = fireConfig.profiles as Record<WeaponClass, { frequency: number; duration: number; wave: OscillatorType; noise: number }>;
-    const profile = profiles[event.weaponClass];
+    const profiles = fireConfig.profiles as Record<FireSoundPool, { frequency: number; duration: number; wave: OscillatorType; noise: number }>;
+    const profile = profiles[fireSoundPool];
     const bus = this.createSpatialBus(
       context,
       event.x,
@@ -702,8 +747,8 @@ class BattleScene extends Phaser.Scene {
     const noise = context.createBufferSource();
     noise.buffer = this.getNoiseBuffer(context);
     const noiseFilter = context.createBiquadFilter();
-    noiseFilter.type = event.weaponClass === "rapid-fire" ? "highpass" : "bandpass";
-    noiseFilter.frequency.value = event.weaponClass === "rapid-fire"
+    noiseFilter.type = fireSoundPool === "rapid-fire" ? "highpass" : "bandpass";
+    noiseFilter.frequency.value = fireSoundPool === "rapid-fire"
       ? fireConfig.rapidNoiseFilterHz
       : fireConfig.otherNoiseFilterHz;
     const noiseGain = context.createGain();
@@ -737,7 +782,7 @@ class BattleScene extends Phaser.Scene {
     const impactConfig = BATTLE_SYNTH_AUDIO_CONFIG.impact;
     const severity = Math.max(0, Math.min(1, damage / impactConfig.severityDamageScale));
     const material = materialAcoustics(event.materialColor);
-    const heavyImpact = event.weaponClass === "heavy-shot" || event.weaponClass === "explosive" || event.weaponClass === "tracking";
+    const heavyImpact = event.impactSoundPool === "heavy-shot" || event.impactSoundPool === "explosive" || event.impactSoundPool === "tracking";
     const impactKeys = (heavyImpact ? impactConfig.heavySamples : impactConfig.lightSamples) as readonly BattleSampleKey[];
     const impactVolume = heavyImpact
       ? impactConfig.heavyBaseVolume + severity * impactConfig.heavySeverityVolume
@@ -753,8 +798,8 @@ class BattleScene extends Phaser.Scene {
     const volume = impactConfig.baseVolume + severity * impactConfig.severityVolume;
     const bus = this.createSpatialBus(context, event.x, volume);
     const oscillator = context.createOscillator();
-    const tone = impactConfig.profiles as Record<WeaponClass, { frequency: number; wave: OscillatorType; noise: number }>;
-    const profile = tone[event.weaponClass];
+    const tone = impactConfig.profiles as Record<FireSoundPool, { frequency: number; wave: OscillatorType; noise: number }>;
+    const profile = tone[event.impactSoundPool];
     oscillator.type = profile.wave;
     oscillator.frequency.setValueAtTime(
       (profile.frequency + event.armor * impactConfig.armorFrequencyScale) * material.resonance,
@@ -782,8 +827,8 @@ class BattleScene extends Phaser.Scene {
     const noise = context.createBufferSource();
     noise.buffer = this.getNoiseBuffer(context);
     const noiseFilter = context.createBiquadFilter();
-    noiseFilter.type = event.weaponClass === "beam-precision" ? "highpass" : "bandpass";
-    noiseFilter.frequency.value = (event.weaponClass === "rapid-fire" ? 2100 : 650 + severity * 900) * material.resonance;
+    noiseFilter.type = event.impactSoundPool === "beam-precision" ? "highpass" : "bandpass";
+    noiseFilter.frequency.value = (event.impactSoundPool === "rapid-fire" ? 2100 : 650 + severity * 900) * material.resonance;
     noiseFilter.Q.value = Math.max(0.25, (1.8 - severity) / material.roughness);
     const noiseGain = context.createGain();
     noiseGain.gain.setValueAtTime(profile.noise * material.roughness * (0.018 + severity * 0.14), context.currentTime);

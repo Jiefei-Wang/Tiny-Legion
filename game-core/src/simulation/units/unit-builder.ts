@@ -1,4 +1,5 @@
 import { COMPONENTS } from "../../config/balance/weapons.ts";
+import { getUnitSizeRatio } from "../../config/balance/battlefield.ts";
 import { nextUid } from "../../core/ids/uid.ts";
 import {
   createDefaultPartDefinitions,
@@ -9,7 +10,7 @@ import {
 } from "../../parts/part-schema.ts";
 import { recalcMass } from "../physics/mass-cache.ts";
 import { getControlUnit, validateSingleControlUnit } from "./control-unit-rules.ts";
-import type { LoaderState, PartDefinition, Side, UnitInstance, UnitTemplate, WeaponClass } from "../../types.ts";
+import type { LoaderState, PartDefinition, ProjectileClass, Side, UnitInstance, UnitTemplate } from "../../types.ts";
 
 function resolveCatalog(partCatalog?: ReadonlyArray<PartDefinition>): PartDefinition[] {
   const defaults = createDefaultPartDefinitions();
@@ -229,6 +230,9 @@ export function instantiateUnit(
             explosiveBlastDamage: part.stats.explosiveBlastDamage,
             explosiveFalloffPower: part.stats.explosiveFalloffPower,
             trackingTurnRateDegPerSec: part.stats.trackingTurnRateDegPerSec,
+            projectileClass: part.stats.projectileClass,
+            projectileShape: part.stats.projectileShape,
+            projectileSizeRatio: part.stats.projectileSizeRatio,
             controlImpairFactor: part.stats.controlImpairFactor,
             controlDuration: part.stats.controlDuration,
             loaderSupports: part.stats.loaderSupports ? [...part.stats.loaderSupports] : undefined,
@@ -295,25 +299,23 @@ export function instantiateUnit(
       targetWeaponSlot: null,
       remaining: 0,
     }));
-  const normalizeLoaderSupports = (values: ReadonlyArray<string> | undefined): WeaponClass[] => {
+  const normalizeLoaderSupports = (values: ReadonlyArray<string> | undefined): ProjectileClass[] => {
     if (!values || values.length <= 0) {
       return [];
     }
-    const supports: WeaponClass[] = [];
+    const supports: ProjectileClass[] = [];
     for (const value of values) {
       if (
-        value === "rapid-fire"
-        || value === "heavy-shot"
-        || value === "explosive"
-        || value === "tracking"
-        || value === "beam-precision"
+        value === "bullet"
+        || value === "missile"
+        || value === "laser"
       ) {
         supports.push(value);
       }
     }
     return supports;
   };
-  const getLoaderSupports = (attachment: UnitInstance["attachments"][number]): WeaponClass[] => {
+  const getLoaderSupports = (attachment: UnitInstance["attachments"][number]): ProjectileClass[] => {
     if (attachment.stats?.loaderSupports && attachment.stats.loaderSupports.length > 0) {
       return attachment.stats.loaderSupports;
     }
@@ -350,7 +352,7 @@ export function instantiateUnit(
       const ys = structure.map((cell) => cell.y);
       const spanX = (Math.max(...xs) - Math.min(...xs) + 1);
       const spanY = (Math.max(...ys) - Math.min(...ys) + 1);
-      return 16 + Math.max(spanX, spanY) * 3.8;
+      return (16 + Math.max(spanX, spanY) * 3.8) * getUnitSizeRatio(template.type);
     })(),
     structure,
     attachments,
@@ -371,7 +373,16 @@ export function instantiateUnit(
       if (weaponStats.type !== "weapon") {
         return 0;
       }
-      const requiresLoader = weaponStats.weaponClass === "heavy-shot" || weaponStats.weaponClass === "explosive" || weaponStats.weaponClass === "tracking";
+      const weaponPart = weaponAttachment.partId
+        ? partCatalog.find((entry) => entry.id === weaponAttachment.partId)
+        : undefined;
+      const projectileClass = weaponAttachment.stats?.projectileClass ?? weaponStats.projectileClass ?? "bullet";
+      const requiresLoader = weaponPart?.partProperties?.needLoader
+        ?? (
+          weaponAttachment.component === "heavyCannon"
+          || weaponAttachment.component === "explosiveShell"
+          || weaponAttachment.component === "trackingMissile"
+        );
       if (!requiresLoader) {
         return 1;
       }
@@ -382,7 +393,7 @@ export function instantiateUnit(
         }
         const loaderStats = COMPONENTS[loaderAttachment.component];
         const supports = getLoaderSupports(loaderAttachment);
-        return loaderStats.type === "loader" && supports.includes(weaponStats.weaponClass ?? "rapid-fire");
+        return loaderStats.type === "loader" && supports.includes(projectileClass);
       });
       return hasCompatibleLoader ? 1 : 0;
     }),

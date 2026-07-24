@@ -16,6 +16,7 @@ import {
   GROUND_WRECK_MIN_INITIAL_HP_LOSS_RATIO,
   GROUND_WRECK_MAX_INITIAL_HP_LOSS_RATIO,
   getStructureCellSize,
+  PROJECTILE_SIZE_RATIO,
   UNIT_SEPARATION_ENABLED,
   UNIT_OVERLAP_ALLOWANCE_RATIO,
   UNIT_SEPARATION_POSITION_FACTOR,
@@ -42,8 +43,26 @@ import { selectBestTarget } from "../../ai/targeting/target-selector.ts";
 import { createBaselineCompositeAiController } from "../../ai/composite/baseline-modules.ts";
 import { validateTemplateDetailed } from "../../templates/template-validation.ts";
 import { createDefaultPartDefinitions, mergePartCatalogs, normalizePartAttachmentRotate } from "../../parts/part-schema.ts";
+import { PROJECTILE_ASSETS } from "../../projectiles/generated/projectile-assets.generated.ts";
 import type { BattleAiController, CombatDecision, WeaponFireAiInput } from "../../ai/composite/composite-ai.ts";
-import type { BattleState, CommandResult, ComponentId, ComponentStats, FireBlockDetail, FireRequest, KeyState, MapNode, PartDefinition, PartDirection, Side, UnitCommand, UnitInstance, UnitTemplate, WeaponClass } from "../../types.ts";
+import type {
+  BattleState,
+  CommandResult,
+  ComponentId,
+  ComponentStats,
+  FireBlockDetail,
+  FireRequest,
+  FireSoundPool,
+  KeyState,
+  MapNode,
+  PartDefinition,
+  PartDirection,
+  ProjectileClass,
+  Side,
+  UnitCommand,
+  UnitInstance,
+  UnitTemplate,
+} from "../../types.ts";
 
 export interface BattleHooks {
   addLog: (text: string, tone?: "good" | "warn" | "bad" | "") => void;
@@ -72,7 +91,8 @@ export type BattleAudioEvent =
       kind: "fire";
       x: number;
       y: number;
-      weaponClass: WeaponClass;
+      projectileClass: ProjectileClass;
+      fireSoundPool: FireSoundPool;
       damage: number;
       projectileSpeed: number;
       volume: number;
@@ -81,7 +101,8 @@ export type BattleAudioEvent =
       kind: "impact";
       x: number;
       y: number;
-      weaponClass: WeaponClass;
+      projectileClass: ProjectileClass;
+      impactSoundPool: FireSoundPool;
       materialColor: string;
       armor: number;
       incomingDamage: number;
@@ -850,7 +871,7 @@ export class BattleSession {
       projectile.ttl -= dt;
       projectile.prevX = projectile.x;
       projectile.prevY = projectile.y;
-      if (projectile.homingTurnRateDegPerSec > 0) {
+      if (projectile.projectileClass === "missile" && projectile.homingTurnRateDegPerSec > 0) {
         let target = projectile.homingTargetId
           ? this.state.units.find((unit) => unit.id === projectile.homingTargetId && unit.alive && unit.side !== projectile.side && canOperate(unit)) ?? null
           : null;
@@ -869,7 +890,7 @@ export class BattleSession {
           projectile.vy = Math.sin(nextAngle) * speed;
         }
       }
-      const instantBeam = projectile.weaponClass === "beam-precision";
+      const instantBeam = projectile.projectileClass === "laser";
       const remainingRange = Math.max(0, projectile.maxDistance - projectile.traveledDistance);
       const projectileSpeed = Math.max(1, Math.hypot(projectile.vx, projectile.vy));
       const stepX = instantBeam ? (projectile.vx / projectileSpeed) * remainingRange : projectile.vx * dt;
@@ -885,7 +906,7 @@ export class BattleSession {
         projectile.ttl = -1;
       }
       const exceededGroundDropLimit = projectile.sourceUnitType === "ground" &&
-        projectile.weaponClass !== "tracking" &&
+        projectile.projectileClass !== "missile" &&
         projectile.initialVy < 0 &&
         projectile.y >= projectile.fireOriginY + GROUND_PROJECTILE_MAX_DROP_BELOW_FIRE_Y;
       if (exceededGroundDropLimit) {
@@ -1605,12 +1626,13 @@ export class BattleSession {
       if (enemyHasDefenders) {
         return;
       }
-      if (
-        projectile.x > this.state.enemyBase.x &&
-        projectile.x < this.state.enemyBase.x + this.state.enemyBase.w &&
-        projectile.y > this.state.enemyBase.y &&
-        projectile.y < this.state.enemyBase.y + this.state.enemyBase.h
-      ) {
+      if (this.projectileAabbEntryTime(
+        projectile,
+        this.state.enemyBase.x,
+        this.state.enemyBase.y,
+        this.state.enemyBase.x + this.state.enemyBase.w,
+        this.state.enemyBase.y + this.state.enemyBase.h,
+      ) !== null) {
         this.state.enemyBase.hp -= projectile.currentDamage * 0.5;
         projectile.ttl = -1;
       }
@@ -1620,12 +1642,13 @@ export class BattleSession {
     if (playerHasDefenders) {
       return;
     }
-    if (
-      projectile.x > this.state.playerBase.x &&
-      projectile.x < this.state.playerBase.x + this.state.playerBase.w &&
-      projectile.y > this.state.playerBase.y &&
-      projectile.y < this.state.playerBase.y + this.state.playerBase.h
-    ) {
+    if (this.projectileAabbEntryTime(
+      projectile,
+      this.state.playerBase.x,
+      this.state.playerBase.y,
+      this.state.playerBase.x + this.state.playerBase.w,
+      this.state.playerBase.y + this.state.playerBase.h,
+    ) !== null) {
       this.state.playerBase.hp -= projectile.currentDamage * 0.5;
       projectile.ttl = -1;
     }
@@ -1709,8 +1732,7 @@ export class BattleSession {
     if (attachmentStats.type !== "weapon") {
       return false;
     }
-    const attachmentWeaponClass = attachmentStats.weaponClass ?? "rapid-fire";
-    const requiresDedicatedLoader = this.requiresDedicatedLoader(attachmentWeaponClass);
+    const requiresDedicatedLoader = this.requiresDedicatedLoaderForAttachment(attachment);
     // Cooldown/reload commands should be a true no-op: skip recoil if not ready.
     if (requiresDedicatedLoader) {
       const charges = unit.weaponReadyCharges[slot] ?? 0;
@@ -1734,7 +1756,7 @@ export class BattleSession {
     })();
     const finalIntendedTargetY = intendedTargetY ?? adjustedTargetY;
     const finalIntendedTargetX = targetX;
-    const resolvedHomingTargetId = shot.weaponClass === "tracking"
+    const resolvedHomingTargetId = shot.projectileClass === "missile" && shot.trackingTurnRateDegPerSec > 0
       ? (intendedTargetId ?? this.findClosestEnemyToPoint(unit.side, finalIntendedTargetX, finalIntendedTargetY)?.id ?? null)
       : null;
     // Clamp angle directly (no dx/dy round-trip)
@@ -1749,7 +1771,26 @@ export class BattleSession {
     const projectileSpeed = shot.projectileSpeed;
     const gravity = shot.projectileGravity;
     const ttl = Math.max(2.0, effectiveRange / Math.max(120, projectileSpeed));
-    if (shot.weaponClass === "beam-precision") {
+    const nominalRadius = Math.max(2, Math.sqrt(shot.damage) * 0.35)
+      * shot.projectileSizeRatio
+      * PROJECTILE_SIZE_RATIO;
+    const projectileAsset = PROJECTILE_ASSETS[shot.projectileShape];
+    const visualHeight = nominalRadius * 2 * (shot.projectileClass === "laser" ? 4 : 1);
+    const visualWidth = visualHeight * projectileAsset.aspect;
+    const capsule = projectileAsset.collider.kind === "capsule"
+      ? {
+          centerX: (projectileAsset.collider.centerX - 0.5) * visualWidth,
+          centerY: (projectileAsset.collider.centerY - 0.5) * visualHeight,
+          halfLength: projectileAsset.collider.halfLength * visualWidth,
+          radius: projectileAsset.collider.radius * visualHeight,
+        }
+      : {
+          centerX: 0,
+          centerY: (projectileAsset.collider.centerY - 0.5) * visualHeight,
+          halfLength: 0,
+          radius: projectileAsset.collider.halfHeight * visualHeight,
+        };
+    if (shot.projectileClass === "laser") {
       this.state.beamEffects.push({
         x1: muzzle.x,
         y1: muzzle.y,
@@ -1758,6 +1799,8 @@ export class BattleSession {
         side: unit.side,
         life: 0.12,
         maxLife: 0.12,
+        shape: shot.projectileShape as import("../../types.ts").LaserShape,
+        halfWidth: capsule.radius,
       });
     }
     this.state.projectiles.push({
@@ -1775,7 +1818,14 @@ export class BattleSession {
       axisY: finalIntendedTargetY,
       allowAirPierce: unit.type === "ground",
       gravity,
-      weaponClass: shot.weaponClass,
+      projectileClass: shot.projectileClass,
+      projectileShape: shot.projectileShape,
+      projectileSizeRatio: shot.projectileSizeRatio,
+      visualHeight,
+      capsuleCenterX: capsule.centerX,
+      capsuleCenterY: capsule.centerY,
+      capsuleHalfLength: capsule.halfLength,
+      capsuleRadius: capsule.radius,
       explosiveBlastRadius: shot.explosive?.blastRadius ?? 0,
       explosiveBlastDamage: shot.explosive?.blastDamage ?? 0,
       explosiveFalloffPower: shot.explosive?.falloffPower ?? 1,
@@ -1797,11 +1847,11 @@ export class BattleSession {
       hitImpulse: shot.impulse,
       initialPenetration: shot.penetration,
       remainingPenetration: shot.penetration,
-      r: Math.max(2, Math.sqrt(shot.damage) * 0.35),
+      r: capsule.halfLength + capsule.radius,
     });
     if (requiresDedicatedLoader) {
       unit.weaponReadyCharges[slot] = Math.max(0, (unit.weaponReadyCharges[slot] ?? 0) - 1);
-      unit.weaponFireTimers[slot] = this.getLoaderMinBurstInterval(unit, slot);
+      unit.weaponFireTimers[slot] = this.getWeaponMinFireInterval(unit, slot);
     } else {
       unit.weaponFireTimers[slot] = shot.cooldown;
     }
@@ -1809,7 +1859,8 @@ export class BattleSession {
       kind: "fire",
       x: muzzle.x,
       y: muzzle.y,
-      weaponClass: shot.weaponClass,
+      projectileClass: shot.projectileClass,
+      fireSoundPool: this.getAttachmentPart(attachment)?.partProperties?.fireSoundPool ?? this.getDefaultFireSoundPool(attachment.component),
       damage: shot.damage,
       projectileSpeed,
       volume: clamp(this.getAttachmentPart(attachment)?.partProperties?.fireSoundVolume ?? 1, 0, 2),
@@ -1977,7 +2028,13 @@ export class BattleSession {
       kind: "impact",
       x: projectile.x,
       y: projectile.y,
-      weaponClass: projectile.weaponClass,
+      projectileClass: projectile.projectileClass,
+      impactSoundPool: this.getDefaultFireSoundPool(
+        this.state.units
+          .find((unit) => unit.id === projectile.sourceId)
+          ?.attachments.find((attachment) => attachment.id === projectile.sourceWeaponAttachmentId)
+          ?.component ?? "rapidGun",
+      ),
       materialColor: cell.color,
       armor: ignoreArmor ? 0 : cell.armor,
       incomingDamage,
@@ -2061,22 +2118,41 @@ export class BattleSession {
     return Math.atan2(y, x);
   }
 
-  private requiresDedicatedLoader(weaponClass: BattleState["projectiles"][number]["weaponClass"]): boolean {
-    return weaponClass === "heavy-shot" || weaponClass === "explosive" || weaponClass === "tracking";
+  private getAttachmentProjectileClass(attachment: UnitInstance["attachments"][number]): ProjectileClass {
+    const stats = COMPONENTS[attachment.component];
+    return attachment.stats?.projectileClass
+      ?? this.getAttachmentPart(attachment)?.partProperties?.projectileClass
+      ?? stats.projectileClass
+      ?? "bullet";
   }
 
-  private normalizeLoaderSupports(values: ReadonlyArray<string> | undefined): WeaponClass[] {
+  private requiresDedicatedLoaderForAttachment(attachment: UnitInstance["attachments"][number]): boolean {
+    return this.getAttachmentPart(attachment)?.partProperties?.needLoader
+      ?? (
+        attachment.component === "heavyCannon"
+        || attachment.component === "explosiveShell"
+        || attachment.component === "trackingMissile"
+      );
+  }
+
+  private getDefaultFireSoundPool(component: ComponentId): FireSoundPool {
+    if (component === "heavyCannon") return "heavy-shot";
+    if (component === "explosiveShell") return "explosive";
+    if (component === "trackingMissile") return "tracking";
+    if (component === "precisionBeam") return "beam-precision";
+    return "rapid-fire";
+  }
+
+  private normalizeLoaderSupports(values: ReadonlyArray<string> | undefined): ProjectileClass[] {
     if (!values || values.length <= 0) {
       return [];
     }
-    const supports: WeaponClass[] = [];
+    const supports: ProjectileClass[] = [];
     for (const value of values) {
       if (
-        value === "rapid-fire"
-        || value === "heavy-shot"
-        || value === "explosive"
-        || value === "tracking"
-        || value === "beam-precision"
+        value === "bullet"
+        || value === "missile"
+        || value === "laser"
       ) {
         supports.push(value);
       }
@@ -2085,7 +2161,7 @@ export class BattleSession {
   }
 
   private getLoaderConfig(loaderAttachment: UnitInstance["attachments"][number]): {
-    supports: WeaponClass[];
+    supports: ProjectileClass[];
     loadMultiplier: number;
     fastOperation: boolean;
     minLoadTime: number;
@@ -2120,29 +2196,22 @@ export class BattleSession {
     };
   }
 
-  private getLoaderMinBurstInterval(unit: UnitInstance, slot: number): number {
+  private getWeaponMinFireInterval(unit: UnitInstance, slot: number): number {
     const weaponAttachmentId = unit.weaponAttachmentIds[slot];
     const weaponAttachment = unit.attachments.find((entry) => entry.id === weaponAttachmentId && entry.alive);
     if (!weaponAttachment) {
-      return 0.5;
+      return 0;
     }
     const weaponStats = COMPONENTS[weaponAttachment.component];
     if (weaponStats.type !== "weapon") {
-      return 0.5;
+      return 0;
     }
-    let best = Number.POSITIVE_INFINITY;
-    for (const loaderState of unit.loaderStates) {
-      const loaderAttachment = unit.attachments.find((entry) => entry.id === loaderState.attachmentId && entry.alive);
-      if (!loaderAttachment) {
-        continue;
-      }
-      const loader = this.getLoaderConfig(loaderAttachment);
-      if (!loader || !loader.supports.includes(weaponStats.weaponClass ?? "rapid-fire")) {
-        continue;
-      }
-      best = Math.min(best, Math.max(0.5, loader.minBurstInterval));
+    const capacity = this.getWeaponChargeCapacity(unit, slot);
+    if (capacity === 1) {
+      return 0;
     }
-    return Number.isFinite(best) ? Math.max(0.5, best) : 0.5;
+    const part = this.getAttachmentPart(weaponAttachment);
+    return Math.max(0, part?.partProperties?.minFireInterval ?? 0.2);
   }
 
   private getWeaponChargeCapacity(unit: UnitInstance, slot: number): number {
@@ -2155,7 +2224,7 @@ export class BattleSession {
     if (weaponStats.type !== "weapon") {
       return 0;
     }
-    if (!this.requiresDedicatedLoader(weaponStats.weaponClass ?? "rapid-fire")) {
+    if (!this.requiresDedicatedLoaderForAttachment(weaponAttachment)) {
       return 1;
     }
     let hasCompatibleLoader = false;
@@ -2165,7 +2234,7 @@ export class BattleSession {
         continue;
       }
       const loader = this.getLoaderConfig(loaderAttachment);
-      if (!loader || !loader.supports.includes(weaponStats.weaponClass ?? "rapid-fire")) {
+      if (!loader || !loader.supports.includes(this.getAttachmentProjectileClass(weaponAttachment))) {
         continue;
       }
       hasCompatibleLoader = true;
@@ -2219,10 +2288,12 @@ export class BattleSession {
         const weaponAttachmentId = unit.weaponAttachmentIds[targetSlot];
         const weaponAttachment = unit.attachments.find((entry) => entry.id === weaponAttachmentId && entry.alive);
         const weaponStats = weaponAttachment ? COMPONENTS[weaponAttachment.component] : null;
-        const weaponClass = weaponStats?.type === "weapon" ? (weaponStats.weaponClass ?? "rapid-fire") : null;
+        const projectileClass = weaponStats?.type === "weapon" && weaponAttachment
+          ? this.getAttachmentProjectileClass(weaponAttachment)
+          : null;
         if (
-          weaponClass === null ||
-          !loaderConfig.supports.includes(weaponClass) ||
+          projectileClass === null ||
+          !loaderConfig.supports.includes(projectileClass) ||
           (unit.weaponReadyCharges[targetSlot] ?? 0) >= this.getWeaponChargeCapacity(unit, targetSlot)
         ) {
           loaderState.targetWeaponSlot = null;
@@ -2280,8 +2351,8 @@ export class BattleSession {
         if (weaponStats.type !== "weapon") {
           return false;
         }
-        const weaponClass = weaponStats.weaponClass ?? "rapid-fire";
-        if (!loaderConfig.supports.includes(weaponClass)) {
+        const projectileClass = this.getAttachmentProjectileClass(weaponAttachment);
+        if (!loaderConfig.supports.includes(projectileClass)) {
           return false;
         }
         const cap = this.getWeaponChargeCapacity(unit, slot);
@@ -2532,8 +2603,7 @@ export class BattleSession {
           } else {
             const stats = COMPONENTS[attachment.component];
             if (stats.type === "weapon") {
-              const weaponClass = stats.weaponClass ?? "rapid-fire";
-              if (this.requiresDedicatedLoader(weaponClass)) {
+              if (this.requiresDedicatedLoaderForAttachment(attachment)) {
                 const charges = unit.weaponReadyCharges[req.slot] ?? 0;
                 if (charges <= 0) {
                   reason = "no-charges";
@@ -2608,8 +2678,9 @@ export class BattleSession {
     const attachmentId = unit.weaponAttachmentIds[slot];
     const attachment = unit.attachments.find((entry) => entry.id === attachmentId && entry.alive) ?? null;
     const stats = attachment ? COMPONENTS[attachment.component] : null;
-    const needsTarget = stats?.type === "weapon"
-      && ((stats.weaponClass ?? "rapid-fire") === "tracking" || (attachment?.stats?.trackingTurnRateDegPerSec ?? 0) > 0);
+    const needsTarget = stats?.type === "weapon" && attachment !== null
+      && this.getAttachmentProjectileClass(attachment) === "missile"
+      && (attachment.stats?.trackingTurnRateDegPerSec ?? stats.tracking?.turnRateDegPerSec ?? 0) > 0;
     const target = needsTarget ? this.findEnemyAlongAim(unit, slot, angleRad) : null;
     return {
       slot,
@@ -3003,14 +3074,14 @@ export class BattleSession {
       if (!weaponAttachment) continue;
       const weaponStats = COMPONENTS[weaponAttachment.component];
       if (weaponStats.type !== "weapon") continue;
-      const weaponClass = weaponStats.weaponClass ?? "rapid-fire";
-      if (!this.requiresDedicatedLoader(weaponClass) || (unit.weaponReadyCharges[slot] ?? 0) > 0) {
+      const projectileClass = this.getAttachmentProjectileClass(weaponAttachment);
+      if (!this.requiresDedicatedLoaderForAttachment(weaponAttachment) || (unit.weaponReadyCharges[slot] ?? 0) > 0) {
         return true;
       }
       const canReload = unit.loaderStates.some((loaderState) => {
         const loaderAttachment = unit.attachments.find((attachment) => attachment.id === loaderState.attachmentId && attachment.alive);
         const loaderConfig = loaderAttachment ? this.getLoaderConfig(loaderAttachment) : null;
-        return loaderConfig?.supports.includes(weaponClass) === true;
+        return loaderConfig?.supports.includes(projectileClass) === true;
       });
       if (canReload) return true;
     }
@@ -3037,7 +3108,7 @@ export class BattleSession {
     unit: UnitInstance,
     attachment: UnitInstance["attachments"][number],
   ): { x: number; y: number } {
-    const weaponCellSize = getStructureCellSize(unit.radius);
+    const weaponCellSize = getStructureCellSize(unit.radius, unit.type);
     const weaponOffset = attachment.shootingOffset
       ? this.getCoordOffsetWorld(
           unit,
@@ -3058,7 +3129,7 @@ export class BattleSession {
     angleRad: number,
   ): { x: number; y: number } {
     // Keep this geometry synchronized with structure rendering and collision.
-    const visualCellSize = getStructureCellSize(unit.radius);
+    const visualCellSize = getStructureCellSize(unit.radius, unit.type);
     const center = this.getCoordOffsetWorld(unit, attachment.x, attachment.y, visualCellSize);
     const barrelLength = (visualCellSize / 14) * 10;
     return {
@@ -3093,7 +3164,7 @@ export class BattleSession {
   public getStructureCellWorldCenter(unit: UnitInstance, cellId: number): { x: number; y: number } | null {
     const cell = unit.structure.find((entry) => entry.id === cellId);
     if (!cell) return null;
-    const offset = this.getCellOffsetWorld(unit, cell.id, getStructureCellSize(unit.radius));
+    const offset = this.getCellOffsetWorld(unit, cell.id, getStructureCellSize(unit.radius, unit.type));
     return { x: unit.x + offset.x, y: unit.y + offset.y };
   }
 
@@ -3115,7 +3186,7 @@ export class BattleSession {
     const firepoint = this.getAttachmentFirepointWorld(unit, attachment);
     return {
       componentId: attachment.component,
-      weaponClass: stats.weaponClass ?? "rapid-fire",
+      projectileClass: attachment.stats?.projectileClass ?? part?.partProperties?.projectileClass ?? stats.projectileClass ?? "bullet",
       damage: attachment.stats?.damage ?? stats.damage,
       penetration: attachment.stats?.penetration ?? stats.penetration ?? 0,
       spreadDeg: attachment.stats?.spreadDeg ?? stats.spreadDeg ?? 0,
@@ -3339,7 +3410,7 @@ export class BattleSession {
     if (aliveCells.length === 0) {
       return;
     }
-    const cellSize = getStructureCellSize(unit.radius);
+    const cellSize = getStructureCellSize(unit.radius, unit.type);
     const pad = 1.5;
     const key = (x: number, y: number): string => `${x},${y}`;
     const aliveSet = new Set(aliveCells.map((cell) => key(cell.x, cell.y)));
@@ -3404,7 +3475,7 @@ export class BattleSession {
       return;
     }
 
-    const cellSize = getStructureCellSize(unit.radius);
+    const cellSize = getStructureCellSize(unit.radius, unit.type);
     for (const item of items) {
       const cell = unit.structure.find((entry) => entry.id === item.cell);
       if (!cell || cell.destroyed) {
@@ -3426,7 +3497,7 @@ export class BattleSession {
   }
 
   private drawStructureAndFunctionalLayer(unit: UnitInstance): void {
-    const cellSize = getStructureCellSize(unit.radius);
+    const cellSize = getStructureCellSize(unit.radius, unit.type);
 
     if (this.debugPartHpEnabled) {
       this.ctx.font = "9px Trebuchet MS";
@@ -3546,7 +3617,7 @@ export class BattleSession {
   }
 
   private getLiveCellRects(unit: UnitInstance): Array<{ id: number; x: number; y: number; w: number; h: number }> {
-    const cellSize = getStructureCellSize(unit.radius);
+    const cellSize = getStructureCellSize(unit.radius, unit.type);
     const rects: Array<{ id: number; x: number; y: number; w: number; h: number }> = [];
     for (const cell of unit.structure) {
       if (cell.destroyed) {
@@ -3570,24 +3641,12 @@ export class BattleSession {
     let bestHit: UnitProjectileHit | null = null;
     let bestEntryTime = Number.POSITIVE_INFINITY;
     for (const rect of rects) {
-      const expandedLeft = rect.x - projectile.r;
-      const expandedTop = rect.y - projectile.r;
-      const expandedRight = rect.x + rect.w + projectile.r;
-      const expandedBottom = rect.y + rect.h + projectile.r;
-      const entryTime = this.segmentAabbEntryTime(
-        projectile.prevX,
-        projectile.prevY,
-        projectile.x,
-        projectile.y,
-        expandedLeft,
-        expandedTop,
-        expandedRight,
-        expandedBottom,
-      );
+      const entryTime = this.projectileAabbEntryTime(projectile, rect.x, rect.y, rect.x + rect.w, rect.y + rect.h);
       if (entryTime === null) {
         continue;
       }
-      if (isAir && Math.abs(unit.y - projectile.y) > laneBounds.airTargetTolerance + projectile.r) {
+      const entryY = projectile.prevY + (projectile.y - projectile.prevY) * entryTime;
+      if (isAir && Math.abs(unit.y - entryY) > laneBounds.airTargetTolerance + projectile.r) {
         continue;
       }
       if (entryTime < bestEntryTime) {
@@ -3596,7 +3655,7 @@ export class BattleSession {
       }
     }
 
-    const cellSize = getStructureCellSize(unit.radius);
+    const cellSize = getStructureCellSize(unit.radius, unit.type);
     const liveStructureByCoord = new Map(
       unit.structure
         .filter((cell) => !cell.destroyed)
@@ -3615,18 +3674,16 @@ export class BattleSession {
         // A functional box over structure is hit as structure, including normal armor.
         if (liveStructureByCoord.has(`${coordX},${coordY}`)) continue;
         const worldOffset = this.getCoordOffsetWorld(unit, coordX, coordY, cellSize);
-        const entryTime = this.segmentAabbEntryTime(
-          projectile.prevX,
-          projectile.prevY,
-          projectile.x,
-          projectile.y,
-          unit.x + worldOffset.x - cellSize / 2 - projectile.r,
-          unit.y + worldOffset.y - cellSize / 2 - projectile.r,
-          unit.x + worldOffset.x + cellSize / 2 + projectile.r,
-          unit.y + worldOffset.y + cellSize / 2 + projectile.r,
+        const entryTime = this.projectileAabbEntryTime(
+          projectile,
+          unit.x + worldOffset.x - cellSize / 2,
+          unit.y + worldOffset.y - cellSize / 2,
+          unit.x + worldOffset.x + cellSize / 2,
+          unit.y + worldOffset.y + cellSize / 2,
         );
         if (entryTime === null || entryTime >= bestEntryTime) continue;
-        if (isAir && Math.abs(unit.y + worldOffset.y - projectile.y) > laneBounds.airTargetTolerance + projectile.r) continue;
+        const entryY = projectile.prevY + (projectile.y - projectile.prevY) * entryTime;
+        if (isAir && Math.abs(unit.y + worldOffset.y - entryY) > laneBounds.airTargetTolerance + projectile.r) continue;
         const closestAttachedCell = attachedCells.reduce((closest, cell) => {
           const closestDistance = Math.hypot(closest.x - coordX, closest.y - coordY);
           const cellDistance = Math.hypot(cell.x - coordX, cell.y - coordY);
@@ -3639,7 +3696,101 @@ export class BattleSession {
     return bestHit;
   }
 
-  private segmentAabbEntryTime(
+  private projectileAabbEntryTime(
+    projectile: BattleState["projectiles"][number],
+    left: number,
+    top: number,
+    right: number,
+    bottom: number,
+  ): number | null {
+    const dx = projectile.x - projectile.prevX;
+    const dy = projectile.y - projectile.prevY;
+    const distance = Math.hypot(dx, dy);
+    const ux = distance > 1e-6 ? dx / distance : Math.cos(Math.atan2(projectile.vy, projectile.vx));
+    const uy = distance > 1e-6 ? dy / distance : Math.sin(Math.atan2(projectile.vy, projectile.vx));
+    const px = -uy;
+    const py = ux;
+    const centerOffsetX = ux * projectile.capsuleCenterX + px * projectile.capsuleCenterY;
+    const centerOffsetY = uy * projectile.capsuleCenterX + py * projectile.capsuleCenterY;
+    if (projectile.projectileClass === "laser") {
+      return this.orientedBeamAabbEntryTime(
+        projectile.prevX + centerOffsetX,
+        projectile.prevY + centerOffsetY,
+        projectile.x + centerOffsetX,
+        projectile.y + centerOffsetY,
+        projectile.capsuleRadius,
+        left,
+        top,
+        right,
+        bottom,
+      );
+    }
+    const startX = projectile.prevX + centerOffsetX - ux * projectile.capsuleHalfLength;
+    const startY = projectile.prevY + centerOffsetY - uy * projectile.capsuleHalfLength;
+    const endX = projectile.x + centerOffsetX + ux * projectile.capsuleHalfLength;
+    const endY = projectile.y + centerOffsetY + uy * projectile.capsuleHalfLength;
+    return this.segmentRoundedAabbEntryTime(
+      startX,
+      startY,
+      endX,
+      endY,
+      left,
+      top,
+      right,
+      bottom,
+      projectile.capsuleRadius,
+    );
+  }
+
+  private orientedBeamAabbEntryTime(
+    x0: number,
+    y0: number,
+    x1: number,
+    y1: number,
+    halfWidth: number,
+    left: number,
+    top: number,
+    right: number,
+    bottom: number,
+  ): number | null {
+    const dx = x1 - x0;
+    const dy = y1 - y0;
+    const length = Math.hypot(dx, dy);
+    if (length <= 1e-6) return null;
+    const ux = dx / length;
+    const uy = dy / length;
+    const px = -uy;
+    const py = ux;
+    const corners = [
+      { x: left, y: top },
+      { x: right, y: top },
+      { x: right, y: bottom },
+      { x: left, y: bottom },
+    ];
+    const along = corners.map((point) => (point.x - x0) * ux + (point.y - y0) * uy);
+    const across = corners.map((point) => (point.x - x0) * px + (point.y - y0) * py);
+    const alongMin = Math.min(...along);
+    const alongMax = Math.max(...along);
+    const acrossMin = Math.min(...across);
+    const acrossMax = Math.max(...across);
+    if (alongMax < 0 || alongMin > length || acrossMax < -halfWidth || acrossMin > halfWidth) return null;
+
+    const beamCorners = [
+      { x: x0 + px * halfWidth, y: y0 + py * halfWidth },
+      { x: x0 - px * halfWidth, y: y0 - py * halfWidth },
+      { x: x1 + px * halfWidth, y: y1 + py * halfWidth },
+      { x: x1 - px * halfWidth, y: y1 - py * halfWidth },
+    ];
+    if (
+      Math.max(...beamCorners.map((point) => point.x)) < left
+      || Math.min(...beamCorners.map((point) => point.x)) > right
+      || Math.max(...beamCorners.map((point) => point.y)) < top
+      || Math.min(...beamCorners.map((point) => point.y)) > bottom
+    ) return null;
+    return clamp(Math.max(0, alongMin) / length, 0, 1);
+  }
+
+  private segmentRoundedAabbEntryTime(
     x0: number,
     y0: number,
     x1: number,
@@ -3648,56 +3799,55 @@ export class BattleSession {
     top: number,
     right: number,
     bottom: number,
+    radius: number,
   ): number | null {
+    const pointDistanceSquared = (x: number, y: number): number => {
+      const cx = clamp(x, left, right);
+      const cy = clamp(y, top, bottom);
+      return (x - cx) ** 2 + (y - cy) ** 2;
+    };
+    if (pointDistanceSquared(x0, y0) <= radius * radius) return 0;
+    const candidates: number[] = [];
     const dx = x1 - x0;
     const dy = y1 - y0;
-    let tMin = 0;
-    let tMax = 1;
-
-    if (Math.abs(dx) < 1e-6) {
-      if (x0 < left || x0 > right) {
-        return null;
-      }
-    } else {
-      const invDx = 1 / dx;
-      let tx1 = (left - x0) * invDx;
-      let tx2 = (right - x0) * invDx;
-      if (tx1 > tx2) {
-        const swap = tx1;
-        tx1 = tx2;
-        tx2 = swap;
-      }
-      tMin = Math.max(tMin, tx1);
-      tMax = Math.min(tMax, tx2);
-      if (tMin > tMax) {
-        return null;
-      }
-    }
-
-    if (Math.abs(dy) < 1e-6) {
-      if (y0 < top || y0 > bottom) {
-        return null;
-      }
-    } else {
-      const invDy = 1 / dy;
-      let ty1 = (top - y0) * invDy;
-      let ty2 = (bottom - y0) * invDy;
-      if (ty1 > ty2) {
-        const swap = ty1;
-        ty1 = ty2;
-        ty2 = swap;
-      }
-      tMin = Math.max(tMin, ty1);
-      tMax = Math.min(tMax, ty2);
-      if (tMin > tMax) {
-        return null;
+    const addAtX = (x: number): void => {
+      if (Math.abs(dx) < 1e-9) return;
+      const t = (x - x0) / dx;
+      const y = y0 + dy * t;
+      if (t >= 0 && t <= 1 && y >= top && y <= bottom) candidates.push(t);
+    };
+    const addAtY = (y: number): void => {
+      if (Math.abs(dy) < 1e-9) return;
+      const t = (y - y0) / dy;
+      const x = x0 + dx * t;
+      if (t >= 0 && t <= 1 && x >= left && x <= right) candidates.push(t);
+    };
+    addAtX(left - radius);
+    addAtX(right + radius);
+    addAtY(top - radius);
+    addAtY(bottom + radius);
+    const a = dx * dx + dy * dy;
+    if (a > 1e-9) {
+      for (const corner of [{ x: left, y: top }, { x: right, y: top }, { x: right, y: bottom }, { x: left, y: bottom }]) {
+        const ox = x0 - corner.x;
+        const oy = y0 - corner.y;
+        const b = 2 * (ox * dx + oy * dy);
+        const c = ox * ox + oy * oy - radius * radius;
+        const discriminant = b * b - 4 * a * c;
+        if (discriminant < 0) continue;
+        const root = Math.sqrt(discriminant);
+        for (const t of [(-b - root) / (2 * a), (-b + root) / (2 * a)]) {
+          if (t >= 0 && t <= 1) candidates.push(t);
+        }
       }
     }
-
-    if (tMax < 0 || tMin > 1) {
-      return null;
+    candidates.sort((aValue, bValue) => aValue - bValue);
+    for (const t of candidates) {
+      const x = x0 + dx * t;
+      const y = y0 + dy * t;
+      if (pointDistanceSquared(x, y) <= radius * radius + 1e-6) return t;
     }
-    return Math.max(0, tMin);
+    return null;
   }
 
   private spawnBreakDebris(
@@ -3706,7 +3856,7 @@ export class BattleSession {
     beforeAliveAttachments: Set<number>,
     wasAlive: boolean,
   ): void {
-    const cellSize = getStructureCellSize(unit.radius);
+    const cellSize = getStructureCellSize(unit.radius, unit.type);
 
     for (const cell of unit.structure) {
       if (!cell.destroyed || beforeDestroyed.has(cell.id)) {

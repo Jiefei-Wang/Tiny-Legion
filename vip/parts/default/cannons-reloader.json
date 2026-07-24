@@ -71,7 +71,7 @@
     "gasCost": 3,
     "mass": 8,
     "loaderSupports": [
-      "explosive"
+      "bullet"
     ],
     "loaderLoadMultiplier": 1,
     "loaderFastOperation": false,
@@ -80,7 +80,7 @@
   },
   "partProperties": {
     "supportedWeaponTags": [
-      "explosive"
+      "bullet"
     ],
     "loadMultiplier": 1,
     "minLoadTime": 2,
@@ -95,7 +95,7 @@
     "isLoader": true,
     "isArmor": false,
     "loaderServesTags": [
-      "explosive"
+      "bullet"
     ],
     "loaderCooldownMultiplier": 1,
     "hasCoreTuning": false

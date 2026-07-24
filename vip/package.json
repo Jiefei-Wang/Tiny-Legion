@@ -4,12 +4,12 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "predev": "npm --prefix .. run config:generate",
+    "predev": "npm --prefix .. run config:generate && npm --prefix .. run projectiles:generate",
     "dev": "vite",
-    "prebuild": "npm --prefix .. run config:generate",
+    "prebuild": "npm --prefix .. run config:generate && npm --prefix .. run projectiles:generate",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "pretest:headless": "npm --prefix .. run config:generate",
+    "pretest:headless": "npm --prefix .. run config:generate && npm --prefix .. run projectiles:generate",
     "test:headless": "tsc -p tsconfig.headless.json && node .headless-dist/vip/scripts/headless-default-template-smoke.js"
   },
   "devDependencies": {

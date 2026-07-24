@@ -105,14 +105,20 @@
     "spreadDeg": 4,
     "explosiveBlastRadius": 100,
     "explosiveBlastDamage": 40,
-    "explosiveFalloffPower": 1.2
+    "explosiveFalloffPower": 1.2,
+    "projectileClass": "bullet",
+    "projectileShape": "bullet-round",
+    "projectileSizeRatio": 1
   },
   "partProperties": {
     "computingConsumption": 1,
     "hasAngleLimit": false,
-    "bulletType": "bullet",
+    "projectileClass": "bullet",
+    "projectileShape": "bullet-round",
+    "projectileSizeRatio": 1,
     "cooldown": 1.5,
     "fireSoundVolume": 2,
+    "fireSoundPool": "explosive",
     "spreadAngleDeg": 4,
     "explodeOnHit": true,
     "explodeRadius": 100,
@@ -124,12 +130,13 @@
   },
   "properties": {
     "category": "weapon",
-    "subcategory": "explosive",
+    "subcategory": "cannon",
     "materialAlpha": 1,
     "isEngine": false,
     "isWeapon": true,
     "isLoader": false,
     "isArmor": false,
+    "projectileClass": "bullet",
     "hasCoreTuning": false
   },
   "tags": [

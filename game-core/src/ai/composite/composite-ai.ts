@@ -1,9 +1,9 @@
-import type { ComponentId, WeaponClass } from "../../types.ts";
+import type { ComponentId, ProjectileClass } from "../../types.ts";
 import type { BattleState, UnitInstance } from "../../types.ts";
 
 export interface WeaponFireAiInput {
   componentId: ComponentId;
-  weaponClass: WeaponClass;
+  projectileClass: ProjectileClass;
   damage: number;
   penetration: number;
   spreadDeg: number;

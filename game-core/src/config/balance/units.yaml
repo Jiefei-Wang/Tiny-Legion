@@ -7,7 +7,7 @@ _descriptions:
   components.*.maxSpeed: Hard movement-speed cap contributed by this engine.
   components.*.propulsion.platform: Unit platform this engine supports, such as ground or air.
   components.*.propulsion.mode: Directions in which this engine can provide thrust.
-  components.*.loader.supports: Weapon classes this loader is allowed to service.
+  components.*.loader.supports: Projectile classes this loader is allowed to service.
   components.*.loader.loadMultiplier: Multiplier applied to the serviced weapon's reload duration.
   components.*.loader.fastOperation: Allows this loader to use fast-operation reload behavior.
   components.*.loader.minLoadTime: Minimum seconds required for this loader to prepare a round.
@@ -55,8 +55,7 @@ components:
     type: loader
     loader:
       supports:
-        - heavy-shot
-        - explosive
+        - bullet
       loadMultiplier: 0.95
       fastOperation: false
       minLoadTime: 1.15
@@ -68,7 +67,7 @@ components:
     type: loader
     loader:
       supports:
-        - tracking
+        - missile
       loadMultiplier: 0.92
       fastOperation: true
       minLoadTime: 0.85

@@ -252,13 +252,14 @@ button:hover {
 
 .global-settings-overlay { position:fixed; inset:0; z-index:2100; display:grid; place-items:center; padding:18px; background:rgba(4,8,13,.72); backdrop-filter:blur(8px); }
 .global-settings-overlay.hidden { display:none; }
-.global-settings-modal { width:min(1100px,100%); max-height:min(900px,calc(100vh - 36px)); display:grid; grid-template-rows:auto auto auto minmax(0,1fr) auto auto; padding:18px; background:linear-gradient(180deg,#1b2939,#162434); box-shadow:var(--shadow); }
+.global-settings-modal { width:min(1100px,100%); height:90vh; max-height:90vh; display:grid; grid-template-rows:auto auto auto minmax(0,1fr) auto auto; overflow:hidden; padding:18px; background:linear-gradient(180deg,#1b2939,#162434); box-shadow:var(--shadow); }
 .global-settings-modal p { margin:8px 0 16px; }
 .global-settings-tabs { display:flex; gap:6px; overflow-x:auto; padding:0 0 10px; }
 .global-settings-tabs button { flex:0 0 auto; padding:8px 13px; text-transform:none; }
 .global-settings-content { min-height:260px; overflow:auto; padding:2px 8px 12px 2px; }
 .global-settings-subcategory { margin:0 0 14px; padding:12px; border:1px solid var(--stroke); border-radius:12px; background:rgba(7,14,22,.38); }
-.global-settings-subcategory > h3 { margin:0 0 10px; color:var(--accent); font-size:14px; letter-spacing:.06em; text-transform:uppercase; }
+.global-settings-subcategory > summary { color:var(--accent); font-size:14px; font-weight:800; letter-spacing:.06em; text-transform:uppercase; cursor:pointer; }
+.global-settings-subcategory-content { padding-top:10px; }
 .global-settings-group { margin:7px 0; border-left:2px solid rgba(107,228,193,.2); }
 .global-settings-group > summary { padding:7px 9px; color:#c9d8e7; font-size:12px; font-weight:800; cursor:pointer; }
 .global-settings-group > div { padding:0 0 4px 10px; }
@@ -286,7 +287,7 @@ button:hover {
 .global-settings-actions { justify-content:flex-end; margin-top:6px; }
 
 @media (max-width: 720px) {
-  .global-settings-modal { max-height:calc(100vh - 16px); padding:12px; }
+  .global-settings-modal { height:90vh; max-height:90vh; padding:12px; }
   .global-setting-field { align-items:stretch; flex-direction:column; gap:8px; }
   .global-setting-value input,
   .global-setting-text input,

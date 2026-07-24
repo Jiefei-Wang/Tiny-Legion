@@ -55,7 +55,7 @@ Lose condition chain:
 - Test Arena options panel is organized as collapsible tabs to save space: battle start/stop actions are always in the first row, `Unit` is expanded by default, and `Manual Spawn`, `AI Selection`, and `UI Configuration` are collapsed by default. `Manual Spawn` deploys exactly one chosen craft immediately for either Player or Enemy during an active Test Arena.
 - Developer-only destinations (`Test Arena`, `Leaderboard`, `Craft Designer`, `Part Designer`, and `Global Settings`) live in the top-bar `Developer Tools` dropdown. The campaign sidebar is reserved for Base/Map/Battle, and its navigation/panel split can be dragged vertically and is persisted locally.
 - Runtime debug controls live in a compact top-bar dropdown that matches the `Developer Tools` trigger and popover presentation.
-- The development-only Global Settings authoring panel exposes every game-core YAML setting through top-level category tabs (`Balance`, `AI`, `Display`, `Editor`, and `Sound`), file-level sections, and recursively nested subcategories. Type-aware controls edit numbers, booleans, text, and arrays; hovering a field or focusing its help marker shows the explanation authored in that YAML document's `_descriptions` map. Sound sample paths and fire-sample pools each include a preview button that uses the current unsaved form values, with pool previews choosing a member at the authored weapon-class playback rate. Saving validates and transactionally rewrites the fixed YAML set under `game-core/src/config/` while retaining the descriptions; movement speed and master battle volume apply immediately through explicit live hooks, while other settings take effect after restarting the affected VIP/Arena runtime. These values are not browser-local preferences.
+- The development-only Global Settings authoring panel exposes every game-core YAML setting through top-level category tabs (`Balance`, `AI`, `Display`, `Editor`, and `Sound`), file-level sections, and recursively nested subcategories. The modal occupies a stable 90% of the viewport height and scrolls its settings content internally instead of resizing as groups expand. File sections and nested subcategories are collapsed by default so opening the panel shows only its navigational headers, except that a category containing exactly one file section expands that section automatically. Type-aware controls edit numbers, booleans, text, and arrays; hovering a field or focusing its help marker shows the explanation authored in that YAML document's `_descriptions` map. Sound sample paths and fire-sample pools each include a preview button that uses the current unsaved form values, with pool previews choosing a member at the authored weapon-class playback rate. Saving validates and transactionally rewrites the fixed YAML set under `game-core/src/config/` while retaining the descriptions; movement speed and master battle volume apply immediately through explicit live hooks, while other settings take effect after restarting the affected VIP/Arena runtime. These values are not browser-local preferences.
 - Test Arena AI presets are local JS/TS-only and run without external Python bridge/service dependencies.
 - Browser battles are presented by Phaser while the shared simulation remains renderer-independent for headless training and verification.
 - Test Arena parameter inputs apply on `Enter` or input blur (no separate apply button).
@@ -192,10 +192,13 @@ Part-level properties:
 - `has angle limit`: limits weapon aiming around its resolved facing using separate clockwise/counter-clockwise arcs.
 - `cw angle`: clockwise limit angle relative to part direction.
 - `ccw angle`: anti-clockwise limit angle relative to part direction.
-- `bullet type`: weapon projectile family (`bullet|missile|laser`).
+- `projectile class`: one of `bullet|missile|laser`; bullet and missile are physical shots, while laser resolves as instant hitscan.
+- `projectile shape`: class-filtered SVG asset (`round|slug|tracer`, `missile|heavy rocket|energy orb`, or `thin|pulse|wide`).
+- `projectile size ratio`: uniform `0.1x..10x` scale applied to both the rendered solid projectile and its generated collider.
 - `damage`: base hit damage.
 - `range`: maximum effective range.
 - `cooldown`: base firing cooldown.
+- `fire sound`: recorded firing-sample pool selected for this individual weapon part; it is independent of weapon category and combat behavior.
 - `recoil`: self-impulse on fire.
 - `hit impulse`: impulse applied to hit target.
 - `penetration`: armor penetration value.
@@ -204,7 +207,7 @@ Part-level properties:
 - `explode radius`: explosive radius.
 - `projectile speed`: flight speed for non-laser projectiles.
 - `projectile gravity`: gravity/drop for non-laser projectiles.
-- `tracking`: projectile can seek targets (non-laser).
+- `tracking`: optional seeking available only to missile-class projectiles.
 - `tracking turn rate`: homing turn acceleration/rate.
 - Firing arcs use only `has angle limit + cw/ccw`; the former `shoot angle` field is not accepted.
 - `need loader`: weapon requires loader participation to reload/fire cycle.
@@ -213,6 +216,7 @@ Part-level properties:
 - `min load time`: minimum enforced loader cycle time.
 - `min burst interval`: minimum interval for burst/charge transfer cadence.
 - `max capacity`: maximum number of loaded rounds stored directly by a weapon.
+- `min fire interval`: minimum seconds between shots released from a weapon whose `max capacity` is not `1`.
 
 Cell-level properties:
 
@@ -240,7 +244,7 @@ Cell-level properties:
 
 `weapon` should expose:
 
-- `gas cost`, `mass`, `tag`, `bullet type`, `damage`, `range`, `cooldown`, `max capacity`, `fire sound volume`, `recoil`, `hit impulse`, `penetration`, `spread angle`, `explode on hit`, `explode radius` (when `explode on hit = true`), `projectile speed` (non-laser), `projectile gravity` (non-laser), `tracking` (non-laser), `tracking turn rate` (tracking only), `directional`, `has angle limit`, `cw angle`, `ccw angle`, `need loader`, `default direction`, `computing consumption`.
+- `gas cost`, `mass`, `tag`, `projectile class`, `projectile shape`, `projectile size ratio`, `damage`, `range`, `cooldown`, `max capacity`, `min fire interval` (when capacity is not `1`), `fire sound`, `fire sound volume`, `recoil`, `hit impulse`, `penetration`, `spread angle`, `explode on hit`, `explode radius` (when enabled), `projectile speed` and `projectile gravity` (bullet/missile), `tracking` and `tracking turn rate` (missile only), `directional`, `has angle limit`, `cw angle`, `ccw angle`, `need loader`, `default direction`, `computing consumption`.
 
 `loader` should expose:
 
@@ -292,6 +296,7 @@ Cell-level properties:
 - `explode on hit`: `false`
 - `explode radius` (when `explode on hit = true`): `50`
 - `projectile speed` (non-laser): `400`
+- `fire sound`: defaults to the pool matching the initial weapon behavior and remains independently selectable per part
 - `fire sound volume`: `1x` (`0x..2x`; affects only the firing part's muzzle sound and `0x` mutes it)
 - `projectile gravity` (non-laser): `100`
 - `tracking` (non-laser): `false`
@@ -301,6 +306,8 @@ Cell-level properties:
 - `cw angle`: `15`
 - `ccw angle`: `15` (`180/180` for omni)
 - `need loader`: `false`
+- `max capacity`: `2`
+- `min fire interval`: `0.2` when `max capacity` is not `1`
 - `default direction`: `right`
 - `computing consumption`: `1`
 
@@ -344,7 +351,7 @@ Part-level property visibility (left pane):
   - structure: `light steel`, `normal steel`, `heavy steel`;
   - control: `small control unit`, `medium control unit`, `large control unit`;
   - engine: `light tank engine`, `heavy tank engine`, `light aircraft engine`, `heavy aircraft engine`;
-  - weapon: `firearm`, `cannons`, `anti-tank gun`, `laser`;
+  - weapon: `firearm`, `cannon`, `laser`; the cannon category contains explosive and anti-tank variants;
   - loader: `cannons reloader`, `anti-tank gun reloader`.
 - Selecting a canonical category opens that existing part; for a new unsaved draft it applies the selected part as a preset while retaining a new identity.
 - `structure` selected:
@@ -355,13 +362,15 @@ Part-level property visibility (left pane):
 - `engine` selected:
   - Show: `mass`, `power`, `max speed`, `power ground`, `power air`.
 - `weapon` selected:
-  - Weapon category options are `bullet`, `missile`, and `beam` (no separate `explosive` category).
-  - Show: `mass`, `bullet type`, `damage`, `range`, `cooldown`, `max loaded ammo`, `recoil`, `hit impulse`, `penetration`, `spread angle`, `explode on hit`, `need loader`, `directional`, `computing consumption`.
-  - Show `projectile speed` and `projectile gravity` only for non-laser bullets.
+  - Replace the category preset selector with `Projectile Class`: `bullet`, `missile`, or `laser`.
+  - Filter `Projectile Shape` to the three assets owned by the selected class and expose `Projectile Size Ratio` (`0.1x..10x`).
+  - Show `projectile speed` and `projectile gravity` only for Bullet and Missile.
   - Show explosive tuning (`blast radius`, `blast damage`, `falloff`) only when `explode on hit = true`.
-  - Show `tracking` only for non-laser bullets; show `tracking turn rate` only when `tracking = true`.
+  - Show optional `tracking` only for Missile and show `tracking turn rate` only when enabled.
+  - Laser hides flight, homing, and explosion controls.
   - Show `has angle limit` and `default direction` for weapon parts.
   - If `has angle limit = true`, show `cw angle` and `ccw angle`.
+  - Show `min fire interval` only when `max loaded ammo` is not `1`.
 - `loader` selected:
   - Show: `mass`, `supported weapon tags`, `load multiplier`, `min load time`, `min burst interval`.
 
@@ -401,8 +410,9 @@ Validation and message placement:
 Weapons:
 
 - `firearm`: omnidirectional with no firing-angle limit, `0.5s` cooldown, `5` damage, `0` penetration, and no blast; intended for `light steel`.
-- `cannons`: `2s` cooldown, `50` direct damage, `0` penetration, `100` blast radius, `40` blast damage, `1x2` footprint, and requires `cannons reloader`; intended for `normal steel`.
-- `anti-tank gun`: `4s` cooldown, `220` damage, `250` penetration, no blast, `1x2` footprint, and requires `anti-tank gun reloader`; intended for `heavy steel`.
+- `cannon` (explosive variant, part name `cannons`): `2s` cooldown, `50` direct damage, `0` penetration, `100` blast radius, `40` blast damage, `1x2` footprint, and requires `cannons reloader`; intended for `normal steel`.
+- `cannon` (anti-tank variant, part name `anti-tank gun`): `4s` cooldown, `220` direct damage, `250` penetration, no blast/range damage, `1x2` footprint, and requires `anti-tank gun reloader`; intended for `heavy steel`.
+- Both variants share the `cannon` Part Designer category. Their recorded muzzle audio is selected independently through each part's `fireSoundPool`, so category membership does not force identical sounds.
 - `laser`: hits across its range without flight time, renders as a short-lived straight beam, has `0.1s` cooldown, `5` damage, `0` penetration, and no blast; intended for `light steel`.
 
 Structure:
@@ -571,7 +581,7 @@ Recommended starter values:
 - A unit has an available weapon when at least one surviving weapon can fire a loaded round or has a surviving compatible loader that can reload it.
 - If every weapon is destroyed, or all loader paths are destroyed and all loaded rounds are exhausted, a ground unit enters its 10-second wreck countdown. An aircraft instead enters irreversible escape mode, returns to its base, and cannot be selected for player control. Aircraft escape movement preserves the craft's current facing for one second, then turns it toward its base and continues retreating.
 - Campaign battles and the strategic layer are continuous real time; there is no **Next Round** action or artificial round deadline.
-- Battlefield presentation uses two deliberately simple illustrated layers: an air image above the runtime ground boundary and a ground-surface image below it. Hand-painted command-bunker sprites, plated modular craft with restrained blue-player/red-enemy illuminated borders, and glowing projectile trails sit above those layers. Block seams carry a light faction tint, while brighter low-opacity strokes follow only exposed outer structure-cell edges so ownership reads from the designed silhouette without adding a detached floor glow. Friendly and enemy bunkers share a transparent source sprite with side tinting, edge anchoring, and in-world health treatment.
+- Battlefield presentation uses two deliberately simple illustrated layers: an air image above the runtime ground boundary and a ground-surface image below it. Hand-painted command-bunker sprites, plated modular craft with restrained blue-player/red-enemy illuminated borders, and faction-tinted SVG projectile assets sit above those layers. Bullet, missile, and laser classes each provide three distinct shapes. Block seams carry a light faction tint, while brighter low-opacity strokes follow only exposed outer structure-cell edges so ownership reads from the designed silhouette without adding a detached floor glow. Friendly and enemy bunkers share a transparent source sprite with side tinting, edge anchoring, and in-world health treatment. Battlefield config provides independent global size ratios for ground units, aircraft, and projectiles; each ratio scales both presentation and the corresponding collision/hit geometry.
 - Tactical overlays are enabled by default outside replay mode: live structure-cell hitboxes, faint faction-colored effective weapon ranges for every craft (with stronger controlled/selected emphasis), movement vectors, and AI aimed-target lines with target reticles. They can still be disabled from Runtime Debug.
 - Every live weapon renders its own barrel from the attachment anchor to the simulation muzzle. Barrel direction follows the per-slot clamped world-space aim angle for both AI and manual control, including mirrored left-facing craft; projectiles spawn exactly at that visible barrel tip, while weapon spread affects their outgoing velocity rather than shifting the spawn point.
 
@@ -635,7 +645,7 @@ Recommended starter values:
 - Ground combat zone is rendered with a visible grid, and aircraft minimum altitude must remain above this grid zone.
 - During battle, functional parts use recognizable component-specific glyphs while visual paint remains visibly attached to structure.
 - Developer debug tools can enable **Show Part HP Overlay** to visualize per-structure-cell remaining HP with red damage tint and numeric HP text.
-- Phaser debug presentation shows live unit/projectile/evading counts, collision radii, velocity vectors, projectile trails, and target lines.
+- Phaser debug presentation shows live unit/projectile/evading counts, fitted projectile capsules or laser rectangles, velocity vectors, and target lines.
 - The dev probe `battle.debug` path exposes compact per-craft position, velocity, structure/functional health counts, AI target and state, dodge state, prediction lead time, aim angle/range, decision path, and fire-block reason.
 - Projectile avoidance predicts closest approach, includes craft/projectile radii and projectile gravity, ranks danger using collision clearance plus time-to-impact, and chooses a perpendicular escape vector. Stable per-unit jink phases keep runs reproducible without making stacked crafts move identically.
 - Weapon fire, projectile impact, explosion, deployment, and moving-engine sounds are positional relative to the user's current panned/zoomed battlefield view. Fire sound uses alternating recorded variants with class-specific pitch/timbre for rapid-fire, heavy-shot, explosive, tracking, and precision-beam weapons. Heavy cannon combines a cannon recording with a low recoil tail; tracking rockets use a broadband rocket-launch source without an extra synthetic tone. Rapid-fire muzzle sound uses the short broadband bullet-on-metal transients selected by the developer, while rapid-fire and other light-projectile hits use a separate four-variant hard-surface ricochet pool with descending metallic tails. Light ricochets are mixed below heavy impacts so sustained rapid fire remains readable. Heavy impacts use their own pool, with pitch influenced by struck material and loudness driven by damage actually delivered after armor.
@@ -655,7 +665,7 @@ No simple fixed hitpoint exchange for whole units. Damage emerges from impacts, 
 
 ## 7.1 Damage Pipeline
 
-1. Collision/projectile contact resolves against the earliest structure cell or exposed damageable functional box along the projectile sweep.
+1. Collision/projectile contact resolves against the earliest structure cell or exposed damageable functional box along the asset-fitted projectile sweep. Bullet/Missile SVGs generate one maximized inscribed oriented capsule; Laser SVGs generate a square-ended beam rectangle from their opaque core.
 2. Compute local impact energy and contact impulse.
 3. Compare vs material resistance.
 4. Apply structural damage, crack, or breach on the impacted local structure cell (when a sweep intersects multiple cells in one tick, use the earliest intersection along projectile travel).
@@ -673,7 +683,7 @@ No simple fixed hitpoint exchange for whole units. Damage emerges from impacts, 
    - the first cell receives full weapon damage,
    - each later cell receives `baseDamage * (remainingPenetration / initialPenetration)` before its own penetration cost is deducted,
    - a zero-penetration shot still damages its first cell and then stops.
-12. A structure cell's visible world-space panel and projectile hitbox use the same canonical size, so hits anywhere on a live displayed cell register consistently.
+12. A structure cell's visible world-space panel and projectile hitbox use the same canonical, unit-type-scaled size, so hits anywhere on a live displayed cell register consistently. The global projectile size ratio likewise scales both each projectile asset and its fitted collider.
 
 Damage presentation:
 

@@ -2,7 +2,19 @@ import { COMPONENTS } from "../config/balance/weapons.ts";
 import { MATERIALS } from "../config/balance/materials.ts";
 import { normalizeRotateQuarter, getPartFootprintCells } from "./part-geometry.ts";
 import { validatePartDefinitionDetailed } from "./part-validation.ts";
-import type { ComponentId, MaterialId, PartCategory, PartDefinition, PartDirection, PartPropertySet, PartType, UnitType } from "../types.ts";
+import type {
+  ComponentId,
+  FireSoundPool,
+  MaterialId,
+  PartCategory,
+  PartDefinition,
+  PartDirection,
+  PartPropertySet,
+  PartType,
+  ProjectileClass,
+  ProjectileShape,
+  UnitType,
+} from "../types.ts";
 
 export { normalizeRotateQuarter, rotateOffsetByQuarter, getPartFootprintCells } from "./part-geometry.ts";
 export { validatePartDefinitionDetailed, validatePartDefinition } from "./part-validation.ts";
@@ -132,11 +144,36 @@ function readOptionalString(value: unknown): string | undefined {
   return next.length > 0 ? next : undefined;
 }
 
-function readOptionalWeaponClass(value: unknown): "rapid-fire" | "heavy-shot" | "explosive" | "tracking" | "beam-precision" | undefined {
+function readOptionalFireSoundPool(value: unknown): FireSoundPool | undefined {
   if (value === "rapid-fire" || value === "heavy-shot" || value === "explosive" || value === "tracking" || value === "beam-precision") {
     return value;
   }
   return undefined;
+}
+
+function readOptionalProjectileClass(value: unknown): ProjectileClass | undefined {
+  if (value === "bullet" || value === "missile" || value === "laser") return value;
+  if (value === "tracking") return "missile";
+  if (value === "beam" || value === "beam-precision") return "laser";
+  if (value === "rapid-fire" || value === "heavy-shot" || value === "explosive" || value === "cannon") return "bullet";
+  return undefined;
+}
+
+function readOptionalProjectileShape(value: unknown): ProjectileShape | undefined {
+  if (
+    value === "bullet-round" || value === "bullet-slug" || value === "bullet-tracer"
+    || value === "missile-missile" || value === "missile-heavy-rocket" || value === "missile-energy-orb"
+    || value === "laser-thin" || value === "laser-pulse" || value === "laser-wide"
+  ) return value;
+  return undefined;
+}
+
+function defaultProjectileShape(projectileClass: ProjectileClass, component: ComponentId): ProjectileShape {
+  if (projectileClass === "laser") return "laser-thin";
+  if (projectileClass === "missile") return "missile-missile";
+  if (component === "rapidGun") return "bullet-tracer";
+  if (component === "heavyCannon") return "bullet-slug";
+  return "bullet-round";
 }
 
 function normalizeStringList(value: unknown): string[] | undefined {
@@ -244,7 +281,7 @@ function getLegacyFootprintOffsets(component: ComponentId): Array<{ x: number; y
   if (placementOffsets && placementOffsets.length > 0) {
     return placementOffsets.map((offset) => ({ x: offset.x, y: offset.y }));
   }
-  if (stats.type === "weapon" && stats.weaponClass === "heavy-shot") {
+  if (stats.type === "weapon" && component === "heavyCannon") {
     return [{ x: 0, y: 0 }, { x: 1, y: 0 }];
   }
   return [{ x: 0, y: 0 }];
@@ -300,7 +337,7 @@ function createImplicitStructurePartDefinition(component: ComponentId): PartDefi
       isLoader: false,
       isArmor: true,
       engineType: undefined,
-      weaponType: undefined,
+      projectileClass: undefined,
       loaderServesTags: undefined,
       loaderCooldownMultiplier: undefined,
       hasCoreTuning: false,
@@ -378,7 +415,7 @@ function createImplicitStructureMaterialPartDefinition(materialId: MaterialId): 
       isLoader: false,
       isArmor: true,
       engineType: undefined,
-      weaponType: undefined,
+      projectileClass: undefined,
       loaderServesTags: undefined,
       loaderCooldownMultiplier: undefined,
       hasCoreTuning: false,
@@ -448,38 +485,44 @@ export function createImplicitPartDefinition(component: ComponentId): PartDefini
       hasAngleLimit: stats.type === "weapon" ? stats.hasAngleLimit === true : undefined,
       cwAngle: stats.type === "weapon" && stats.hasAngleLimit === true ? stats.cwAngle : undefined,
       ccwAngle: stats.type === "weapon" && stats.hasAngleLimit === true ? stats.ccwAngle : undefined,
-      bulletType: stats.type === "weapon"
-        ? ((stats.weaponClass === "tracking")
-            ? "missile"
-            : (stats.weaponClass === "beam-precision" ? "laser" : "bullet"))
-        : undefined,
+      projectileClass: stats.type === "weapon" ? (stats.projectileClass ?? "bullet") : undefined,
+      projectileShape: stats.type === "weapon" ? (stats.projectileShape ?? defaultProjectileShape(stats.projectileClass ?? "bullet", component)) : undefined,
+      projectileSizeRatio: stats.type === "weapon" ? (stats.projectileSizeRatio ?? 1) : undefined,
       damage: stats.damage,
       range: stats.range,
       cooldown: stats.cooldown,
       fireSoundVolume: stats.type === "weapon" ? 1 : undefined,
+      fireSoundPool: stats.type === "weapon"
+        ? (component === "heavyCannon" ? "heavy-shot"
+          : component === "explosiveShell" ? "explosive"
+          : component === "trackingMissile" ? "tracking"
+          : component === "precisionBeam" ? "beam-precision"
+          : "rapid-fire")
+        : undefined,
       recoil: stats.recoil,
       hitImpulse: stats.hitImpulse,
       penetration: stats.penetration,
       spreadAngleDeg: stats.spreadDeg,
-      explodeOnHit: stats.weaponClass === "explosive",
+      explodeOnHit: component === "explosiveShell",
       explodeRadius: stats.explosive?.blastRadius,
       projectileSpeed: stats.projectileSpeed,
       projectileGravity: stats.projectileGravity,
-      tracking: stats.weaponClass === "tracking",
+      tracking: component === "trackingMissile",
       trackingTurnRate: stats.tracking?.turnRateDegPerSec,
-      needLoader: stats.weaponClass === "tracking" || stats.weaponClass === "heavy-shot" || stats.weaponClass === "explosive",
+      needLoader: component === "trackingMissile" || component === "heavyCannon" || component === "explosiveShell",
       supportedWeaponTags: stats.type === "loader" ? (stats.loader?.supports ?? []).map((entry) => String(entry)) : undefined,
       loadMultiplier: stats.loader?.loadMultiplier,
       minLoadTime: stats.loader?.minLoadTime,
       minBurstInterval: stats.loader?.minBurstInterval,
       maxCapacity: stats.type === "weapon" ? stats.maxLoadedAmmo : undefined,
+      minFireInterval: stats.type === "weapon" && (stats.maxLoadedAmmo ?? 1) !== 1 ? 0.2 : undefined,
       computing: stats.type === "control" ? 20 : undefined,
       computingConsumption: stats.type === "weapon" ? 1 : undefined,
     },
     properties: {
       category: stats.type,
       subcategory: stats.type === "weapon"
-        ? (stats.weaponClass ?? "weapon")
+        ? (stats.projectileClass ?? "weapon")
         : stats.type === "engine"
           ? (stats.propulsion?.platform ?? "engine")
           : stats.type,
@@ -489,7 +532,7 @@ export function createImplicitPartDefinition(component: ComponentId): PartDefini
       isLoader: stats.type === "loader",
       isArmor: false,
       engineType: stats.type === "engine" ? stats.propulsion?.platform : undefined,
-      weaponType: stats.type === "weapon" ? stats.weaponClass : undefined,
+      projectileClass: stats.type === "weapon" ? stats.projectileClass : undefined,
       loaderServesTags: stats.type === "loader" ? stats.loader?.supports.map((entry) => String(entry)) : undefined,
       loaderCooldownMultiplier: stats.type === "loader" ? stats.loader?.loadMultiplier : undefined,
       hasCoreTuning: false,
@@ -648,11 +691,14 @@ export function clonePartDefinition(part: PartDefinition): PartDefinition {
           hasAngleLimit: part.partProperties.hasAngleLimit,
           cwAngle: part.partProperties.cwAngle,
           ccwAngle: part.partProperties.ccwAngle,
-          bulletType: part.partProperties.bulletType,
+          projectileClass: part.partProperties.projectileClass,
+          projectileShape: part.partProperties.projectileShape,
+          projectileSizeRatio: part.partProperties.projectileSizeRatio,
           damage: part.partProperties.damage,
           range: part.partProperties.range,
           cooldown: part.partProperties.cooldown,
           fireSoundVolume: part.partProperties.fireSoundVolume,
+          fireSoundPool: part.partProperties.fireSoundPool,
           recoil: part.partProperties.recoil,
           hitImpulse: part.partProperties.hitImpulse,
           penetration: part.partProperties.penetration,
@@ -669,6 +715,7 @@ export function clonePartDefinition(part: PartDefinition): PartDefinition {
           minLoadTime: part.partProperties.minLoadTime,
           minBurstInterval: part.partProperties.minBurstInterval,
           maxCapacity: part.partProperties.maxCapacity,
+          minFireInterval: part.partProperties.minFireInterval,
           explosionDamage: part.partProperties.explosionDamage,
           explosionRadius: part.partProperties.explosionRadius,
         }
@@ -700,6 +747,9 @@ export function clonePartDefinition(part: PartDefinition): PartDefinition {
           loaderFastOperation: part.stats.loaderFastOperation,
           loaderMinLoadTime: part.stats.loaderMinLoadTime,
           loaderMinBurstInterval: part.stats.loaderMinBurstInterval,
+          projectileClass: part.stats.projectileClass,
+          projectileShape: part.stats.projectileShape,
+          projectileSizeRatio: part.stats.projectileSizeRatio,
         }
       : undefined,
     properties: part.properties
@@ -717,7 +767,7 @@ export function clonePartDefinition(part: PartDefinition): PartDefinition {
           isLoader: part.properties.isLoader,
           isArmor: part.properties.isArmor,
           engineType: part.properties.engineType,
-          weaponType: part.properties.weaponType,
+          projectileClass: part.properties.projectileClass,
           loaderServesTags: part.properties.loaderServesTags ? [...part.properties.loaderServesTags] : undefined,
           loaderCooldownMultiplier: part.properties.loaderCooldownMultiplier,
           hasCoreTuning: part.properties.hasCoreTuning,
@@ -901,13 +951,17 @@ export function parsePartDefinition(input: unknown): PartDefinition | null {
     hasAngleLimit,
     cwAngle: cwAngleRaw,
     ccwAngle: ccwAngleRaw,
-    bulletType: (partPropertiesRecord.bulletType === "bullet" || partPropertiesRecord.bulletType === "missile" || partPropertiesRecord.bulletType === "laser")
-      ? partPropertiesRecord.bulletType
-      : undefined,
+    projectileClass: readOptionalProjectileClass(partPropertiesRecord.projectileClass ?? partPropertiesRecord.bulletType)
+      ?? (normalizedPartType === "weapon"
+        ? (normalizedPartCategory === "missile" ? "missile" : normalizedPartCategory === "beam" ? "laser" : COMPONENTS[baseComponent].projectileClass ?? "bullet")
+        : undefined),
+    projectileShape: readOptionalProjectileShape(partPropertiesRecord.projectileShape),
+    projectileSizeRatio: readOptionalNumber(partPropertiesRecord.projectileSizeRatio),
     damage: readOptionalNumber(partPropertiesRecord.damage),
     range: readOptionalNumber(partPropertiesRecord.range),
     cooldown: readOptionalNumber(partPropertiesRecord.cooldown),
     fireSoundVolume: readOptionalNumber(partPropertiesRecord.fireSoundVolume),
+    fireSoundPool: readOptionalFireSoundPool(partPropertiesRecord.fireSoundPool),
     recoil: readOptionalNumber(partPropertiesRecord.recoil),
     hitImpulse: readOptionalNumber(partPropertiesRecord.hitImpulse),
     penetration: readOptionalNumber(partPropertiesRecord.penetration),
@@ -924,6 +978,7 @@ export function parsePartDefinition(input: unknown): PartDefinition | null {
     minLoadTime: readOptionalNumber(partPropertiesRecord.minLoadTime),
     minBurstInterval: readOptionalNumber(partPropertiesRecord.minBurstInterval),
     maxCapacity: readOptionalNumber(partPropertiesRecord.maxCapacity),
+    minFireInterval: readOptionalNumber(partPropertiesRecord.minFireInterval),
     explosionDamage: readOptionalNumber(partPropertiesRecord.explosionDamage),
     explosionRadius: readOptionalNumber(partPropertiesRecord.explosionRadius),
   };
@@ -939,6 +994,16 @@ export function parsePartDefinition(input: unknown): PartDefinition | null {
   }
   if (inferredPartType === "weapon" && partProperties.computingConsumption === undefined) {
     partProperties.computingConsumption = 1;
+  }
+  if (inferredPartType === "weapon" && partProperties.projectileClass) {
+    partProperties.projectileShape ??= defaultProjectileShape(partProperties.projectileClass, baseComponent);
+    partProperties.projectileSizeRatio ??= 1;
+  }
+  if (
+    inferredPartType === "weapon"
+    && (partProperties.maxCapacity ?? COMPONENTS[baseComponent].maxLoadedAmmo ?? 1) !== 1
+  ) {
+    partProperties.minFireInterval ??= 0.2;
   }
 
   const parsed: PartDefinition = {
@@ -991,24 +1056,23 @@ export function parsePartDefinition(input: unknown): PartDefinition | null {
       explosiveBlastDamage: readOptionalNumber(runtimeRecord.explosiveBlastDamage ?? runtimeExplosiveRecord.blastDamage ?? partProperties.explosionDamage),
       explosiveFalloffPower: readOptionalNumber(runtimeRecord.explosiveFalloffPower ?? runtimeExplosiveRecord.falloffPower),
       trackingTurnRateDegPerSec: readOptionalNumber(runtimeRecord.trackingTurnRateDegPerSec ?? runtimeTrackingRecord.turnRateDegPerSec ?? partProperties.trackingTurnRate),
+      projectileClass: readOptionalProjectileClass(runtimeRecord.projectileClass ?? partProperties.projectileClass),
+      projectileShape: readOptionalProjectileShape(runtimeRecord.projectileShape ?? partProperties.projectileShape),
+      projectileSizeRatio: readOptionalNumber(runtimeRecord.projectileSizeRatio ?? partProperties.projectileSizeRatio),
       loaderSupports: Array.isArray(runtimeRecord.loaderSupports)
         ? runtimeRecord.loaderSupports
-            .map((entry) => readOptionalWeaponClass(entry))
-            .filter((entry): entry is "rapid-fire" | "heavy-shot" | "explosive" | "tracking" | "beam-precision" => entry !== undefined)
+            .map((entry) => readOptionalProjectileClass(entry))
+            .filter((entry): entry is ProjectileClass => entry !== undefined)
         : Array.isArray(partProperties.supportedWeaponTags)
           ? partProperties.supportedWeaponTags
               .map((entry) => {
-                if (entry === "missile") return "tracking";
-                if (entry === "beam" || entry === "laser") return "beam-precision";
-                if (entry === "explosive") return "explosive";
-                if (entry === "cannon") return "heavy-shot";
-                return "rapid-fire";
+                return readOptionalProjectileClass(entry) ?? "bullet";
               })
-              .filter((entry): entry is "rapid-fire" | "heavy-shot" | "explosive" | "tracking" | "beam-precision" => entry !== undefined)
+              .filter((entry): entry is ProjectileClass => entry !== undefined)
         : Array.isArray(runtimeLoaderRecord.supports)
           ? runtimeLoaderRecord.supports
-              .map((entry) => readOptionalWeaponClass(entry))
-              .filter((entry): entry is "rapid-fire" | "heavy-shot" | "explosive" | "tracking" | "beam-precision" => entry !== undefined)
+              .map((entry) => readOptionalProjectileClass(entry))
+              .filter((entry): entry is ProjectileClass => entry !== undefined)
         : undefined,
       loaderLoadMultiplier: readOptionalNumber(runtimeRecord.loaderLoadMultiplier ?? runtimeLoaderRecord.loadMultiplier ?? partProperties.loadMultiplier),
       loaderFastOperation: readOptionalBoolean(runtimeRecord.loaderFastOperation ?? runtimeLoaderRecord.fastOperation),
@@ -1052,6 +1116,9 @@ export function parsePartDefinition(input: unknown): PartDefinition | null {
         : (propertiesRecord.engine_type === "ground" || propertiesRecord.engine_type === "air")
           ? propertiesRecord.engine_type
           : (partProperties.powerAir === true ? "air" : (partProperties.powerGround === true ? "ground" : undefined)),
+      projectileClass: readOptionalProjectileClass(
+        propertiesRecord.projectileClass ?? propertiesRecord.weaponType ?? partProperties.projectileClass,
+      ),
       loaderServesTags: normalizeStringList(
         propertiesRecord.loaderServesTags
           ?? propertiesRecord.loader_serves_tags

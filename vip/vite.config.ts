@@ -84,6 +84,45 @@ function gameCoreAudioPlugin() {
   };
 }
 
+function gameCoreProjectilePlugin() {
+  const projectileDir = resolve(process.cwd(), "..", "game-core", "assets", "projectiles");
+  const resolveProjectilePath = (rawUrl: string): string | null => {
+    let decoded = "";
+    try {
+      decoded = decodeURIComponent(rawUrl.split("?")[0] ?? "").replace(/^\/+/, "");
+    } catch {
+      return null;
+    }
+    const target = resolve(projectileDir, decoded);
+    if (target !== projectileDir && !target.startsWith(`${projectileDir}${sep}`)) return null;
+    return target;
+  };
+  return {
+    name: "game-core-projectiles",
+    buildStart(this: { emitFile: (asset: { type: "asset"; fileName: string; source: Buffer }) => void }) {
+      for (const name of readdirSync(projectileDir)) {
+        if (!name.endsWith(".svg")) continue;
+        this.emitFile({
+          type: "asset",
+          fileName: `assets/projectiles/${name}`,
+          source: readFileSync(resolve(projectileDir, name)),
+        });
+      }
+    },
+    configureServer(server: import("vite").ViteDevServer) {
+      server.middlewares.use("/assets/projectiles", (req, res, next) => {
+        const target = resolveProjectilePath(req.url ?? "");
+        if (!target || !target.endsWith(".svg") || !existsSync(target) || !statSync(target).isFile()) {
+          next();
+          return;
+        }
+        res.setHeader("content-type", "image/svg+xml; charset=utf-8");
+        res.end(readFileSync(target));
+      });
+    },
+  };
+}
+
 function gameCoreSettingsPlugin() {
   const battlefieldPath = resolve(gameCoreConfigDir, "balance", "battlefield.yaml");
   const soundPath = resolve(gameCoreConfigDir, "sound", "battle.yaml");
@@ -1860,6 +1899,7 @@ export default defineConfig({
   },
   plugins: [
     gameCoreAudioPlugin(),
+    gameCoreProjectilePlugin(),
     gameCoreSettingsPlugin(),
     debugLogPlugin(),
     templateStorePlugin(),

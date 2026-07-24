@@ -1,6 +1,6 @@
 import { COMPONENTS } from "../config/balance/weapons.ts";
 import { MATERIALS } from "../config/balance/materials.ts";
-import type { ComponentId, MaterialId, PartCategory, PartDefinition, PartDirection, PartPropertySet, PartType } from "../types.ts";
+import type { ComponentId, MaterialId, PartCategory, PartDefinition, PartDirection, PartPropertySet, PartType, ProjectileClass } from "../types.ts";
 
 export function getPartDirectionDefault(baseComponent: ComponentId): PartDirection {
   void baseComponent;
@@ -39,6 +39,13 @@ export function getComponentFromPartTypeAndCategory(partType: PartType, partCate
   return "cannonLoader";
 }
 
+export function getComponentFromProjectileClass(projectileClass: ProjectileClass, explosive = false): ComponentId {
+  if (projectileClass === "laser") return "precisionBeam";
+  if (projectileClass === "missile") return "trackingMissile";
+  if (explosive) return "explosiveShell";
+  return "rapidGun";
+}
+
 export function getPartPropertyDefaults(baseComponent: ComponentId): NonNullable<PartDefinition["properties"]> {
   const stats = COMPONENTS[baseComponent];
   return {
@@ -50,7 +57,7 @@ export function getPartPropertyDefaults(baseComponent: ComponentId): NonNullable
           ? "support"
           : "functional",
     subcategory: stats.type === "weapon"
-      ? (stats.weaponClass ?? "weapon")
+      ? (stats.projectileClass ?? "weapon")
       : stats.type === "engine"
         ? (stats.propulsion?.platform ?? "engine")
         : stats.type,
@@ -60,6 +67,7 @@ export function getPartPropertyDefaults(baseComponent: ComponentId): NonNullable
     isLoader: stats.type === "loader",
     isArmor: false,
     engineType: stats.type === "engine" ? stats.propulsion?.platform : undefined,
+    projectileClass: stats.type === "weapon" ? stats.projectileClass : undefined,
     loaderServesTags: stats.type === "loader" ? stats.loader?.supports.map((entry) => String(entry)) : undefined,
     loaderCooldownMultiplier: stats.type === "loader" ? stats.loader?.loadMultiplier : undefined,
     hasCoreTuning: false,
@@ -85,31 +93,41 @@ export function getPartPropertiesDefaultsByType(partType: PartType, partCategory
     };
   }
   if (partType === "weapon") {
-    const bulletType = partCategory === "missile" ? "missile" : (partCategory === "beam" ? "laser" : "bullet");
+    const projectileClass = partCategory === "missile" ? "missile" : (partCategory === "beam" ? "laser" : "bullet");
     return {
       gasCost: 10,
       mass: 8,
       tag: "weapon",
-      bulletType,
+      projectileClass,
+      projectileShape: projectileClass === "laser"
+        ? "laser-thin"
+        : projectileClass === "missile"
+          ? "missile-missile"
+          : "bullet-round",
+      projectileSizeRatio: 1,
       damage: 20,
       range: 300,
       cooldown: 1,
       fireSoundVolume: 1,
+      fireSoundPool: projectileClass === "laser"
+        ? "beam-precision"
+        : (partCategory === "missile" ? "tracking" : "rapid-fire"),
       recoil: 10,
       hitImpulse: 10,
       penetration: 0,
       spreadAngleDeg: 0,
       explodeOnHit: false,
       explodeRadius: 50,
-      projectileSpeed: bulletType === "laser" ? undefined : 400,
-      projectileGravity: bulletType === "laser" ? undefined : 100,
-      tracking: bulletType !== "laser" ? partCategory === "missile" : false,
+      projectileSpeed: projectileClass === "laser" ? undefined : 400,
+      projectileGravity: projectileClass === "laser" ? undefined : 100,
+      tracking: projectileClass === "missile",
       trackingTurnRate: partCategory === "missile" ? 50 : undefined,
       hasAngleLimit: true,
       cwAngle: 15,
       ccwAngle: 15,
       needLoader: false,
       maxCapacity: 2,
+      minFireInterval: 0.2,
       computingConsumption: 1,
     };
   }

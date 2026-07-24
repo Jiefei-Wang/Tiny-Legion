@@ -71,7 +71,7 @@
     "gasCost": 5,
     "mass": 10,
     "loaderSupports": [
-      "heavy-shot"
+      "bullet"
     ],
     "loaderLoadMultiplier": 1,
     "loaderFastOperation": false,
@@ -80,7 +80,7 @@
   },
   "partProperties": {
     "supportedWeaponTags": [
-      "heavy-shot"
+      "bullet"
     ],
     "loadMultiplier": 1,
     "minLoadTime": 4,
@@ -95,7 +95,7 @@
     "isLoader": true,
     "isArmor": false,
     "loaderServesTags": [
-      "heavy-shot"
+      "bullet"
     ],
     "loaderCooldownMultiplier": 1,
     "hasCoreTuning": false

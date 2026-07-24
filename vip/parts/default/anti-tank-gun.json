@@ -148,13 +148,19 @@
     "projectileSpeed": 800,
     "projectileGravity": 65,
     "penetration": 250,
-    "spreadDeg": 0.25
+    "spreadDeg": 0.25,
+    "projectileClass": "bullet",
+    "projectileShape": "bullet-slug",
+    "projectileSizeRatio": 1
   },
   "partProperties": {
     "computingConsumption": 1,
     "hasAngleLimit": false,
-    "bulletType": "bullet",
+    "projectileClass": "bullet",
+    "projectileShape": "bullet-slug",
+    "projectileSizeRatio": 1,
     "fireSoundVolume": 1.5,
+    "fireSoundPool": "heavy-shot",
     "explodeOnHit": false,
     "projectileSpeed": 800,
     "needLoader": true,
@@ -162,12 +168,13 @@
   },
   "properties": {
     "category": "weapon",
-    "subcategory": "heavy-shot",
+    "subcategory": "cannon",
     "materialAlpha": 1,
     "isEngine": false,
     "isWeapon": true,
     "isLoader": false,
     "isArmor": false,
+    "projectileClass": "bullet",
     "hasCoreTuning": false
   },
   "tags": [

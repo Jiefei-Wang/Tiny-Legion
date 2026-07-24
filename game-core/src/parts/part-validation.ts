@@ -14,13 +14,8 @@ function isFiniteInteger(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value) && Number.isInteger(value);
 }
 
-function isWeaponClass(value: string): boolean {
-  return value === "rapid-fire"
-    || value === "heavy-shot"
-    || value === "explosive"
-    || value === "tracking"
-    || value === "beam-precision"
-    || value === "control-utility";
+function isProjectileClass(value: string): boolean {
+  return value === "bullet" || value === "missile" || value === "laser";
 }
 
 export function validatePartDefinitionDetailed(part: PartDefinition): PartValidationResult {
@@ -187,6 +182,41 @@ export function validatePartDefinitionDetailed(part: PartDefinition): PartValida
   ) {
     errors.push("part partProperties.fireSoundVolume must be between 0 and 2.");
   }
+  if (
+    part.partProperties?.fireSoundPool !== undefined
+    && !["rapid-fire", "heavy-shot", "explosive", "tracking", "beam-precision"].includes(part.partProperties.fireSoundPool)
+  ) {
+    errors.push("part partProperties.fireSoundPool must name a configured weapon fire pool.");
+  }
+  const projectileClass = part.partProperties?.projectileClass;
+  const projectileShape = part.partProperties?.projectileShape;
+  if (part.partType === "weapon" && projectileClass === undefined) {
+    errors.push("weapon partProperties.projectileClass is required.");
+  }
+  if (projectileShape !== undefined) {
+    const compatible = projectileClass === "bullet"
+      ? projectileShape.startsWith("bullet-")
+      : projectileClass === "missile"
+        ? projectileShape.startsWith("missile-")
+        : projectileClass === "laser"
+          ? projectileShape.startsWith("laser-")
+          : false;
+    if (!compatible) errors.push("part projectileShape must belong to its projectileClass.");
+  }
+  if (
+    part.partProperties?.projectileSizeRatio !== undefined
+    && (!Number.isFinite(part.partProperties.projectileSizeRatio)
+      || part.partProperties.projectileSizeRatio < 0.1
+      || part.partProperties.projectileSizeRatio > 10)
+  ) {
+    errors.push("part projectileSizeRatio must be between 0.1 and 10.");
+  }
+  if (projectileClass !== "missile" && part.partProperties?.tracking === true) {
+    errors.push("only missile projectiles can track.");
+  }
+  if (projectileClass === "laser" && part.partProperties?.explodeOnHit === true) {
+    errors.push("laser projectiles cannot explode.");
+  }
   if (part.properties?.loaderCooldownMultiplier !== undefined && (!Number.isFinite(part.properties.loaderCooldownMultiplier) || part.properties.loaderCooldownMultiplier <= 0)) {
     errors.push("part properties.loaderCooldownMultiplier must be > 0.");
   }
@@ -206,13 +236,18 @@ export function validatePartDefinitionDetailed(part: PartDefinition): PartValida
     && (!Number.isInteger(part.partProperties.maxCapacity) || part.partProperties.maxCapacity < 1)) {
     errors.push("weapon maxCapacity must be an integer >= 1.");
   }
+  if (part.partType === "weapon" && (part.partProperties?.maxCapacity ?? 1) !== 1
+    && (!Number.isFinite(part.partProperties?.minFireInterval)
+      || (part.partProperties?.minFireInterval ?? -1) < 0)) {
+    errors.push("multi-round weapons require minFireInterval >= 0.");
+  }
   if (part.stats?.loaderMinBurstInterval !== undefined && (!Number.isFinite(part.stats.loaderMinBurstInterval) || part.stats.loaderMinBurstInterval <= 0)) {
     errors.push("part stats.loaderMinBurstInterval must be > 0.");
   }
   if (part.stats?.loaderSupports) {
     for (const supported of part.stats.loaderSupports) {
-      if (!isWeaponClass(supported)) {
-        errors.push("part stats.loaderSupports includes invalid weapon class.");
+      if (!isProjectileClass(supported)) {
+        errors.push("part stats.loaderSupports includes invalid projectile class.");
         break;
       }
     }
@@ -235,8 +270,8 @@ export function validatePartDefinitionDetailed(part: PartDefinition): PartValida
   if (part.properties?.engineType !== undefined && part.properties.engineType !== "ground" && part.properties.engineType !== "air") {
     errors.push("part properties.engineType must be ground or air.");
   }
-  if (part.properties?.isWeapon === true && !part.properties.weaponType) {
-    warnings.push("is_weapon is enabled but weaponType is not set.");
+  if (part.properties?.isWeapon === true && !part.properties.projectileClass) {
+    warnings.push("is_weapon is enabled but projectileClass is not set.");
   }
   if (part.properties?.isEngine === true && !part.properties.engineType) {
     warnings.push("is_engine is enabled but engineType is not set.");
@@ -260,8 +295,8 @@ export function validatePartDefinitionDetailed(part: PartDefinition): PartValida
   ) {
     warnings.push("core_tuning is enabled but neither mass nor hpMul override is set.");
   }
-  if (part.properties?.isWeapon !== true && part.properties?.weaponType !== undefined) {
-    warnings.push("weaponType is set while is_weapon is disabled.");
+  if (part.properties?.isWeapon !== true && part.properties?.projectileClass !== undefined) {
+    warnings.push("projectileClass is set while is_weapon is disabled.");
   }
   if (part.properties?.isEngine !== true && part.properties?.engineType !== undefined) {
     warnings.push("engineType is set while is_engine is disabled.");

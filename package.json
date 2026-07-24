@@ -1,7 +1,9 @@
 {
   "scripts": {
     "config:generate": "node game-core/scripts/generate-config.mjs",
-    "config:check": "node game-core/scripts/generate-config.mjs --check"
+    "config:check": "node game-core/scripts/generate-config.mjs --check",
+    "projectiles:generate": "node game-core/scripts/generate-projectile-assets.mjs",
+    "projectiles:check": "node game-core/scripts/generate-projectile-assets.mjs --check"
   },
   "dependencies": {
     "playwright": "^1.58.2",
@@ -9,6 +11,7 @@
     "yaml": "^2.9.0"
   },
   "devDependencies": {
-    "@types/node": "^25.2.2"
+    "@types/node": "^25.2.2",
+    "sharp": "^0.35.3"
   }
 }

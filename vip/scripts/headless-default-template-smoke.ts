@@ -12,6 +12,8 @@ import { COMPONENTS } from "../src/config/balance/weapons.ts";
 import { createInitialTemplates } from "../src/simulation/units/unit-builder.ts";
 import { instantiateUnit } from "../src/simulation/units/unit-builder.ts";
 import { applyHitToUnit, scaleDamageByRemainingPenetration } from "../src/simulation/combat/damage-model.ts";
+import { orientedBeamAabbEntryTime, segmentRoundedAabbEntryTime } from "../../game-core/src/simulation/combat/projectile-collision.ts";
+import { PROJECTILE_ASSETS } from "../../game-core/src/projectiles/generated/projectile-assets.generated.ts";
 import { destroyCell } from "../src/simulation/units/structure-grid.ts";
 import { canOperate } from "../src/simulation/units/control-unit-rules.ts";
 import { mergeTemplates, parseTemplate, validateTemplateDetailed } from "../src/app/template-store.ts";
@@ -24,7 +26,7 @@ declare const process: { exit: (code?: number) => void; cwd: () => string };
 type Failure = {
   templateId: number;
   templateName: string;
-  check: "validation" | "movement" | "firing" | "overlap" | "functional-support" | "weapon-capacity" | "air-isotropic" | "escape-mode" | "control-loss-crash" | "structure-origin" | "penetration-scaling" | "wreck-damage" | "wreck-lifecycle";
+  check: "validation" | "movement" | "firing" | "overlap" | "functional-support" | "weapon-capacity" | "air-isotropic" | "escape-mode" | "control-loss-crash" | "structure-origin" | "penetration-scaling" | "wreck-damage" | "wreck-lifecycle" | "projectile-collision";
   detail: string;
 };
 
@@ -164,12 +166,10 @@ function loadRuntimeMergedTemplates(partCatalog: ReadonlyArray<PartDefinition>):
 }
 
 function getMissingLoaderClasses(template: UnitTemplate): string[] {
-  const weaponClasses = template.attachments
-    .map((attachment) => COMPONENTS[attachment.component])
-    .filter((stats) => stats.type === "weapon")
-    .map((stats) => stats.weaponClass ?? "rapid-fire")
-    .filter((weaponClass) => weaponClass === "tracking" || weaponClass === "heavy-shot" || weaponClass === "explosive");
-  if (weaponClasses.length === 0) {
+  const projectileClasses = template.attachments
+    .filter((attachment) => attachment.component === "trackingMissile" || attachment.component === "heavyCannon" || attachment.component === "explosiveShell")
+    .map((attachment) => COMPONENTS[attachment.component].projectileClass ?? "bullet");
+  if (projectileClasses.length === 0) {
     return [];
   }
   const supported = new Set<string>();
@@ -178,11 +178,11 @@ function getMissingLoaderClasses(template: UnitTemplate): string[] {
     if (stats.type !== "loader" || !stats.loader) {
       continue;
     }
-    for (const weaponClass of stats.loader.supports) {
-      supported.add(weaponClass);
+    for (const projectileClass of stats.loader.supports) {
+      supported.add(projectileClass);
     }
   }
-  return Array.from(new Set(weaponClasses.filter((weaponClass) => !supported.has(weaponClass))));
+  return Array.from(new Set(projectileClasses.filter((projectileClass) => !supported.has(projectileClass))));
 }
 
 function runSmoke(): Failure[] {
@@ -249,6 +249,51 @@ function runSmoke(): Failure[] {
   const firearmPart = partCatalog.find((part) => part.name === "firearm");
   if (!firearmPart || firearmPart.partProperties?.hasAngleLimit !== false || firearmPart.directional !== false) {
     failures.push({ templateId: 0, templateName: "firearm", check: "validation", detail: "firearm must be omnidirectional with hasAngleLimit=false in the editor/runtime catalog" });
+  }
+  const explosiveCannonPart = partCatalog.find((part) => part.name === "cannons");
+  const antiTankCannonPart = partCatalog.find((part) => part.name === "anti-tank gun");
+  if (
+    explosiveCannonPart?.properties?.subcategory !== "cannon"
+    || antiTankCannonPart?.properties?.subcategory !== "cannon"
+  ) {
+    failures.push({ templateId: 0, templateName: "cannon", check: "validation", detail: "explosive and anti-tank variants must share the cannon category" });
+  }
+  if (
+    !antiTankCannonPart
+    || antiTankCannonPart.partProperties?.explodeOnHit !== false
+    || (antiTankCannonPart.stats?.explosiveBlastRadius ?? 0) !== 0
+    || (antiTankCannonPart.stats?.explosiveBlastDamage ?? 0) !== 0
+  ) {
+    failures.push({ templateId: 0, templateName: "anti-tank gun", check: "validation", detail: "anti-tank cannon must not apply area/blast damage" });
+  }
+  if (
+    explosiveCannonPart?.partProperties?.fireSoundPool !== "explosive"
+    || antiTankCannonPart?.partProperties?.fireSoundPool !== "heavy-shot"
+  ) {
+    failures.push({ templateId: 0, templateName: "cannon", check: "validation", detail: "cannon variants must preserve independent per-part fire sound pools" });
+  }
+  const expectedProjectileAssets = [
+    "bullet-round", "bullet-slug", "bullet-tracer",
+    "missile-missile", "missile-heavy-rocket", "missile-energy-orb",
+    "laser-thin", "laser-pulse", "laser-wide",
+  ];
+  if (expectedProjectileAssets.some((shape) => !(shape in PROJECTILE_ASSETS))) {
+    failures.push({ templateId: 0, templateName: "projectile assets", check: "validation", detail: "generated nine-shape projectile manifest is incomplete" });
+  }
+  if (
+    firearmPart?.partProperties?.projectileClass !== "bullet"
+    || firearmPart.partProperties.projectileShape !== "bullet-tracer"
+    || explosiveCannonPart?.partProperties?.projectileShape !== "bullet-round"
+    || antiTankCannonPart?.partProperties?.projectileShape !== "bullet-slug"
+  ) {
+    failures.push({ templateId: 0, templateName: "projectile defaults", check: "validation", detail: "default weapon projectile class/shape migration is incorrect" });
+  }
+  const fastCapsuleHit = segmentRoundedAabbEntryTime(0, 50, 1000, 50, 490, 40, 510, 60, 3);
+  const roundedCornerMiss = segmentRoundedAabbEntryTime(0, 35, 500, 35, 490, 40, 510, 60, 3);
+  const beamHit = orientedBeamAabbEntryTime(0, 50, 1000, 50, 4, 490, 48, 510, 52);
+  const beamMiss = orientedBeamAabbEntryTime(0, 50, 1000, 50, 4, 490, 60, 510, 70);
+  if (fastCapsuleHit === null || roundedCornerMiss !== null || beamHit === null || beamMiss !== null) {
+    failures.push({ templateId: 0, templateName: "projectile geometry", check: "projectile-collision", detail: "swept capsule or oriented beam collision regression" });
   }
   const templates = loadRuntimeMergedTemplates(partCatalog);
   const defaultTemplateIds = new Set(readTemplateDir(`${process.cwd().replace(/\\/g, "/")}/templates/default`, partCatalog).map((template) => template.id));

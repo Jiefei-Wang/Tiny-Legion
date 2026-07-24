@@ -4,7 +4,9 @@ _descriptions:
   components.*.gasCost: Gas cost contributed by this weapon to its craft.
   components.*.type: Runtime component family; weapon entries must use weapon.
   components.*.directional: Whether rotating the placed part also rotates its functional firing direction; this is separate from its allowed firing arc.
-  components.*.weaponClass: Weapon behavior class used by firing, AI, projectile, and audio systems.
+  components.*.projectileClass: Projectile behavior family used by firing, AI, collision, and loaders.
+  components.*.projectileShape: Asset-backed projectile shape used by rendering and fitted collision.
+  components.*.projectileSizeRatio: Uniform projectile visual and collider scale multiplier.
   components.*.maxLoadedAmmo: Maximum number of ready rounds the weapon can hold.
   components.*.recoil: Impulse applied to the firing craft.
   components.*.hitImpulse: Impulse applied to a target struck by this weapon.
@@ -29,7 +31,9 @@ components:
     gasCost: 4
     type: weapon
     directional: false
-    weaponClass: rapid-fire
+    projectileClass: bullet
+    projectileShape: bullet-tracer
+    projectileSizeRatio: 1
     maxLoadedAmmo: 1
     recoil: 1.2
     hitImpulse: 0.8
@@ -47,7 +51,9 @@ components:
     gasCost: 9
     type: weapon
     directional: true
-    weaponClass: heavy-shot
+    projectileClass: bullet
+    projectileShape: bullet-slug
+    projectileSizeRatio: 1
     maxLoadedAmmo: 2
     recoil: 34
     hitImpulse: 38
@@ -67,7 +73,9 @@ components:
     gasCost: 12
     type: weapon
     directional: true
-    weaponClass: explosive
+    projectileClass: bullet
+    projectileShape: bullet-round
+    projectileSizeRatio: 1
     maxLoadedAmmo: 2
     recoil: 14
     hitImpulse: 11
@@ -90,7 +98,9 @@ components:
     gasCost: 11
     type: weapon
     directional: true
-    weaponClass: tracking
+    projectileClass: missile
+    projectileShape: missile-missile
+    projectileSizeRatio: 1
     maxLoadedAmmo: 2
     recoil: 9
     hitImpulse: 10
@@ -111,7 +121,9 @@ components:
     gasCost: 8
     type: weapon
     directional: true
-    weaponClass: beam-precision
+    projectileClass: laser
+    projectileShape: laser-thin
+    projectileSizeRatio: 1
     maxLoadedAmmo: 1
     recoil: 2
     hitImpulse: 2.5

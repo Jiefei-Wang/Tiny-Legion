@@ -1,7 +1,7 @@
 import { COMPONENTS } from "../../config/balance/weapons.ts";
 import { PROJECTILE_GRAVITY, PROJECTILE_SPEED } from "../../config/balance/range.ts";
 import { impulseToDeltaV } from "../physics/impulse-model.ts";
-import type { Attachment, UnitInstance } from "../../types.ts";
+import type { Attachment, ProjectileClass, ProjectileShape, UnitInstance } from "../../types.ts";
 
 export function getAliveWeaponAttachments(unit: UnitInstance): Attachment[] {
   return unit.weaponAttachmentIds
@@ -32,7 +32,9 @@ export function applyRecoilForAttachment(
   impulse: number;
   range: number;
   cooldown: number;
-  weaponClass: NonNullable<(typeof COMPONENTS)[keyof typeof COMPONENTS]["weaponClass"]>;
+  projectileClass: ProjectileClass;
+  projectileShape: ProjectileShape;
+  projectileSizeRatio: number;
   projectileSpeed: number;
   projectileGravity: number;
   penetration: number;
@@ -82,7 +84,9 @@ export function applyRecoilForAttachment(
     impulse: hitImpulse,
     range,
     cooldown,
-    weaponClass: weapon.weaponClass ?? "rapid-fire",
+    projectileClass: weaponAttachment.stats?.projectileClass ?? weapon.projectileClass ?? "bullet",
+    projectileShape: weaponAttachment.stats?.projectileShape ?? weapon.projectileShape ?? "bullet-round",
+    projectileSizeRatio: Math.max(0.1, Math.min(10, weaponAttachment.stats?.projectileSizeRatio ?? weapon.projectileSizeRatio ?? 1)),
     projectileSpeed: weaponAttachment.stats?.projectileSpeed ?? weapon.projectileSpeed ?? PROJECTILE_SPEED,
     projectileGravity: weaponAttachment.stats?.projectileGravity ?? weapon.projectileGravity ?? PROJECTILE_GRAVITY,
     penetration: Math.max(0, penetration),

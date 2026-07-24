@@ -15,12 +15,39 @@ export type ComponentId =
 | "trackingMissile"
   | "precisionBeam";
 
-export type WeaponClass =
+export type FireSoundPool =
   | "rapid-fire"
   | "heavy-shot"
   | "explosive"
   | "tracking"
   | "beam-precision";
+
+export type ProjectileClass = "bullet" | "missile" | "laser";
+export type BulletShape = "bullet-round" | "bullet-slug" | "bullet-tracer";
+export type MissileShape = "missile-missile" | "missile-heavy-rocket" | "missile-energy-orb";
+export type LaserShape = "laser-thin" | "laser-pulse" | "laser-wide";
+export type ProjectileShape = BulletShape | MissileShape | LaserShape;
+
+export interface ProjectileCapsuleAsset {
+  readonly kind: "capsule";
+  readonly centerX: number;
+  readonly centerY: number;
+  readonly halfLength: number;
+  readonly radius: number;
+}
+
+export interface ProjectileBeamAsset {
+  readonly kind: "beam-rect";
+  readonly centerY: number;
+  readonly halfHeight: number;
+}
+
+export interface ProjectileAssetDefinition {
+  readonly projectileClass: ProjectileClass;
+  readonly url: string;
+  readonly aspect: number;
+  readonly collider: ProjectileCapsuleAsset | ProjectileBeamAsset;
+}
 
 export type PartType = "structure" | "control" | "engine" | "weapon" | "loader";
 export type PartCategory = "vehicle" | "jet" | "bullet" | "missile" | "beam";
@@ -54,7 +81,9 @@ export interface ComponentStats {
   };
   readonly power?: number;
   readonly maxSpeed?: number;
-  readonly weaponClass?: WeaponClass;
+  readonly projectileClass?: ProjectileClass;
+  readonly projectileShape?: ProjectileShape;
+  readonly projectileSizeRatio?: number;
   readonly maxLoadedAmmo?: number;
   readonly recoil?: number;
   readonly hitImpulse?: number;
@@ -81,7 +110,7 @@ export interface ComponentStats {
     readonly duration: number;
   };
   readonly loader?: {
-    readonly supports: ReadonlyArray<WeaponClass>;
+    readonly supports: ReadonlyArray<ProjectileClass>;
     readonly loadMultiplier: number;
     readonly fastOperation: boolean;
     readonly minLoadTime: number;
@@ -132,7 +161,10 @@ export interface PartStats {
   trackingTurnRateDegPerSec?: number;
   controlImpairFactor?: number;
   controlDuration?: number;
-  loaderSupports?: WeaponClass[];
+  projectileClass?: ProjectileClass;
+  projectileShape?: ProjectileShape;
+  projectileSizeRatio?: number;
+  loaderSupports?: ProjectileClass[];
   loaderLoadMultiplier?: number;
   loaderFastOperation?: boolean;
   loaderMinLoadTime?: number;
@@ -157,11 +189,15 @@ export interface PartPropertySet {
   hasAngleLimit?: boolean;
   cwAngle?: number;
   ccwAngle?: number;
-  bulletType?: "bullet" | "missile" | "laser";
+  projectileClass?: ProjectileClass;
+  projectileShape?: ProjectileShape;
+  projectileSizeRatio?: number;
   damage?: number;
   range?: number;
   cooldown?: number;
   fireSoundVolume?: number;
+  /** Recorded weapon-fire sample pool selected independently from combat behavior. */
+  fireSoundPool?: FireSoundPool;
   recoil?: number;
   hitImpulse?: number;
   penetration?: number;
@@ -179,6 +215,8 @@ export interface PartPropertySet {
   minBurstInterval?: number;
   /** Maximum ready rounds stored directly by a weapon. */
   maxCapacity?: number;
+  /** Minimum seconds between shots released from a multi-round weapon. */
+  minFireInterval?: number;
   explosionDamage?: number;
   explosionRadius?: number;
 }
@@ -209,7 +247,7 @@ export interface PartDesignerProperties {
   isLoader?: boolean;
   isArmor?: boolean;
   engineType?: "ground" | "air";
-  weaponType?: WeaponClass;
+  projectileClass?: ProjectileClass;
   loaderServesTags?: string[];
   loaderCooldownMultiplier?: number;
   hasCoreTuning?: boolean;
@@ -396,7 +434,16 @@ export interface Projectile {
   axisY: number;
   allowAirPierce: boolean;
   gravity: number;
-  weaponClass: WeaponClass;
+  projectileClass: ProjectileClass;
+  projectileShape: ProjectileShape;
+  projectileSizeRatio: number;
+  /** Nominal world-space height of the rendered SVG before class-specific collider fitting. */
+  visualHeight: number;
+  /** Resolved local capsule geometry, rotated to current velocity during collision/rendering. */
+  capsuleCenterX: number;
+  capsuleCenterY: number;
+  capsuleHalfLength: number;
+  capsuleRadius: number;
   explosiveBlastRadius: number;
   explosiveBlastDamage: number;
   explosiveFalloffPower: number;
@@ -437,6 +484,8 @@ export interface BeamEffect {
   side: Side;
   life: number;
   maxLife: number;
+  shape: LaserShape;
+  halfWidth: number;
 }
 
 export interface BlockExplosionEffect {

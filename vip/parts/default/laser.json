@@ -56,13 +56,19 @@
     "projectileSpeed": 20000,
     "projectileGravity": 0,
     "penetration": 0,
-    "spreadDeg": 0
+    "spreadDeg": 0,
+    "projectileClass": "laser",
+    "projectileShape": "laser-thin",
+    "projectileSizeRatio": 1
   },
   "partProperties": {
     "computingConsumption": 1,
     "hasAngleLimit": false,
-    "bulletType": "laser",
+    "projectileClass": "laser",
+    "projectileShape": "laser-thin",
+    "projectileSizeRatio": 1,
     "fireSoundVolume": 1,
+    "fireSoundPool": "beam-precision",
     "explodeOnHit": false,
     "needLoader": false,
     "maxCapacity": 1
@@ -74,6 +80,7 @@
     "isWeapon": true,
     "isLoader": false,
     "isArmor": false,
+    "projectileClass": "laser",
     "hasCoreTuning": false
   },
   "tags": [
