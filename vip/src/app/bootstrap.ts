@@ -467,6 +467,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
   let testArenaBattlefieldWidth = BATTLEFIELD_WIDTH;
   let testArenaBattlefieldHeight = BATTLEFIELD_HEIGHT;
   let testArenaGroundHeight = Math.floor(BATTLEFIELD_HEIGHT * DEFAULT_GROUND_HEIGHT_RATIO);
+  let testArenaBattlefieldUsesGlobalDefaults = true;
   let testArenaEnemySpawnTemplateIds: number[] = templates.map((template) => template.id);
   let testArenaPlayerSpawnTemplateIds: number[] = templates.map((template) => template.id);
   let testArenaSpawnTemplateDropdownOpen = false;
@@ -622,6 +623,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     battlefieldWidth?: unknown;
     battlefieldHeight?: unknown;
     groundHeight?: unknown;
+    battlefieldUsesGlobalDefaults?: unknown;
     playerSpawnTemplateIds?: unknown;
     enemySpawnTemplateIds?: unknown;
     autoSpawnOnPlayerSide?: unknown;
@@ -641,9 +643,19 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       testArenaPlayerCount = Math.max(0, Math.min(40, Math.floor(readFinite(stored.playerCount, testArenaPlayerCount))));
       testArenaEnemyCount = Math.max(0, Math.min(40, Math.floor(readFinite(stored.enemyCount, testArenaEnemyCount))));
       testArenaBaseHp = Math.max(1, Math.min(1_000_000_000, Math.floor(readFinite(stored.baseHp, testArenaBaseHp))));
-      testArenaBattlefieldWidth = normalizeTestArenaBattlefieldWidth(readFinite(stored.battlefieldWidth, testArenaBattlefieldWidth));
-      testArenaBattlefieldHeight = normalizeTestArenaBattlefieldHeight(readFinite(stored.battlefieldHeight, testArenaBattlefieldHeight));
-      testArenaGroundHeight = normalizeTestArenaGroundHeight(readFinite(stored.groundHeight, testArenaGroundHeight));
+      const hasStoredBattlefieldSize = typeof stored.battlefieldWidth === "number"
+        || typeof stored.battlefieldHeight === "number"
+        || typeof stored.groundHeight === "number";
+      const isLegacyCanonicalDefault = stored.battlefieldWidth === 2000
+        && stored.battlefieldHeight === 1000
+        && stored.groundHeight === 400;
+      testArenaBattlefieldUsesGlobalDefaults = stored.battlefieldUsesGlobalDefaults === true
+        || (stored.battlefieldUsesGlobalDefaults !== false && (!hasStoredBattlefieldSize || isLegacyCanonicalDefault));
+      if (!testArenaBattlefieldUsesGlobalDefaults) {
+        testArenaBattlefieldWidth = normalizeTestArenaBattlefieldWidth(readFinite(stored.battlefieldWidth, testArenaBattlefieldWidth));
+        testArenaBattlefieldHeight = normalizeTestArenaBattlefieldHeight(readFinite(stored.battlefieldHeight, testArenaBattlefieldHeight));
+        testArenaGroundHeight = normalizeTestArenaGroundHeight(readFinite(stored.groundHeight, testArenaGroundHeight));
+      }
       if (Array.isArray(stored.playerSpawnTemplateIds)) {
         testArenaPlayerSpawnTemplateIds = stored.playerSpawnTemplateIds.filter((id): id is number => Number.isInteger(id) && id > 0);
         testArenaHasStoredPlayerCraftSelection = true;
@@ -685,6 +697,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         battlefieldWidth: testArenaBattlefieldWidth,
         battlefieldHeight: testArenaBattlefieldHeight,
         groundHeight: testArenaGroundHeight,
+        battlefieldUsesGlobalDefaults: testArenaBattlefieldUsesGlobalDefaults,
         playerSpawnTemplateIds: testArenaPlayerSpawnTemplateIds,
         enemySpawnTemplateIds: testArenaEnemySpawnTemplateIds,
         autoSpawnOnPlayerSide: testArenaAutoSpawnOnPlayerSide,
@@ -1035,7 +1048,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     editorGridPanY = nextGridOriginY - (baseY - (editorGridRows * nextCell) * 0.5);
   };
   const normalizeTestArenaBattlefieldWidth = (value: number): number => Math.max(640, Math.min(4096, Math.floor(value)));
-  const normalizeTestArenaBattlefieldHeight = (value: number): number => Math.max(360, Math.min(2160, Math.floor(value)));
+  const normalizeTestArenaBattlefieldHeight = (value: number): number => Math.max(360, Math.min(4096, Math.floor(value)));
   const normalizeTestArenaZoomPercent = (value: number): number => Math.max(MIN_BATTLE_VIEW_SCALE * 100, Math.min(MAX_BATTLE_VIEW_SCALE * 100, Math.round(value)));
   const normalizeTestArenaGroundHeight = (value: number): number => Math.max(80, Math.min(Math.max(120, testArenaBattlefieldHeight - 40), Math.floor(value)));
   const normalizeTestArenaSpawnTemplateIds = (candidateIds: ReadonlyArray<number>): number[] => {
@@ -4943,13 +4956,17 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         <div class="test-arena-section-body">
           <div class="small">Battlefield W/H and ground height update simulation size. Zoom changes display scale only.</div>
           <div class="row"><label class="small">Both base HP <input id="testArenaBaseHp" type="number" min="1" max="1000000000" step="100" value="${testArenaBaseHp}" /></label></div>
+          <div class="row">
+            <button id="testArenaUseGlobalBattlefield" type="button">Use Global Battlefield</button>
+            <span class="small">${testArenaBattlefieldUsesGlobalDefaults ? "Following Global Settings" : "Using a Test Arena override"}</span>
+          </div>
           <div class="test-arena-ui-grid">
             <span class="small">Width</span>
             <span class="small">Height</span>
             <span class="small">Zoom %</span>
             <span class="small">Ground H</span>
             <input id="testArenaBattlefieldWidth" type="number" min="640" max="4096" step="10" value="${testArenaBattlefieldWidth}" />
-            <input id="testArenaBattlefieldHeight" type="number" min="360" max="2160" step="10" value="${testArenaBattlefieldHeight}" />
+            <input id="testArenaBattlefieldHeight" type="number" min="360" max="4096" step="10" value="${testArenaBattlefieldHeight}" />
             <input id="testArenaZoomPercent" type="number" min="10" max="240" step="1" value="${zoomPercentLabel}" />
             <input id="testArenaGroundHeight" type="number" min="80" max="${Math.max(120, testArenaBattlefieldHeight - 40)}" step="10" value="${testArenaGroundHeight}" />
           </div>
@@ -5871,6 +5888,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         return;
       }
       testArenaBattlefieldWidth = normalizeTestArenaBattlefieldWidth(value);
+      testArenaBattlefieldUsesGlobalDefaults = false;
       saveTestArenaSettings();
       if (battle.getState().active && battle.getState().nodeId !== testArenaNode.id) {
         addLog(`Test Arena battlefield width queued: ${testArenaBattlefieldWidth}.`, "warn");
@@ -5892,6 +5910,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       }
       testArenaBattlefieldHeight = normalizeTestArenaBattlefieldHeight(value);
       testArenaGroundHeight = normalizeTestArenaGroundHeight(testArenaGroundHeight);
+      testArenaBattlefieldUsesGlobalDefaults = false;
       saveTestArenaSettings();
       if (battle.getState().active && battle.getState().nodeId !== testArenaNode.id) {
         addLog(`Test Arena battlefield height queued: ${testArenaBattlefieldHeight}.`, "warn");
@@ -5926,6 +5945,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         return;
       }
       testArenaGroundHeight = normalizeTestArenaGroundHeight(value);
+      testArenaBattlefieldUsesGlobalDefaults = false;
       saveTestArenaSettings();
       if (battle.getState().active && battle.getState().nodeId !== testArenaNode.id) {
         addLog(`Test Arena ground height queued: ${testArenaGroundHeight}.`, "warn");
@@ -5936,6 +5956,21 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       renderPanels();
     };
     bindCommitOnEnterOrBlur(getOptionalElement<HTMLInputElement>("#testArenaGroundHeight"), commitTestArenaGroundHeight);
+
+    getOptionalElement<HTMLButtonElement>("#testArenaUseGlobalBattlefield")?.addEventListener("click", () => {
+      testArenaBattlefieldUsesGlobalDefaults = true;
+      testArenaBattlefieldWidth = normalizeTestArenaBattlefieldWidth(BATTLEFIELD_WIDTH);
+      testArenaBattlefieldHeight = normalizeTestArenaBattlefieldHeight(BATTLEFIELD_HEIGHT);
+      testArenaGroundHeight = normalizeTestArenaGroundHeight(Math.floor(BATTLEFIELD_HEIGHT * DEFAULT_GROUND_HEIGHT_RATIO));
+      saveTestArenaSettings();
+      if (battle.getState().active && battle.getState().nodeId !== testArenaNode.id) {
+        addLog(`Global battlefield ${testArenaBattlefieldWidth}x${testArenaBattlefieldHeight} queued for Test Arena.`, "warn");
+      } else {
+        applyTestArenaBattlefieldSize();
+        addLog(`Test Arena now follows Global Settings: ${testArenaBattlefieldWidth}x${testArenaBattlefieldHeight}.`, "good");
+      }
+      renderPanels();
+    });
 
     document.querySelectorAll<HTMLInputElement>("input.testArenaEnemySpawnTemplateToggle").forEach((input) => {
       input.addEventListener("change", (event) => {

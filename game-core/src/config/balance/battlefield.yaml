@@ -27,7 +27,7 @@ _descriptions:
   separation.spawnPlacementAttempts: Maximum attempts to find a non-overlapping spawn position.
 battlefield:
   width: 3000
-  height: 4000
+  height: 1500
   groundHeightRatio: 0.4
   airMinZRatio: 0.07
   airGroundGapRatio: 0.03

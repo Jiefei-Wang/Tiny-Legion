@@ -4,7 +4,7 @@ export const GAME_CONFIG = {
     "battlefield": {
       "battlefield": {
         "width": 3000,
-        "height": 4000,
+        "height": 1500,
         "groundHeightRatio": 0.4,
         "airMinZRatio": 0.07,
         "airGroundGapRatio": 0.03,

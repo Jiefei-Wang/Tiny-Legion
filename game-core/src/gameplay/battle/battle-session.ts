@@ -469,7 +469,7 @@ export class BattleSession {
 
   public setBattlefieldSize(width: number, height: number): { width: number; height: number } {
     const normalizedWidth = clamp(Math.floor(width), 640, 4096);
-    const normalizedHeight = clamp(Math.floor(height), 360, 2160);
+    const normalizedHeight = clamp(Math.floor(height), 360, 4096);
     this.canvas.width = normalizedWidth;
     this.canvas.height = normalizedHeight;
     this.groundHeightPx = clamp(this.groundHeightPx, 80, Math.max(120, this.canvas.height - 40));

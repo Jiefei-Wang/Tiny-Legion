@@ -104,7 +104,15 @@ export function validateGameConfig(config) {
   exactKeys(config.sound, ["battle"], "config.sound");
   const battlefield = config.balance.battlefield;
   validateScalarObject(battlefield, ["battlefield", "movement", "air", "combat", "wreck", "structure", "separation"], "balance/battlefield.yaml");
-  validateScalarObject(battlefield.battlefield, ["width", "height", "groundHeightRatio", "airMinZRatio", "airGroundGapRatio", "airTargetZToleranceRatio"], "balance/battlefield.yaml.battlefield");
+  const battlefieldDimensions = validateScalarObject(battlefield.battlefield, ["width", "height", "groundHeightRatio", "airMinZRatio", "airGroundGapRatio", "airTargetZToleranceRatio"], "balance/battlefield.yaml.battlefield");
+  const battlefieldWidth = numberAt(battlefieldDimensions, "width", "balance/battlefield.yaml.battlefield");
+  const battlefieldHeight = numberAt(battlefieldDimensions, "height", "balance/battlefield.yaml.battlefield");
+  if (!(battlefieldWidth >= 640 && battlefieldWidth <= 4096)) {
+    fail("balance/battlefield.yaml.battlefield.width", "expected a value from 640 to 4096");
+  }
+  if (!(battlefieldHeight >= 360 && battlefieldHeight <= 4096)) {
+    fail("balance/battlefield.yaml.battlefield.height", "expected a value from 360 to 4096");
+  }
   validateScalarObject(battlefield.movement, ["defaultMultiplier"], "balance/battlefield.yaml.movement");
   const air = validateScalarObject(
     battlefield.air,

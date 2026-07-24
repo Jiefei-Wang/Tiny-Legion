@@ -200,6 +200,11 @@ function gameCoreSettingsPlugin() {
             }
             const result = generateGameConfig();
             json(res, 200, { ok: true, config: result.config, descriptions: result.descriptions });
+            // Config files live outside Vite's app root, and writes made by this
+            // middleware are not reliably observed by the file watcher. Clear
+            // transformed module results so the next browser refresh imports the
+            // newly generated settings instead of the pre-save GAME_CONFIG.
+            server.moduleGraph.invalidateAll();
           } catch (error) {
             for (const [filePath, raw] of backups) writeFileSync(filePath, raw, "utf8");
             if (oldGenerated === null) {
