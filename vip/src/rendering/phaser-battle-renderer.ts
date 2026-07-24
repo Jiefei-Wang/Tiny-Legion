@@ -15,6 +15,7 @@ import {
   MIN_BATTLE_SOUND_VOLUME,
   type BattleSampleKey,
 } from "../../../game-core/src/config/sound/battle.ts";
+import { BATTLE_CANVAS_RESOLUTION_SCALE } from "../../../game-core/src/config/display/battle.ts";
 
 export { DEFAULT_BATTLE_SOUND_VOLUME, MAX_BATTLE_SOUND_VOLUME, MIN_BATTLE_SOUND_VOLUME };
 
@@ -64,18 +65,24 @@ class BattleScene extends Phaser.Scene {
   private audioResumePending = false;
   private readonly lastSampleByGroup = new Map<string, BattleSampleKey>();
   private projectileSprites: Phaser.GameObjects.Image[] = [];
+  private viewOffsetX = 0;
+  private viewOffsetY = 0;
+  private viewScale = 1;
+  private readonly canvasResolutionScale: number;
 
   public constructor(
     battle: BattleSession,
     templates: ReadonlyArray<UnitTemplate>,
     getViewAudioContext: () => BattleViewAudioContext,
     getSoundVolume: () => number,
+    canvasResolutionScale: number,
   ) {
     super({ key: "battle" });
     this.battle = battle;
     this.templates = templates;
     this.getViewAudioContext = getViewAudioContext;
     this.getSoundVolume = getSoundVolume;
+    this.canvasResolutionScale = canvasResolutionScale;
   }
 
   public preload(): void {
@@ -98,7 +105,7 @@ class BattleScene extends Phaser.Scene {
       fontSize: "14px",
       backgroundColor: "rgba(8, 13, 21, 0.72)",
       padding: { x: 8, y: 6 },
-    }).setDepth(1000);
+    }).setDepth(1000).setScrollFactor(0);
     document.addEventListener("pointerdown", this.unlockAudioOnGesture, { capture: true });
     document.addEventListener("keydown", this.unlockAudioOnGesture, { capture: true });
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
@@ -108,10 +115,27 @@ class BattleScene extends Phaser.Scene {
   }
 
   public update(): void {
-    const info = this.battle.getBattlefieldInfo();
-    if (this.scale.width !== info.width || this.scale.height !== info.height) {
-      this.scale.resize(info.width, info.height);
-    }
+    const camera = this.cameras.main;
+    const zoom = this.viewScale * this.canvasResolutionScale;
+    const halfWidth = this.scale.width * 0.5;
+    const halfHeight = this.scale.height * 0.5;
+    const visibleLeft = -this.viewOffsetX / this.viewScale;
+    const visibleTop = -this.viewOffsetY / this.viewScale;
+    camera.setZoom(zoom);
+    // Phaser zooms around the camera center. Convert the app's top-left world
+    // offset into Phaser's center-anchored scroll coordinates.
+    camera.setScroll(
+      visibleLeft - halfWidth + halfWidth / zoom,
+      visibleTop - halfHeight + halfHeight / zoom,
+    );
+    // Scroll-factor zero removes camera translation, but camera zoom still
+    // applies around its center. Counter-transform the fixed debug HUD.
+    this.status
+      .setPosition(
+        halfWidth + (16 * this.canvasResolutionScale - halfWidth) / zoom,
+        halfHeight + (14 * this.canvasResolutionScale - halfHeight) / zoom,
+      )
+      .setScale(1 / this.viewScale);
     this.draw(this.battle.getState());
     // Do not discard transient combat sounds while browser autoplay policy still
     // has Web Audio suspended. The next user gesture unlocks the shared context.
@@ -121,23 +145,74 @@ class BattleScene extends Phaser.Scene {
     this.updateUnitAudio(this.battle.getState());
   }
 
+  public setViewTransform(offsetX: number, offsetY: number, scale: number): void {
+    this.viewOffsetX = offsetX;
+    this.viewOffsetY = offsetY;
+    this.viewScale = Math.max(0.0001, scale);
+  }
+
+  private isVisiblePoint(x: number, y: number, padding = 0): boolean {
+    const view = this.getVisibleWorldRect();
+    return x + padding >= view.left
+      && x - padding <= view.right
+      && y + padding >= view.top
+      && y - padding <= view.bottom;
+  }
+
+  private getVisibleWorldRect(): { left: number; right: number; top: number; bottom: number } {
+    const left = -this.viewOffsetX / this.viewScale;
+    const top = -this.viewOffsetY / this.viewScale;
+    return {
+      left,
+      right: left + this.scale.width / (this.viewScale * this.canvasResolutionScale),
+      top,
+      bottom: top + this.scale.height / (this.viewScale * this.canvasResolutionScale),
+    };
+  }
+
+  private acquireProjectileSprite(index: number, texture: string): Phaser.GameObjects.Image {
+    const existing = this.projectileSprites[index];
+    if (existing) {
+      return existing.setTexture(texture).setVisible(true);
+    }
+    const created = this.add.image(0, 0, texture);
+    this.projectileSprites.push(created);
+    return created;
+  }
+
   private draw(state: BattleState): void {
     const g = this.graphics;
     const options = this.battle.getRenderOptions();
     const selection = this.battle.getSelection();
     const { width, height, laneBounds } = this.battle.getBattlefieldInfo();
     const groundY = laneBounds.groundMinY;
+    const view = this.getVisibleWorldRect();
+    const visibleLeft = Math.max(0, view.left);
+    const visibleRight = Math.min(width, view.right);
+    const visibleTop = Math.max(0, view.top);
+    const visibleBottom = Math.min(height, view.bottom);
+    const visibleWidth = Math.max(0, visibleRight - visibleLeft);
     this.airBackground.setPosition(0, 0).setDisplaySize(width, groundY);
     this.groundBackground.setPosition(0, groundY).setDisplaySize(width, Math.max(1, height - groundY));
     g.clear();
-    for (const sprite of this.projectileSprites) sprite.destroy();
-    this.projectileSprites = [];
-    g.fillStyle(0x06101a, 0.08).fillRect(0, 0, width, groundY);
-    g.fillStyle(0x06130f, 0.08).fillRect(0, groundY, width, height - groundY);
-    g.fillStyle(0xb5eff4, 0.14).fillRect(0, groundY - 2, width, 4);
+    let projectileSpriteCount = 0;
+    if (visibleWidth > 0) {
+      const visibleAirBottom = Math.min(visibleBottom, groundY);
+      if (visibleAirBottom > visibleTop) {
+        g.fillStyle(0x06101a, 0.08).fillRect(visibleLeft, visibleTop, visibleWidth, visibleAirBottom - visibleTop);
+      }
+      const visibleGroundTop = Math.max(visibleTop, groundY);
+      if (visibleBottom > visibleGroundTop) {
+        g.fillStyle(0x06130f, 0.08).fillRect(visibleLeft, visibleGroundTop, visibleWidth, visibleBottom - visibleGroundTop);
+      }
+      if (groundY + 2 >= visibleTop && groundY - 2 <= visibleBottom) {
+        g.fillStyle(0xb5eff4, 0.14).fillRect(visibleLeft, groundY - 2, visibleWidth, 4);
+      }
+    }
     this.playerBaseSprite.setVisible(false);
     this.enemyBaseSprite.setVisible(false);
     if (!state.active && !state.outcome) {
+      for (const sprite of this.projectileSprites) sprite.setVisible(false);
       this.status.setText("Map/Base Mode\nSelect a map node and launch battle.").setVisible(true);
       return;
     }
@@ -146,7 +221,7 @@ class BattleScene extends Phaser.Scene {
     this.drawBase(state.enemyBase, 0xb36b63);
     if (options.debugDraw) {
       for (const unit of state.units) {
-        if (!unit.alive) continue;
+        if (!unit.alive || !this.isVisiblePoint(unit.x, unit.y, unit.radius + 120)) continue;
         const range = this.battle.getSelectedWeaponRange(unit);
         if (range > 0) {
           const emphasized = unit.id === selection.playerControlledId || unit.id === selection.selectedUnitId;
@@ -165,22 +240,31 @@ class BattleScene extends Phaser.Scene {
         }
       }
     }
-    for (const p of state.particles) g.fillStyle(0xf5c07a, Math.min(1, p.life / 0.4)).fillCircle(p.x, p.y, Math.max(1, p.size * (1 - p.life * 0.8)));
+    for (const p of state.particles) {
+      if (this.isVisiblePoint(p.x, p.y, p.size + 8)) {
+        g.fillStyle(0xf5c07a, Math.min(1, p.life / 0.4)).fillCircle(p.x, p.y, Math.max(1, p.size * (1 - p.life * 0.8)));
+      }
+    }
     for (const beam of state.beamEffects) {
+      const beamLeft = Math.min(beam.x1, beam.x2) - beam.halfWidth;
+      const beamRight = Math.max(beam.x1, beam.x2) + beam.halfWidth;
+      const beamTop = Math.min(beam.y1, beam.y2) - beam.halfWidth;
+      const beamBottom = Math.max(beam.y1, beam.y2) + beam.halfWidth;
+      if (beamRight < view.left || beamLeft > view.right || beamBottom < view.top || beamTop > view.bottom) continue;
       const alpha = Math.max(0, Math.min(1, beam.life / beam.maxLife));
       const beamColor = beam.side === "player" ? 0x8ff6ff : 0xff8fa8;
       const asset = PROJECTILE_ASSETS[beam.shape];
       const collider = asset.collider;
       const visualHeight = collider.kind === "beam-rect" ? beam.halfWidth / Math.max(0.001, collider.halfHeight) : beam.halfWidth * 2;
       const length = Math.hypot(beam.x2 - beam.x1, beam.y2 - beam.y1);
-      this.projectileSprites.push(
-        this.add.image((beam.x1 + beam.x2) / 2, (beam.y1 + beam.y2) / 2, `projectile:${beam.shape}`)
+      this.acquireProjectileSprite(projectileSpriteCount, `projectile:${beam.shape}`)
+          .setPosition((beam.x1 + beam.x2) / 2, (beam.y1 + beam.y2) / 2)
           .setDisplaySize(length, visualHeight)
           .setRotation(Math.atan2(beam.y2 - beam.y1, beam.x2 - beam.x1))
           .setTint(beamColor)
           .setAlpha(alpha)
-          .setDepth(0.9),
-      );
+          .setDepth(0.9);
+      projectileSpriteCount += 1;
       if (options.debugDraw) {
         const px = -(beam.y2 - beam.y1) / Math.max(1, length);
         const py = (beam.x2 - beam.x1) / Math.max(1, length);
@@ -192,15 +276,17 @@ class BattleScene extends Phaser.Scene {
     for (const p of state.projectiles) {
       const projectileColor = p.side === "player" ? 0x9bd5ff : 0xff9d81;
       if (p.projectileClass === "laser") continue;
+      if (!this.isVisiblePoint(p.x, p.y, Math.max(24, p.visualHeight * 2))) continue;
       const asset = PROJECTILE_ASSETS[p.projectileShape];
       const angle = Math.atan2(p.vy, p.vx);
-      this.projectileSprites.push(
-        this.add.image(p.x, p.y, `projectile:${p.projectileShape}`)
+      this.acquireProjectileSprite(projectileSpriteCount, `projectile:${p.projectileShape}`)
+          .setPosition(p.x, p.y)
           .setDisplaySize(p.visualHeight * asset.aspect, p.visualHeight)
           .setRotation(angle)
           .setTint(projectileColor)
-          .setDepth(0.9),
-      );
+          .setAlpha(1)
+          .setDepth(0.9);
+      projectileSpriteCount += 1;
       if (options.debugDraw) {
         const ux = Math.cos(angle);
         const uy = Math.sin(angle);
@@ -214,12 +300,24 @@ class BattleScene extends Phaser.Scene {
           .strokeCircle(cx + ux * p.capsuleHalfLength, cy + uy * p.capsuleHalfLength, p.capsuleRadius);
       }
     }
-    for (const d of state.debris) g.fillStyle(color(d.color), 1).fillRect(d.x - d.size / 2, d.y - d.size / 2, d.size, d.size);
-    for (const unit of state.units) this.drawUnit(unit, options, selection, state.projectiles);
-    for (const effect of state.blockExplosions) this.drawBlockExplosion(effect);
+    for (let index = projectileSpriteCount; index < this.projectileSprites.length; index += 1) {
+      this.projectileSprites[index].setVisible(false);
+    }
+    for (const d of state.debris) {
+      if (this.isVisiblePoint(d.x, d.y, d.size + 4)) {
+        g.fillStyle(color(d.color), 1).fillRect(d.x - d.size / 2, d.y - d.size / 2, d.size, d.size);
+      }
+    }
+    for (const unit of state.units) {
+      if (this.isVisiblePoint(unit.x, unit.y, unit.radius + 80)) this.drawUnit(unit, options, selection, state.projectiles);
+    }
+    for (const effect of state.blockExplosions) {
+      if (this.isVisiblePoint(effect.x, effect.y, effect.size + 24)) this.drawBlockExplosion(effect);
+    }
 
     if (options.debugTargetLines) {
       for (const unit of state.units) {
+        if (!this.isVisiblePoint(unit.x, unit.y, unit.radius + 40)) continue;
         const target = state.units.find((candidate) => candidate.id === unit.aiDebugTargetId && candidate.alive);
         const base = unit.side === "player" ? state.enemyBase : state.playerBase;
         const targetX = target?.x ?? base.x + base.w / 2;
@@ -941,6 +1039,7 @@ class BattleScene extends Phaser.Scene {
 
 export class PhaserBattleRenderer {
   public readonly game: Phaser.Game;
+  private readonly scene: BattleScene;
 
   public constructor(
     canvas: HTMLCanvasElement,
@@ -949,17 +1048,37 @@ export class PhaserBattleRenderer {
     getViewAudioContext: () => BattleViewAudioContext,
     getSoundVolume: () => number,
   ) {
+    const resolutionScale = Math.max(0.1, BATTLE_CANVAS_RESOLUTION_SCALE);
+    const cssWidth = Math.max(1, canvas.clientWidth || canvas.width);
+    const cssHeight = Math.max(1, canvas.clientHeight || canvas.height);
+    this.scene = new BattleScene(battle, templates, getViewAudioContext, getSoundVolume, resolutionScale);
     this.game = new Phaser.Game({
       type: Phaser.CANVAS,
       canvas,
-      width: canvas.width,
-      height: canvas.height,
+      width: Math.max(1, Math.floor(cssWidth * resolutionScale)),
+      height: Math.max(1, Math.floor(cssHeight * resolutionScale)),
       backgroundColor: "#09111d",
       transparent: false,
       banner: false,
       audio: { disableWebAudio: false },
-      scene: [new BattleScene(battle, templates, getViewAudioContext, getSoundVolume)],
+      scene: [this.scene],
       render: { antialias: true, roundPixels: false },
     });
+  }
+
+  public resizeViewport(width: number, height: number): void {
+    const normalizedWidth = Math.max(1, Math.floor(width));
+    const normalizedHeight = Math.max(1, Math.floor(height));
+    const resolutionScale = Math.max(0.1, BATTLE_CANVAS_RESOLUTION_SCALE);
+    this.game.scale.resize(
+      Math.max(1, Math.floor(normalizedWidth * resolutionScale)),
+      Math.max(1, Math.floor(normalizedHeight * resolutionScale)),
+    );
+    this.game.canvas.style.width = `${normalizedWidth}px`;
+    this.game.canvas.style.height = `${normalizedHeight}px`;
+  }
+
+  public setViewTransform(offsetX: number, offsetY: number, scale: number): void {
+    this.scene.setViewTransform(offsetX, offsetY, scale);
   }
 }

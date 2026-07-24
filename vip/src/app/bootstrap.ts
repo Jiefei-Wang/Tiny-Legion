@@ -47,17 +47,24 @@ import {
 import {
   clonePartDefinition,
   deleteDefaultPartFromStore,
-  deleteUserPartFromStore,
   fetchDefaultPartsFromStore,
-  fetchUserPartsFromStore,
   getPartFootprintOffsets,
   isPartCompatibleWithUnitType,
   mergePartCatalogs,
   normalizePartAttachmentRotate,
   resolvePartDefinitionForAttachment,
+  saveDefaultPartsToStore,
   saveDefaultPartToStore,
   validatePartDefinitionDetailed,
 } from "./part-store.ts";
+import {
+  calculateDestroyTimeSeconds,
+  calculateHitsToDestroy,
+  formatDestroyTime,
+  resolvePartGasCost,
+  resolveStructureComparisonValues,
+  resolveWeaponComparisonValues,
+} from "./part-comparison.ts";
 import {
   createDefaultPartDraft,
   getComponentFromProjectileClass,
@@ -231,7 +238,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         <section class="center-panel card">
           <div id="managementCenter" class="management-center hidden"></div>
           <div id="battleCanvasViewport" class="battle-canvas-viewport">
-            <canvas id="battleCanvas" width="${BATTLEFIELD_WIDTH}" height="${BATTLEFIELD_HEIGHT}"></canvas>
+            <canvas id="battleCanvas" width="1" height="1"></canvas>
             <canvas id="templateEditorCanvas" class="hidden"></canvas>
             <canvas id="partEditorCanvas" class="hidden"></canvas>
             <div id="testArenaLossStats" class="test-arena-loss-stats hidden" aria-live="polite"></div>
@@ -272,6 +279,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
           </details>
         </section>
       </main>
+      <div id="globalModalRoot"></div>
       <div id="globalSettingsOverlay" class="global-settings-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="globalSettingsTitle">
         <section class="card global-settings-modal">
           <div class="panel-heading">
@@ -304,6 +312,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
   const leaderboardCenter = getElement<HTMLDivElement>("#leaderboardCenter");
   const managementCenter = getElement<HTMLDivElement>("#managementCenter");
   const editorPanel = getElement<HTMLDivElement>("#editorPanel");
+  const globalModalRoot = getElement<HTMLDivElement>("#globalModalRoot");
   const selectedInfo = getElement<HTMLDivElement>("#selectedInfo");
   const contextInspectorTitle = getElement<HTMLHeadingElement>("#contextInspectorTitle");
   const weaponHud = getElement<HTMLDivElement>("#weaponHud");
@@ -399,11 +408,17 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     localStorage.setItem(SIDEBAR_SPLIT_STORAGE_KEY, `${height}`);
   });
 
-  // Keep battle simulation dimensions deterministic in all runtime modes.
-  canvas.width = BATTLEFIELD_WIDTH;
-  canvas.height = BATTLEFIELD_HEIGHT;
-  canvas.style.width = `${canvas.width}px`;
-  canvas.style.height = `${canvas.height}px`;
+  // Simulation dimensions live on a non-presented logical surface. Phaser's
+  // visible canvas is viewport-sized and never inherits battlefield dimensions.
+  const simulationCanvas = document.createElement("canvas");
+  simulationCanvas.width = 1;
+  simulationCanvas.height = 1;
+  const initialViewportWidth = Math.max(1, Math.floor(canvasViewport.clientWidth));
+  const initialViewportHeight = Math.max(1, Math.floor(canvasViewport.clientHeight));
+  canvas.width = initialViewportWidth;
+  canvas.height = initialViewportHeight;
+  canvas.style.width = `${initialViewportWidth}px`;
+  canvas.style.height = `${initialViewportHeight}px`;
 
   const syncEditorCanvasSizes = (): void => {
     const width = Math.max(1, Math.floor(canvasViewport.clientWidth));
@@ -823,12 +838,14 @@ export function bootstrap(options: BootstrapOptions = {}): void {
   let battleViewOffsetX = 0;
   let battleViewOffsetY = 0;
   let battleViewScale = 1;
+  let phaserBattleRenderer: PhaserBattleRenderer | null = null;
   let battleViewDragActive = false;
   let battleViewDragMoved = false;
   let battleViewDragStartClientX = 0;
   let battleViewDragStartClientY = 0;
   let battleViewDragLastClientX = 0;
   let battleViewDragLastClientY = 0;
+  let battleViewFollowSelection = true;
   let editorStructureSlots: Array<number | null> = new Array<number | null>(EDITOR_GRID_MAX_SIZE).fill(null);
   let editorStructureColorSlots: Array<string | null> = new Array<string | null>(EDITOR_GRID_MAX_SIZE).fill(null);
   let editorFunctionalSlots: EditorFunctionalSlot[] = new Array<EditorFunctionalSlot>(EDITOR_GRID_MAX_SIZE).fill(null);
@@ -840,6 +857,12 @@ export function bootstrap(options: BootstrapOptions = {}): void {
   let partDesignerOpenedPartId: number | null = null;
   let partDesignerOpenFilter: PartOpenFilter = "all";
   let partDesignerTool: PartDesignerTool = "select";
+  let partComparisonOpen = false;
+  let partComparisonTab: "hits" | "time" = "hits";
+  let partComparisonSelection: { kind: "weapon" | "structure"; id: number } | null = null;
+  let partComparisonDrafts = new Map<number, PartDefinition>();
+  let partComparisonDirtyIds = new Set<number>();
+  let partComparisonInvalidKeys = new Set<string>();
   const STRUCTURE_LAYER_BASE_OPTION = "__structure_layer__";
   let partDesignerDraft: PartDefinition = (() => {
     const draft = clonePartDefinition(createDefaultPartDraft(1000, "Custom Part"));
@@ -927,16 +950,12 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       editorViewScale = 1;
     }
   };
-  const getCanvasDisplayWidth = (): number => Math.max(1, canvas.clientWidth || BATTLEFIELD_WIDTH);
-  const getCanvasDisplayHeight = (): number => Math.max(1, canvas.clientHeight || BATTLEFIELD_HEIGHT);
-  const toDisplayX = (worldX: number): number => worldX * (getCanvasDisplayWidth() / Math.max(1, canvas.width));
-  const toDisplayY = (worldY: number): number => worldY * (getCanvasDisplayHeight() / Math.max(1, canvas.height));
-
   const clampBattleViewOffsets = (): void => {
     const viewportWidth = Math.max(0, canvasViewport.clientWidth);
     const viewportHeight = Math.max(0, canvasViewport.clientHeight);
-    const scaledCanvasWidth = getCanvasDisplayWidth() * battleViewScale;
-    const scaledCanvasHeight = getCanvasDisplayHeight() * battleViewScale;
+    const { width: battlefieldWidth, height: battlefieldHeight } = battle.getBattlefieldInfo();
+    const scaledCanvasWidth = battlefieldWidth * battleViewScale;
+    const scaledCanvasHeight = battlefieldHeight * battleViewScale;
     const VIEW_MARGIN = BATTLE_DISPLAY_CONFIG.view.cameraMargin;
 
     let minOffsetX = 0;
@@ -983,13 +1002,11 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     updateViewportCanvasVisibility();
     if (!isBattleScreen()) {
       syncEditorCanvasSizes();
-      canvas.style.transform = "translate(0px, 0px) scale(1)";
       return;
     }
-    canvas.style.width = `${canvas.width}px`;
-    canvas.style.height = `${canvas.height}px`;
     clampBattleViewOffsets();
-    canvas.style.transform = `translate(${battleViewOffsetX}px, ${battleViewOffsetY}px) scale(${battleViewScale})`;
+    phaserBattleRenderer?.resizeViewport(canvasViewport.clientWidth, canvasViewport.clientHeight);
+    phaserBattleRenderer?.setViewTransform(battleViewOffsetX, battleViewOffsetY, battleViewScale);
   };
 
   const panBattleViewBy = (dx: number, dy: number): void => {
@@ -1047,8 +1064,8 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     editorGridPanX = nextGridOriginX - (baseX - (editorGridCols * nextCell) * 0.5);
     editorGridPanY = nextGridOriginY - (baseY - (editorGridRows * nextCell) * 0.5);
   };
-  const normalizeTestArenaBattlefieldWidth = (value: number): number => Math.max(640, Math.min(4096, Math.floor(value)));
-  const normalizeTestArenaBattlefieldHeight = (value: number): number => Math.max(360, Math.min(4096, Math.floor(value)));
+  const normalizeTestArenaBattlefieldWidth = (value: number): number => Math.max(640, Math.floor(value));
+  const normalizeTestArenaBattlefieldHeight = (value: number): number => Math.max(360, Math.floor(value));
   const normalizeTestArenaZoomPercent = (value: number): number => Math.max(MIN_BATTLE_VIEW_SCALE * 100, Math.min(MAX_BATTLE_VIEW_SCALE * 100, Math.round(value)));
   const normalizeTestArenaGroundHeight = (value: number): number => Math.max(80, Math.min(Math.max(120, testArenaBattlefieldHeight - 40), Math.floor(value)));
   const normalizeTestArenaSpawnTemplateIds = (candidateIds: ReadonlyArray<number>): number[] => {
@@ -1102,9 +1119,8 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       return;
     }
     const { laneBounds } = battle.getBattlefieldInfo();
-    const displayYScale = getCanvasDisplayHeight() / Math.max(1, canvas.height);
-    const laneTop = laneBounds.airMinZ * displayYScale;
-    const laneBottom = laneBounds.groundMaxY * displayYScale;
+    const laneTop = laneBounds.airMinZ;
+    const laneBottom = laneBounds.groundMaxY;
     const laneHeight = Math.max(1, laneBottom - laneTop);
     const availableHeight = Math.max(1, viewportHeight - DEFAULT_BATTLE_VERTICAL_PADDING * 2);
     battleViewScale = Math.max(
@@ -1113,6 +1129,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     );
     const fittedHeight = laneHeight * battleViewScale;
     battleViewOffsetY = (viewportHeight - fittedHeight) * 0.5 - laneTop * battleViewScale;
+    battleViewFollowSelection = true;
     applyBattleViewTransform();
     syncTestArenaZoomInput();
   };
@@ -1735,7 +1752,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
   };
 
   const battle = new BattleSession(
-    canvas,
+    simulationCanvas,
     {
       addLog,
       getCommanderSkill: () => getCommanderSkillForCap(),
@@ -1787,6 +1804,8 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     templates,
     {
       ...(battleSessionOptions ?? {}),
+      battlefieldWidth: battleSessionOptions?.battlefieldWidth ?? BATTLEFIELD_WIDTH,
+      battlefieldHeight: battleSessionOptions?.battlefieldHeight ?? BATTLEFIELD_HEIGHT,
       movementSpeedMultiplier: globalMovementSpeedMultiplier,
       partCatalog: battleSessionOptions?.partCatalog
         ? mergePartCatalogs(parts, battleSessionOptions.partCatalog)
@@ -1794,13 +1813,13 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     },
   );
   // Phaser owns browser battle presentation; BattleSession remains the shared/headless simulation.
-  const phaserBattleRenderer = new PhaserBattleRenderer(
+  phaserBattleRenderer = new PhaserBattleRenderer(
     canvas,
     battle,
     templates,
     () => {
       const viewportWidth = Math.max(1, canvasViewport.clientWidth);
-      const worldPerDisplayPixel = canvas.width / Math.max(1, getCanvasDisplayWidth() * battleViewScale);
+      const worldPerDisplayPixel = 1 / Math.max(0.0001, battleViewScale);
       return {
         centerX: (-battleViewOffsetX + viewportWidth * 0.5) * worldPerDisplayPixel,
         worldWidth: viewportWidth * worldPerDisplayPixel,
@@ -2315,9 +2334,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
 
   const refreshPartsFromStore = async (): Promise<void> => {
     const defaultParts = await fetchDefaultPartsFromStore();
-    const userParts = await fetchUserPartsFromStore();
-    const mergedParts = mergePartCatalogs(defaultParts, userParts);
-    parts.splice(0, parts.length, ...mergedParts);
+    parts.splice(0, parts.length, ...defaultParts);
     const applyMaterialOverridesFromParts = (): void => {
       const materialIds: MaterialId[] = ["basic", "reinforced", "ceramic", "reactive", "combined"];
       for (const materialId of materialIds) {
@@ -2569,7 +2586,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
   };
 
   const followSelectedUnitWithCamera = (): void => {
-    if (!isBattleScreen() || battleViewDragActive) {
+    if (!isBattleScreen() || battleViewDragActive || !battleViewFollowSelection) {
       return;
     }
     const selection = battle.getSelection();
@@ -2587,8 +2604,8 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     }
     const viewportHeight = canvasViewport.clientHeight;
     const BORDER_MARGIN = BATTLE_DISPLAY_CONFIG.view.designerBorderMargin;
-    const screenX = battleViewOffsetX + toDisplayX(tracked.x) * battleViewScale;
-    const screenY = battleViewOffsetY + toDisplayY(tracked.y) * battleViewScale;
+    const screenX = battleViewOffsetX + tracked.x * battleViewScale;
+    const screenY = battleViewOffsetY + tracked.y * battleViewScale;
 
     let dx = 0;
     let dy = 0;
@@ -4686,6 +4703,146 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     recalcEditorDraftFromSlots();
   };
 
+  const getPartComparisonDraft = (id: number): PartDefinition | null => (
+    partComparisonDrafts.get(id) ?? null
+  );
+
+  const refreshPartComparisonMatrix = (): void => {
+    document.querySelectorAll<HTMLElement>("[data-part-comparison-cell]").forEach((cell) => {
+      const weaponId = Number.parseInt(cell.dataset.weaponId ?? "", 10);
+      const structureId = Number.parseInt(cell.dataset.structureId ?? "", 10);
+      const weapon = getPartComparisonDraft(weaponId);
+      const structure = getPartComparisonDraft(structureId);
+      if (!weapon || !structure) {
+        cell.textContent = "—";
+        return;
+      }
+      const weaponValues = resolveWeaponComparisonValues(weapon);
+      const structureValues = resolveStructureComparisonValues(structure);
+      const hits = calculateHitsToDestroy(weaponValues, structureValues);
+      cell.textContent = partComparisonTab === "hits"
+        ? String(hits)
+        : formatDestroyTime(calculateDestroyTimeSeconds(hits, weaponValues));
+    });
+  };
+
+  const renderPartComparisonModal = (): string => {
+    if (!partComparisonOpen) {
+      return "";
+    }
+    const weapons = parts
+      .filter((part) => getResolvedPartType(part) === "weapon")
+      .map((part) => getPartComparisonDraft(part.id))
+      .filter((part): part is PartDefinition => part !== null)
+      .sort((a, b) => (
+        resolvePartGasCost(a) - resolvePartGasCost(b)
+        || a.name.localeCompare(b.name)
+        || a.id - b.id
+      ));
+    const structures = parts
+      .filter((part) => getResolvedPartType(part) === "structure")
+      .map((part) => getPartComparisonDraft(part.id))
+      .filter((part): part is PartDefinition => part !== null)
+      .sort((a, b) => (
+        resolvePartGasCost(a) - resolvePartGasCost(b)
+        || a.name.localeCompare(b.name)
+        || a.id - b.id
+      ));
+    const selected = partComparisonSelection
+      ? getPartComparisonDraft(partComparisonSelection.id)
+      : null;
+    const selectedKind = selected ? getResolvedPartType(selected) : null;
+    const inspector = (() => {
+      if (!selected || (selectedKind !== "weapon" && selectedKind !== "structure")) {
+        return `<div class="small">Select a weapon row or structure column.</div>`;
+      }
+      if (selectedKind === "weapon") {
+        const values = resolveWeaponComparisonValues(selected);
+        return `
+          <div class="part-comparison-inspector-title">
+            <span class="eyebrow">Weapon parameters</span>
+            <h3>${escapeHtml(selected.name)}</h3>
+          </div>
+          <label>Gas Consumption<input data-comparison-field="gasCost" type="number" min="0" step="1" value="${values.gasCost}" /></label>
+          <label>Mass<input data-comparison-field="mass" type="number" min="0" step="0.1" value="${values.mass}" /></label>
+          <label>Damage<input data-comparison-field="damage" type="number" min="0" step="1" value="${values.damage}" /></label>
+          <label>Penetration<input data-comparison-field="penetration" type="number" min="0" step="1" value="${values.penetration}" /></label>
+          <label>Cooldown (s)<input data-comparison-field="cooldown" type="number" min="0" step="0.05" value="${values.cooldown}" /></label>
+          <label>Max Loaded Ammo<input data-comparison-field="maxCapacity" type="number" min="1" step="1" value="${values.maxCapacity}" /></label>
+          <label>Min Fire Interval (s)<input data-comparison-field="minFireInterval" type="number" min="0" step="0.05" value="${values.minFireInterval}" /></label>
+        `;
+      }
+      const values = resolveStructureComparisonValues(selected);
+      return `
+          <div class="part-comparison-inspector-title">
+            <span class="eyebrow">Structure parameters</span>
+            <h3>${escapeHtml(selected.name)}</h3>
+          </div>
+          <label>Gas Consumption<input data-comparison-field="gasCost" type="number" min="0" step="1" value="${values.gasCost}" /></label>
+          <label>Mass<input data-comparison-field="mass" type="number" min="0" step="0.1" value="${values.mass}" /></label>
+          <label>Armor<input data-comparison-field="armor" type="number" min="0" step="0.01" value="${values.armor}" /></label>
+        <label>HP<input data-comparison-field="hp" type="number" min="0" step="1" value="${values.hp}" /></label>
+      `;
+    })();
+    const headerCells = structures.map((structure) => `
+      <th>
+        <button type="button" data-comparison-select-kind="structure" data-comparison-select-id="${structure.id}" class="${partComparisonSelection?.kind === "structure" && partComparisonSelection.id === structure.id ? "active" : ""}">
+          ${escapeHtml(structure.name)}
+        </button>
+      </th>
+    `).join("");
+    const rows = weapons.map((weapon) => {
+      const weaponValues = resolveWeaponComparisonValues(weapon);
+      const cells = structures.map((structure) => {
+        const hits = calculateHitsToDestroy(weaponValues, resolveStructureComparisonValues(structure));
+        const value = partComparisonTab === "hits"
+          ? String(hits)
+          : formatDestroyTime(calculateDestroyTimeSeconds(hits, weaponValues));
+        return `<td data-part-comparison-cell data-weapon-id="${weapon.id}" data-structure-id="${structure.id}">${value}</td>`;
+      }).join("");
+      return `
+        <tr>
+          <th>
+            <button type="button" data-comparison-select-kind="weapon" data-comparison-select-id="${weapon.id}" class="${partComparisonSelection?.kind === "weapon" && partComparisonSelection.id === weapon.id ? "active" : ""}">
+              ${escapeHtml(weapon.name)}
+            </button>
+          </th>
+          ${cells}
+        </tr>
+      `;
+    }).join("");
+    return `
+      <div id="partComparisonOverlay" class="part-comparison-overlay" role="dialog" aria-modal="true" aria-labelledby="partComparisonTitle">
+        <section class="part-comparison-modal">
+          <header class="part-comparison-header">
+            <div><span class="eyebrow">Weapon analysis</span><h2 id="partComparisonTitle">Weapon vs. Structure</h2></div>
+            <span id="partComparisonChangedCount" class="small">${partComparisonDirtyIds.size} changed${partComparisonInvalidKeys.size > 0 ? ` · ${partComparisonInvalidKeys.size} invalid` : ""}</span>
+          </header>
+          <div class="part-comparison-tabs" role="tablist">
+            <button type="button" data-comparison-tab="hits" class="${partComparisonTab === "hits" ? "active" : ""}">Hit Number</button>
+            <button type="button" data-comparison-tab="time" class="${partComparisonTab === "time" ? "active" : ""}">Destroy Time</button>
+          </div>
+          <div class="part-comparison-content">
+            <div class="part-comparison-table-wrap">
+              <table class="part-comparison-table">
+                <thead><tr><th>Weapon \\ Structure</th>${headerCells}</tr></thead>
+                <tbody>${rows || `<tr><td colspan="${Math.max(1, structures.length + 1)}">No default weapon parts found.</td></tr>`}</tbody>
+              </table>
+            </div>
+            <aside class="part-comparison-inspector">${inspector}</aside>
+          </div>
+          <footer class="part-comparison-actions">
+            <span class="small">Calculations ignore penetration, blast damage, recovery, accuracy, travel time, and loader parts.</span>
+            <div>
+              <button id="btnDiscardPartComparison" type="button">Discard</button>
+              <button id="btnSavePartComparison" type="button" ${partComparisonDirtyIds.size === 0 || partComparisonInvalidKeys.size > 0 ? "disabled" : ""}>Save All</button>
+            </div>
+          </footer>
+        </section>
+      </div>
+    `;
+  };
+
   const renderPanels = (): void => {
     updateMetaBar();
 
@@ -4965,8 +5122,8 @@ export function bootstrap(options: BootstrapOptions = {}): void {
             <span class="small">Height</span>
             <span class="small">Zoom %</span>
             <span class="small">Ground H</span>
-            <input id="testArenaBattlefieldWidth" type="number" min="640" max="4096" step="10" value="${testArenaBattlefieldWidth}" />
-            <input id="testArenaBattlefieldHeight" type="number" min="360" max="4096" step="10" value="${testArenaBattlefieldHeight}" />
+            <input id="testArenaBattlefieldWidth" type="number" min="640" step="10" value="${testArenaBattlefieldWidth}" />
+            <input id="testArenaBattlefieldHeight" type="number" min="360" step="10" value="${testArenaBattlefieldHeight}" />
             <input id="testArenaZoomPercent" type="number" min="10" max="240" step="1" value="${zoomPercentLabel}" />
             <input id="testArenaGroundHeight" type="number" min="80" max="${Math.max(120, testArenaBattlefieldHeight - 40)}" step="10" value="${testArenaGroundHeight}" />
           </div>
@@ -5324,6 +5481,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
             </select>
           </label>` : ""}
         </div>
+        ${propIsWeapon ? `<div class="row"><button id="btnShowPartComparison" type="button">Show Info</button></div>` : ""}
         ${propIsWeapon ? `<div class="row">
           <label class="small"><input id="partDirectional" type="checkbox" ${partDesignerDraft.directional ? "checked" : ""} /> Placement rotation changes weapon facing</label>
           <label class="small">Base facing
@@ -5393,7 +5551,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
           <label class="small">Spread <input id="partSpread" type="number" step="0.1" value="${partRuntimeProps.spreadAngleDeg ?? ""}" placeholder="${runtimePlaceholders.spreadDeg}" /></label>
           <label class="small">Max Loaded Ammo <input id="partWeaponMaxLoadedAmmo" type="number" step="1" min="1" value="${partRuntimeProps.maxCapacity ?? ""}" placeholder="${runtimePlaceholders.weaponMaxLoadedAmmo}" /></label>
           ${weaponMaxLoadedAmmo !== 1 ? `<label class="small">Min Fire Interval <input id="partWeaponMinFireInterval" type="number" step="0.05" min="0" value="${partRuntimeProps.minFireInterval ?? 0.2}" /></label>` : ""}
-          <label class="small">Computing Use <input id="partWeaponComputingConsumption" type="number" step="1" min="0" value="${partRuntimeProps.computingConsumption ?? 1}" /></label>
+          <label class="small">Computing Use <input id="partWeaponComputingConsumption" type="number" step="1" min="0" value="${partRuntimeProps.computingConsumption ?? 0}" /></label>
           <label class="small">Fire Sound Volume <input id="partFireSoundVolume" type="number" step="0.05" min="0" max="2" value="${partRuntimeProps.fireSoundVolume ?? 1}" /> ×</label>
           <label class="small">Fire Sound
             <select id="partFireSoundPool">
@@ -5434,6 +5592,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       `;
     }
 
+    globalModalRoot.innerHTML = renderPartComparisonModal();
     updateBattleOpsInfo();
     updateSelectedInfo();
     updateWeaponHud();
@@ -6406,6 +6565,220 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       renderPanels();
     });
 
+    getOptionalElement<HTMLButtonElement>("#btnShowPartComparison")?.addEventListener("click", () => {
+      const comparableParts = parts.filter((part) => {
+        const type = getResolvedPartType(part);
+        return type === "weapon" || type === "structure";
+      });
+      partComparisonDrafts = new Map(comparableParts.map((part) => [part.id, clonePartDefinition(part)]));
+      partComparisonDirtyIds = new Set<number>();
+      partComparisonInvalidKeys = new Set<string>();
+      const currentWeapon = comparableParts.find((part) => (
+        part.id === partDesignerOpenedPartId && getResolvedPartType(part) === "weapon"
+      ));
+      const firstWeapon = comparableParts.find((part) => getResolvedPartType(part) === "weapon");
+      const initial = currentWeapon ?? firstWeapon ?? comparableParts[0] ?? null;
+      partComparisonSelection = initial
+        ? { kind: getResolvedPartType(initial) === "structure" ? "structure" : "weapon", id: initial.id }
+        : null;
+      partComparisonTab = "hits";
+      partComparisonOpen = true;
+      renderPanels();
+    });
+
+    document.querySelectorAll<HTMLButtonElement>("[data-comparison-tab]").forEach((button) => {
+      button.addEventListener("click", () => {
+        partComparisonTab = button.dataset.comparisonTab === "time" ? "time" : "hits";
+        renderPanels();
+      });
+    });
+
+    document.querySelectorAll<HTMLButtonElement>("[data-comparison-select-kind][data-comparison-select-id]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const invalidInput = [...document.querySelectorAll<HTMLInputElement>("[data-comparison-field]")]
+          .find((input) => !input.checkValidity());
+        if (invalidInput) {
+          invalidInput.reportValidity();
+          return;
+        }
+        const id = Number.parseInt(button.dataset.comparisonSelectId ?? "", 10);
+        const kind = button.dataset.comparisonSelectKind;
+        if (!Number.isInteger(id) || (kind !== "weapon" && kind !== "structure")) {
+          return;
+        }
+        partComparisonSelection = { kind, id };
+        renderPanels();
+      });
+    });
+
+    document.querySelectorAll<HTMLInputElement>("[data-comparison-field]").forEach((input) => {
+      input.addEventListener("input", () => {
+        const selection = partComparisonSelection;
+        const draft = selection ? getPartComparisonDraft(selection.id) : null;
+        const raw = input.value.trim();
+        const numeric = raw.length > 0 ? Number(raw) : Number.NaN;
+        const field = input.dataset.comparisonField;
+        const integerRequired = field === "maxCapacity";
+        const minimum = integerRequired ? 1 : 0;
+        const valid = Number.isFinite(numeric)
+          && numeric >= minimum
+          && (!integerRequired || Number.isInteger(numeric));
+        const invalidKey = `${selection?.id ?? "none"}:${field ?? "unknown"}`;
+        input.setCustomValidity(valid ? "" : integerRequired ? "Enter an integer of at least 1." : "Enter a non-negative number.");
+        if (valid) {
+          partComparisonInvalidKeys.delete(invalidKey);
+        } else {
+          partComparisonInvalidKeys.add(invalidKey);
+        }
+        const changedCount = getOptionalElement<HTMLElement>("#partComparisonChangedCount");
+        if (changedCount) {
+          changedCount.textContent = `${partComparisonDirtyIds.size} changed${partComparisonInvalidKeys.size > 0 ? ` · ${partComparisonInvalidKeys.size} invalid` : ""}`;
+        }
+        const saveButton = getOptionalElement<HTMLButtonElement>("#btnSavePartComparison");
+        if (saveButton) {
+          saveButton.disabled = partComparisonDirtyIds.size === 0 || partComparisonInvalidKeys.size > 0;
+        }
+        if (!draft || !valid || !field) {
+          return;
+        }
+        if (selection?.kind === "weapon") {
+          if (field === "gasCost" || field === "mass" || field === "damage" || field === "penetration" || field === "cooldown") {
+            draft.stats = { ...(draft.stats ?? {}), [field]: numeric };
+            draft.partProperties = { ...(draft.partProperties ?? {}), [field]: numeric };
+          } else if (field === "maxCapacity" || field === "minFireInterval") {
+            draft.partProperties = { ...(draft.partProperties ?? {}), [field]: numeric };
+          }
+        } else if (selection?.kind === "structure" && (field === "gasCost" || field === "mass" || field === "armor" || field === "hp")) {
+          if (field === "gasCost" || field === "mass") {
+            draft.stats = { ...(draft.stats ?? {}), [field]: numeric };
+          } else {
+            draft.properties = {
+              ...(draft.properties ?? {}),
+              [field === "armor" ? "materialArmor" : "hp"]: numeric,
+            };
+          }
+          draft.partProperties = { ...(draft.partProperties ?? {}), [field]: numeric };
+        }
+        partComparisonDirtyIds.add(draft.id);
+        if (changedCount) {
+          changedCount.textContent = `${partComparisonDirtyIds.size} changed`;
+        }
+        if (saveButton) {
+          saveButton.disabled = partComparisonInvalidKeys.size > 0;
+        }
+        refreshPartComparisonMatrix();
+      });
+      if (input.dataset.comparisonField === "gasCost") {
+        input.addEventListener("change", () => {
+          if (input.checkValidity()) {
+            renderPanels();
+          }
+        });
+      }
+    });
+
+    getOptionalElement<HTMLButtonElement>("#btnDiscardPartComparison")?.addEventListener("click", () => {
+      partComparisonOpen = false;
+      partComparisonSelection = null;
+      partComparisonDrafts.clear();
+      partComparisonDirtyIds.clear();
+      partComparisonInvalidKeys.clear();
+      renderPanels();
+    });
+
+    getOptionalElement<HTMLButtonElement>("#btnSavePartComparison")?.addEventListener("click", async () => {
+      const inputs = [...document.querySelectorAll<HTMLInputElement>("[data-comparison-field]")];
+      const invalidInput = inputs.find((input) => !input.checkValidity());
+      if (invalidInput) {
+        invalidInput.reportValidity();
+        return;
+      }
+      const changed = [...partComparisonDirtyIds]
+        .map((id) => getPartComparisonDraft(id))
+        .filter((part): part is PartDefinition => part !== null);
+      if (changed.length === 0) {
+        return;
+      }
+      for (const part of changed) {
+        const validation = validatePartDefinitionDetailed(part);
+        if (validation.errors.length > 0) {
+          for (const issue of validation.errors) {
+            addLog(`Part Error: ${issue}`, "bad");
+          }
+          return;
+        }
+      }
+      const saveButton = getOptionalElement<HTMLButtonElement>("#btnSavePartComparison");
+      if (saveButton) {
+        saveButton.disabled = true;
+        saveButton.textContent = "Saving…";
+      }
+      const saved = await saveDefaultPartsToStore(changed);
+      if (!saved) {
+        addLog("Failed to save comparison changes; no staged values were applied.", "bad");
+        if (saveButton) {
+          saveButton.disabled = false;
+          saveButton.textContent = "Save All";
+        }
+        return;
+      }
+      const savedCurrent = partDesignerOpenedPartId === null
+        ? null
+        : saved.find((part) => part.id === partDesignerOpenedPartId) ?? null;
+      if (savedCurrent) {
+        const type = getResolvedPartType(savedCurrent);
+        if (type === "weapon") {
+          const values = resolveWeaponComparisonValues(savedCurrent);
+          partDesignerDraft.stats = {
+            ...(partDesignerDraft.stats ?? {}),
+            gasCost: values.gasCost,
+            mass: values.mass,
+            damage: values.damage,
+            penetration: values.penetration,
+            cooldown: values.cooldown,
+          };
+          partDesignerDraft.partProperties = {
+            ...(partDesignerDraft.partProperties ?? {}),
+            gasCost: values.gasCost,
+            mass: values.mass,
+            damage: values.damage,
+            penetration: values.penetration,
+            cooldown: values.cooldown,
+            maxCapacity: values.maxCapacity,
+            minFireInterval: values.minFireInterval,
+          };
+        } else if (type === "structure") {
+          const values = resolveStructureComparisonValues(savedCurrent);
+          partDesignerDraft.properties = {
+            ...(partDesignerDraft.properties ?? {}),
+            materialArmor: values.armor,
+            hp: values.hp,
+          };
+          partDesignerDraft.stats = {
+            ...(partDesignerDraft.stats ?? {}),
+            gasCost: values.gasCost,
+            mass: values.mass,
+          };
+          partDesignerDraft.partProperties = {
+            ...(partDesignerDraft.partProperties ?? {}),
+            gasCost: values.gasCost,
+            mass: values.mass,
+            armor: values.armor,
+            hp: values.hp,
+          };
+        }
+      }
+      await refreshPartsFromStore();
+      await refreshTemplatesFromStore();
+      partComparisonOpen = false;
+      partComparisonSelection = null;
+      partComparisonDrafts.clear();
+      partComparisonDirtyIds.clear();
+      partComparisonInvalidKeys.clear();
+      addLog(`Saved comparison settings for ${saved.length} part${saved.length === 1 ? "" : "s"}.`, "good");
+      renderPanels();
+    });
+
     getOptionalElement<HTMLButtonElement>("#btnOpenPartWindow")?.addEventListener("click", () => {
       partDesignerDialogOpen = !partDesignerDialogOpen;
       if (partDesignerDialogOpen && !partDesignerSelectedId) {
@@ -6482,9 +6855,8 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         if (!window.confirm(`Delete part "${source.name}" (${source.id})?`)) {
           return;
         }
-        const deletedUser = await deleteUserPartFromStore(partId);
         const deletedDefault = await deleteDefaultPartFromStore(partId);
-        if (!deletedUser && !deletedDefault) {
+        if (!deletedDefault) {
           addLog(`Failed to delete part: ${source.name}`, "bad");
           return;
         }
@@ -7908,6 +8280,14 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     return { x, y, rect };
   };
 
+  const getPointerOnBattlefield = (event: MouseEvent): { x: number; y: number } => {
+    const rect = canvasViewport.getBoundingClientRect();
+    return {
+      x: (event.clientX - rect.left - battleViewOffsetX) / Math.max(0.0001, battleViewScale),
+      y: (event.clientY - rect.top - battleViewOffsetY) / Math.max(0.0001, battleViewScale),
+    };
+  };
+
   canvasViewport.addEventListener("mousedown", (event) => {
     if (event.button !== 0 && event.button !== 2) {
       return;
@@ -7947,7 +8327,8 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       canvasViewport.style.cursor = "grabbing";
       return;
     }
-    const { x, y } = getPointerOnCanvas(event, canvas);
+    const { x, y } = getPointerOnBattlefield(event);
+    battleViewFollowSelection = true;
     battle.handleLeftPointerDown(x, y);
     renderPanels();
   });
@@ -7970,6 +8351,9 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       }
     }
     if (battleViewDragActive) {
+      if (battleViewDragMoved) {
+        battleViewFollowSelection = false;
+      }
       if (!battleViewDragMoved && isBattleScreen()) {
         battle.clearControlSelection();
         renderPanels();
@@ -8020,7 +8404,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     if (battleViewDragActive) {
       return;
     }
-    const { x, y } = getPointerOnCanvas(event, canvas);
+    const { x, y } = getPointerOnBattlefield(event);
     battle.setAim(x, y);
   });
 

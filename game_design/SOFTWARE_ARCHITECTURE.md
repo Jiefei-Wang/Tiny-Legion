@@ -43,12 +43,15 @@ Implemented gameplay architecture highlights:
 - Display layer visibility is debug-controlled (top-bar `Debug Options`) and defaults to OFF in battle runtime
 - In-app debug options plus local runtime log pipeline (`/__debug/*` -> `vip/.debug/runtime.log`)
 - Battle simulation defaults are centralized in shared balance config (`battlefield.ts`) including dimensions, ground height, air layer ratios, air physics constants, battle rules (salvage refund factor), and unit soft-separation tuning constants - all reused by browser + headless/arena paths
-- Test Arena supports runtime battlefield simulation-size overrides (`W`/`H`) and ground-height tuning in the browser app; display zoom remains a separate view-only transform. Battle entry derives its default zoom from the live viewport and lane bounds (`airMinZ` through `groundMaxY`), and Test Arena recomputes that vertical fit when runtime battlefield dimensions change.
+- Test Arena supports uncapped runtime battlefield simulation-size overrides (`W`/`H`) and ground-height tuning in the browser app; display zoom and canvas resolution remain separate view-only concerns. Battle entry derives its default zoom from the live viewport and lane bounds (`airMinZ` through `groundMaxY`), and Test Arena recomputes that vertical fit when runtime battlefield dimensions change.
 - Strategic layer uses `RealTimeCampaign`: the fixed game loop advances continuous income, timed building/research jobs, deployment ETAs, and off-screen campaign battles (Test Arena behavior remains isolated)
 - `game-core/src/gameplay/campaign/real-time-campaign.ts` owns building catalogs, four sized Main Base slots, timed jobs, delivery capacity, nearest-base logistics quotes, distance cost, and outpost support rules
 - `MapNode` carries optional strategic metadata (`kind`, routed `links`, map coordinates, home distance, yields, deposits, outpost roster/range); remote bases are logistics-only and never receive building slots
 - Campaign art assets live under `vip/public/assets/campaign/` as optimized WebP scene/facility art plus an alpha PNG command-bunker sprite. Base and Map consume scene/facility assets through DOM/CSS composition. Phaser independently preloads `battle-air-layer.webp` and `battle-ground-layer.webp`, resizes their boundary from the runtime `groundMinY`, positions side-specific bunker instances behind its immediate-mode effects layer, and keeps simulation state renderer-independent.
-- Phaser's tactical overlay reads renderer-safe `BattleSession` state: per-cell structure geometry for hitboxes, `getSelectedWeaponRange(...)` for each craft's effective range ring, velocity for movement vectors, and `aiDebugTargetId` for faction-colored aim lines/reticles. Selected/controlled range rings receive stronger emphasis; the two related Runtime Debug checkboxes default ON outside replay mode.
+- `BattleSession` owns logical `battlefieldWidth`/`battlefieldHeight` values independently of its optional legacy Canvas 2D drawing surface. Changing battlefield size updates simulation bounds only and never resizes a browser canvas; browser, headless match, leaderboard, and Vite scenario normalization enforce minimum dimensions without an upper cap.
+- Phaser's visible canvas tracks the CSS viewport, with backing pixel density authored by `display/battle.yaml.canvas.resolutionScale`. CSS pan/zoom transforms are not used: the Phaser camera maps the shared world-to-screen offset and zoom, pointer input applies the inverse mapping, and spatial audio uses the same visible world center/width.
+- The app stores battle view offsets as a top-left screen transform. The Phaser renderer converts them to Phaser's center-anchored zoom/scroll coordinates, counter-transforms its fixed debug HUD, and keeps manual right-drag panning persistent by suspending selected-unit follow until the next selection.
+- Phaser's tactical overlay reads renderer-safe `BattleSession` state: per-cell structure geometry for hitboxes, `getSelectedWeaponRange(...)` for each craft's effective range ring, velocity for movement vectors, and `aiDebugTargetId` for faction-colored aim lines/reticles. The immediate-mode pass culls units, projectiles, particles, debris, beams, explosions, and debug sources outside the camera rectangle, while simulation continues for all entities. Projectile images are retained in a reusable pool rather than destroyed and recreated every frame. Selected/controlled range rings receive stronger emphasis; the two related Runtime Debug checkboxes default ON outside replay mode.
 - Phaser derives crack density and low-HP pixel smoke directly from each live structure cell's strain/threshold ratio. Shared simulation state carries short-lived `blockExplosions` records (position, lifetime, deterministic seed, and one of three variants), allowing browser presentation to render varied pixel bursts while headless runtime owns effect timing.
 - `UnitInstance.weaponAimAngles` stores per-slot presentation aim. Command processing updates it from manual/AI fire requests, and `BattleSession.getWeaponVisualState(...)` exposes the clamped angle plus exact projectile muzzle geometry. Phaser draws each live barrel from its attachment center to that muzzle, and projectile creation reuses the same muzzle calculation so shots originate at the visible barrel tip.
 
@@ -312,7 +315,7 @@ Encode your game rules as explicit modules (not scattered checks):
 - `control-unit-rules.ts`
   - exactly one control unit per craft.
   - template validation and runtime instantiation reject zero or multiple controls.
-  - the control part's `computing` value limits unique occupied non-control functional cells; its own footprint is excluded.
+  - the control part's `computing` value limits the sum of each placed non-control functional part's `computingConsumption`; each part is charged once regardless of footprint size, missing values default to zero, and the control part itself is excluded.
   - a ground object becomes a stationary, damageable wreck if control is lost or it lacks either a usable ground engine or a fireable weapon. Wreck entry applies a deterministic-random 1%-50% initial HP loss per surviving cell, records that post-entry HP in `groundWreckInitialCellHp`, and linearly scales each cell toward zero over the configured 10-second lifetime. Aircraft that lose control enter the battle session's direct vertical crash path and are destroyed on ground impact.
 - `damage-model.ts`
   - applies localized structure damage with either normal armor deduction or explicit armor bypass for relayed functional hits.
@@ -351,7 +354,7 @@ Encode your game rules as explicit modules (not scattered checks):
   - weapon availability means a surviving weapon has a loaded round, does not require a loader, or has a surviving compatible loader that can eventually reload it.
   - loss of all weapon availability starts the ground wreck countdown for ground craft. For aircraft it sets persistent `UnitInstance.escapeActive`, releases player control immediately, and routes the craft through return-to-base escape behavior.
   - `CommandResult` reports which slots fired and which were blocked (with reason).
-  - craft control capacity is validated before spawn: the one Control Unit's `partProperties.computing` must cover all unique occupied non-control functional cells.
+  - craft control capacity is validated before spawn: the one Control Unit's `partProperties.computing` must cover the summed `partProperties.computingConsumption` of all placed non-control functional parts.
 
 This keeps your physics behavior consistent across all systems.
 
@@ -461,10 +464,9 @@ Part persistence middleware (dev server via `vite.config.ts`):
 
 - `GET /__parts/default` -> read file-backed default part catalog from `vip/parts/default`
 - `PUT /__parts/default/:id` -> save/overwrite one default part definition JSON
-- `GET /__parts/user` -> read user part definitions from `vip/parts/user`
-- `PUT /__parts/user/:id` -> save/overwrite one user part definition JSON
-- `DELETE /__parts/user/:id` -> remove one user part definition JSON
+- `PUT /__parts/default/batch` -> validate and rollback-protect a multi-part update used by the Part Designer comparison panel
 - Part save filenames are canonicalized from `part.name` (illegal filename symbols removed); delete/update resolves by internal integer `part.id`, not by filename.
+- Browser part loading and authoring are default-only; the legacy `vip/parts/user` directory is left untouched but is not exposed through browser storage endpoints.
 
 Startup flow in `bootstrap.ts` merges templates from built-in defaults + file-backed defaults + user templates, then feeds the merged list into deploy/editor flows.
 
@@ -473,6 +475,8 @@ Editor UX implementation details:
 - Canvas editor uses a resizable placement grid up to `10x10`.
 - Shared design tokens and responsive layout rules in `style.css` provide consistent cards, metrics, action states, developer introductions, navigation, focus hierarchy, and compact breakpoints across Base, Map, Test Arena, Leaderboard, and both editors.
 - Right-side palette renders component cards (placeholder thumbnail + label + type) in a scrollable list with hover detail text.
+- Weapon Part Designer fields expose a `Show Info` modal with Hit Number and Destroy Time matrices (default weapons by default structures). Header selection drives a staged parameter inspector for shared gas/mass values, weapon damage/penetration/timing, and structure armor/HP; edits recalculate immediately, Discard is non-mutating, and Save All uses the transactional default-part batch endpoint.
+- The comparison uses flat armor damage (`max(1, damage - armor)`) and a simplified burst schedule: the first shot is immediate, loaded shots use `minFireInterval`, and `cooldown` separates magazines. It intentionally ignores penetration, explosions, recovery, accuracy, travel time, and loader-part behavior.
 - Active layer (`structure`, `functional`, `display`) is switched from right-panel controls above the part palette.
 - Template editor functional palette uses part catalog entries (not only hardcoded component IDs).
 - Template editor functional palette applies template-type compatibility filtering: `air`-tagged parts are hidden on ground templates, `ground`-tagged parts are hidden on air templates, and untagged parts remain shared.
@@ -489,7 +493,7 @@ Editor UX implementation details:
 - Editor templates persist coordinates per placed part (`x`,`y`, origin `(0,0)`; negatives allowed).
 - Template Editor and Part Editor maintain separate grid pan/view state, so tab switching restores each editor's last viewport.
 - Editor grid viewport defaults to screen-centered origin and only recenters when loading a different template/part.
-- Battle, Template Editor, and Part Editor use dedicated canvases (`#battleCanvas`, `#templateEditorCanvas`, `#partEditorCanvas`) layered in the shared viewport container. Phaser owns `#battleCanvas`; editor canvases intentionally remain direct Canvas tools.
+- Battle, Template Editor, and Part Editor use dedicated canvases (`#battleCanvas`, `#templateEditorCanvas`, `#partEditorCanvas`) layered in the shared viewport container. Phaser owns the viewport-resolution `#battleCanvas`; editor canvases intentionally remain direct Canvas tools.
 - `src/rendering/phaser-battle-renderer.ts` is the browser-only presentation adapter. It reads `BattleSession` state without owning game rules, preserving browser/headless combat parity.
 - Phaser draws faction affiliation directly on live craft geometry: every structure-block seam receives a light blue-player/red-enemy tint, then a brighter low-opacity two-stroke border is generated only for cell edges without a living orthogonal neighbor. This keeps the ownership cue attached to the authored surviving silhouette and composes beneath functional glyphs, selection markers, and later combat effects without adding simulation state.
 - `BattleSession.getDebugSnapshot()` publishes battlefield, entity counts, selection, craft motion/health, and AI target/evasion/lead/fire-block telemetry. The dev probe exposes it at `battle.debug`.

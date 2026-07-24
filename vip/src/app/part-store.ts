@@ -37,20 +37,27 @@ export async function fetchDefaultPartsFromStore(): Promise<PartDefinition[]> {
   return fetchPartCollection("/__parts/default");
 }
 
-export async function fetchUserPartsFromStore(): Promise<PartDefinition[]> {
-  return fetchPartCollection("/__parts/user");
-}
-
-export async function saveUserPartToStore(part: PartDefinition): Promise<boolean> {
+export async function saveDefaultPartsToStore(parts: ReadonlyArray<PartDefinition>): Promise<PartDefinition[] | null> {
   try {
-    const response = await fetch(`/__parts/user/${part.id}`, {
+    const response = await fetch("/__parts/default/batch", {
       method: "PUT",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify(part),
+      body: JSON.stringify({ parts }),
+      cache: "no-store",
     });
-    return response.ok;
+    if (!response.ok) {
+      return null;
+    }
+    const body = await response.json().catch(() => null) as { parts?: unknown[] } | null;
+    if (!Array.isArray(body?.parts)) {
+      return null;
+    }
+    const parsed = body.parts
+      .map((entry) => parsePartDefinition(entry))
+      .filter((part): part is PartDefinition => part !== null);
+    return parsed.length === parts.length ? parsed : null;
   } catch {
-    return false;
+    return null;
   }
 }
 
@@ -77,17 +84,6 @@ export async function saveDefaultPartToStore(part: PartDefinition): Promise<Part
 export async function deleteDefaultPartFromStore(partId: number): Promise<boolean> {
   try {
     const response = await fetch(`/__parts/default/${encodeURIComponent(partId)}`, {
-      method: "DELETE",
-    });
-    return response.ok;
-  } catch {
-    return false;
-  }
-}
-
-export async function deleteUserPartFromStore(partId: number): Promise<boolean> {
-  try {
-    const response = await fetch(`/__parts/user/${encodeURIComponent(partId)}`, {
       method: "DELETE",
     });
     return response.ok;

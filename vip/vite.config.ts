@@ -8,6 +8,7 @@ import { parseTemplate } from "../game-core/src/templates/template-schema.ts";
 import {
   mergePartCatalogs,
   parsePartDefinition,
+  validatePartDefinitionDetailed,
 } from "../game-core/src/parts/part-schema.ts";
 import { runMatch } from "../arena/src/match/run-match.ts";
 import { compareMirroredSeries } from "../arena/src/match/mirrored-series.ts";
@@ -823,7 +824,6 @@ function templateStorePlugin() {
 function partStorePlugin() {
   const rootDir = process.cwd();
   const defaultDir = resolve(rootDir, "parts", "default");
-  const userDir = resolve(rootDir, "parts", "user");
 
   const ensureDir = (dirPath: string): void => {
     if (!existsSync(dirPath)) {
@@ -924,12 +924,83 @@ function partStorePlugin() {
           res.end(JSON.stringify({ parts }));
           return;
         }
+        const rawUrl = req.url ?? "";
+        const pathSegments = rawUrl.split("?")[0]?.split("/").filter(Boolean) ?? [];
+        if (req.method === "PUT" && pathSegments.at(-1) === "batch") {
+          let body = "";
+          req.on("data", (chunk) => {
+            body += chunk;
+          });
+          req.on("end", () => {
+            try {
+              const parsed = JSON.parse(body || "{}") as { parts?: unknown[] };
+              if (!Array.isArray(parsed.parts)) {
+                res.statusCode = 400;
+                res.end("invalid part batch payload");
+                return;
+              }
+              const normalizedParts: Array<NonNullable<ReturnType<typeof parsePartDefinition>>> = [];
+              const seenIds = new Set<number>();
+              const snapshots: Array<{ path: string; raw: string }> = [];
+              for (const candidate of parsed.parts) {
+                const normalized = parsePartDefinition(candidate);
+                if (!normalized || seenIds.has(normalized.id)) {
+                  res.statusCode = 400;
+                  res.end("batch parts must have unique valid ids");
+                  return;
+                }
+                const existingPath = findPartFileById(defaultDir, normalized.id);
+                if (!existingPath) {
+                  res.statusCode = 400;
+                  res.end(`default part ${normalized.id} does not exist`);
+                  return;
+                }
+                const validation = validatePartDefinitionDetailed(normalized);
+                if (validation.errors.length > 0) {
+                  res.statusCode = 400;
+                  res.end(`invalid default part ${normalized.id}: ${validation.errors.join("; ")}`);
+                  return;
+                }
+                seenIds.add(normalized.id);
+                normalizedParts.push(normalized);
+                snapshots.push({ path: existingPath, raw: readFileSync(existingPath, "utf8") });
+              }
+              try {
+                for (let index = 0; index < normalizedParts.length; index += 1) {
+                  const snapshot = snapshots[index];
+                  const normalized = normalizedParts[index];
+                  if (!snapshot || !normalized) {
+                    throw new Error("incomplete batch snapshot");
+                  }
+                  writeFileSync(snapshot.path, `${JSON.stringify(normalized, null, 2)}\n`, "utf8");
+                }
+              } catch (error) {
+                for (const snapshot of snapshots) {
+                  try {
+                    writeFileSync(snapshot.path, snapshot.raw, "utf8");
+                  } catch {
+                    // Best-effort rollback; retain the original write error response.
+                  }
+                }
+                throw error;
+              }
+              res.setHeader("cache-control", "no-store, max-age=0");
+              res.setHeader("content-type", "application/json");
+              res.end(JSON.stringify({ ok: true, parts: normalizedParts }));
+            } catch {
+              if (!res.headersSent) {
+                res.statusCode = 400;
+              }
+              res.end("bad request");
+            }
+          });
+          return;
+        }
         if (req.method !== "PUT" && req.method !== "DELETE") {
           res.statusCode = 405;
           res.end("method not allowed");
           return;
         }
-        const rawUrl = req.url ?? "";
         const idSegment = rawUrl.split("/").filter(Boolean).at(-1) ?? "";
         const id = safeId(idSegment);
         if (!id) {
@@ -978,66 +1049,6 @@ function partStorePlugin() {
         });
       });
 
-      server.middlewares.use("/__parts/user", (req, res) => {
-        if (req.method === "GET") {
-          const parts = readPartsInDir(userDir);
-          res.setHeader("cache-control", "no-store, max-age=0");
-          res.setHeader("content-type", "application/json");
-          res.end(JSON.stringify({ parts }));
-          return;
-        }
-        if (req.method !== "PUT" && req.method !== "DELETE") {
-          res.statusCode = 405;
-          res.end("method not allowed");
-          return;
-        }
-        const rawUrl = req.url ?? "";
-        const idSegment = rawUrl.split("/").filter(Boolean).at(-1) ?? "";
-        const id = safeId(idSegment);
-        if (!id) {
-          res.statusCode = 400;
-          res.end("invalid part id");
-          return;
-        }
-        ensureDir(userDir);
-
-        if (req.method === "DELETE") {
-          const filePath = findPartFileById(userDir, id);
-          if (filePath && existsSync(filePath)) {
-            unlinkSync(filePath);
-          }
-          res.setHeader("content-type", "application/json");
-          res.end(JSON.stringify({ ok: true }));
-          return;
-        }
-
-        let body = "";
-        req.on("data", (chunk) => {
-          body += chunk;
-        });
-        req.on("end", () => {
-          try {
-            const parsed = JSON.parse(body || "{}");
-            const normalized = parsePartDefinition({ ...parsed, id });
-            if (!normalized) {
-              res.statusCode = 400;
-              res.end("invalid part payload");
-              return;
-            }
-            const existingPath = findPartFileById(userDir, normalized.id);
-            const targetPath = resolveTargetPartFilePath(userDir, normalized);
-            if (existingPath && existingPath !== targetPath && existsSync(existingPath)) {
-              unlinkSync(existingPath);
-            }
-            writeFileSync(targetPath, `${JSON.stringify(normalized, null, 2)}\n`, "utf8");
-            res.setHeader("content-type", "application/json");
-            res.end(JSON.stringify({ ok: true }));
-          } catch {
-            res.statusCode = 400;
-            res.end("bad request");
-          }
-        });
-      });
     },
   };
 }
@@ -1298,8 +1309,8 @@ function arenaModelPlugin() {
       const bf = source.battlefield && typeof source.battlefield === "object" ? source.battlefield as Record<string, unknown> : null;
       const battlefield = bf
         ? {
-          ...(typeof bf.width === "number" ? { width: Math.max(640, Math.min(4096, Math.floor(bf.width))) } : {}),
-          ...(typeof bf.height === "number" ? { height: Math.max(360, Math.min(2160, Math.floor(bf.height))) } : {}),
+          ...(typeof bf.width === "number" ? { width: Math.max(640, Math.floor(bf.width)) } : {}),
+          ...(typeof bf.height === "number" ? { height: Math.max(360, Math.floor(bf.height)) } : {}),
           ...(typeof bf.groundHeight === "number" ? { groundHeight: Math.max(80, Math.floor(bf.groundHeight)) } : {}),
         }
         : fallback.battlefield;

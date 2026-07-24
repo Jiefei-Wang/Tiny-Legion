@@ -53,7 +53,7 @@
     "mass": 50,
     "hp": 100,
     "tag": "structure",
-    "armor": 10,
+    "armor": 5,
     "recover": 10,
     "color": "#66788d",
     "alpha": 1
@@ -62,7 +62,7 @@
     "category": "structure",
     "subcategory": "material",
     "materialId": "reinforced",
-    "materialArmor": 10,
+    "materialArmor": 5,
     "materialRecoverPerSecond": 10,
     "materialColor": "#66788d",
     "materialAlpha": 1,

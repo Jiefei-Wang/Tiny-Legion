@@ -84,6 +84,8 @@ export interface BattleSessionOptions {
   externalAiSides?: Partial<Record<Side, boolean>>;
   partCatalog?: ReadonlyArray<PartDefinition>;
   movementSpeedMultiplier?: number;
+  battlefieldWidth?: number;
+  battlefieldHeight?: number;
 }
 
 export type BattleAudioEvent =
@@ -121,8 +123,9 @@ type UnitProjectileHit = {
 };
 
 export class BattleSession {
-  private readonly canvas: HTMLCanvasElement;
   private readonly ctx: CanvasRenderingContext2D;
+  private battlefieldWidth: number;
+  private battlefieldHeight: number;
   private readonly hooks: BattleHooks;
   private readonly templates: UnitTemplate[];
   private aiControllers: Partial<Record<Side, BattleAiController>>;
@@ -161,8 +164,13 @@ export class BattleSession {
     if (!context) {
       throw new Error("2D canvas context unavailable");
     }
-    this.canvas = canvas;
     this.ctx = context;
+    this.battlefieldWidth = Number.isFinite(options.battlefieldWidth)
+      ? Math.max(640, Math.floor(options.battlefieldWidth as number))
+      : Math.max(640, canvas.width);
+    this.battlefieldHeight = Number.isFinite(options.battlefieldHeight)
+      ? Math.max(360, Math.floor(options.battlefieldHeight as number))
+      : Math.max(360, canvas.height);
     this.hooks = hooks;
     this.templates = templates;
     this.aiControllers = options.aiControllers ?? {};
@@ -181,8 +189,8 @@ export class BattleSession {
     this.state = this.createEmptyBattle();
     this.selectedUnitId = null;
     this.playerControlledId = null;
-    this.aimX = canvas.width * 0.7;
-    this.aimY = canvas.height * 0.5;
+    this.aimX = this.battlefieldWidth * 0.7;
+    this.aimY = this.battlefieldHeight * 0.5;
     this.controllerAimAngleRad = null;
     this.manualFireHeld = false;
     this.displayEnabled = false;
@@ -195,7 +203,7 @@ export class BattleSession {
     this.autoSpawnPlayerSideEnabled = false;
     this.autoSpawnPlayerTargetCount = 0;
     this.playerSpawnTemplateAllowList = null;
-    this.groundHeightPx = Math.max(80, canvas.height * DEFAULT_GROUND_HEIGHT_RATIO);
+    this.groundHeightPx = Math.max(80, this.battlefieldHeight * DEFAULT_GROUND_HEIGHT_RATIO);
     this.baselineController = createBaselineCompositeAiController();
     this.audioEvents = [];
     this.movementSpeedMultiplier = this.normalizeMovementSpeedMultiplier(options.movementSpeedMultiplier);
@@ -284,8 +292,8 @@ export class BattleSession {
     laneBounds: { airMinZ: number; airMaxZ: number; groundMinY: number; groundMaxY: number; airTargetTolerance: number };
   } {
     return {
-      width: this.canvas.width,
-      height: this.canvas.height,
+      width: this.battlefieldWidth,
+      height: this.battlefieldHeight,
       groundHeight: Math.floor(this.groundHeightPx),
       laneBounds: this.getLaneBounds(),
     };
@@ -468,21 +476,21 @@ export class BattleSession {
   }
 
   public setBattlefieldSize(width: number, height: number): { width: number; height: number } {
-    const normalizedWidth = clamp(Math.floor(width), 640, 4096);
-    const normalizedHeight = clamp(Math.floor(height), 360, 4096);
-    this.canvas.width = normalizedWidth;
-    this.canvas.height = normalizedHeight;
-    this.groundHeightPx = clamp(this.groundHeightPx, 80, Math.max(120, this.canvas.height - 40));
+    const normalizedWidth = Number.isFinite(width) ? Math.max(640, Math.floor(width)) : this.battlefieldWidth;
+    const normalizedHeight = Number.isFinite(height) ? Math.max(360, Math.floor(height)) : this.battlefieldHeight;
+    this.battlefieldWidth = normalizedWidth;
+    this.battlefieldHeight = normalizedHeight;
+    this.groundHeightPx = clamp(this.groundHeightPx, 80, Math.max(120, this.battlefieldHeight - 40));
     this.relayoutBasesPreservingHp();
 
-    this.aimX = clamp(this.aimX, 0, this.canvas.width);
-    this.aimY = clamp(this.aimY, 0, this.canvas.height);
+    this.aimX = clamp(this.aimX, 0, this.battlefieldWidth);
+    this.aimY = clamp(this.aimY, 0, this.battlefieldHeight);
     this.clampEntitiesToBattlefield();
-    return { width: this.canvas.width, height: this.canvas.height };
+    return { width: this.battlefieldWidth, height: this.battlefieldHeight };
   }
 
   public setGroundHeight(height: number): number {
-    const normalized = clamp(Math.floor(height), 80, Math.max(120, this.canvas.height - 40));
+    const normalized = clamp(Math.floor(height), 80, Math.max(120, this.battlefieldHeight - 40));
     this.groundHeightPx = normalized;
     this.relayoutBasesPreservingHp();
     this.clampEntitiesToBattlefield();
@@ -494,8 +502,8 @@ export class BattleSession {
   }
 
   public setAim(mouseX: number, mouseY: number): void {
-    this.aimX = clamp(mouseX, 0, this.canvas.width);
-    this.aimY = clamp(mouseY, 0, this.canvas.height);
+    this.aimX = clamp(mouseX, 0, this.battlefieldWidth);
+    this.aimY = clamp(mouseY, 0, this.battlefieldHeight);
     this.controllerAimAngleRad = null;
   }
 
@@ -680,8 +688,8 @@ export class BattleSession {
     this.selectedUnitId = null;
     this.playerControlledId = null;
     this.manualFireHeld = false;
-    this.aimX = this.canvas.width * 0.7;
-    this.aimY = this.canvas.height * 0.5;
+    this.aimX = this.battlefieldWidth * 0.7;
+    this.aimY = this.battlefieldHeight * 0.5;
     this.controllerAimAngleRad = null;
   }
 
@@ -1035,7 +1043,7 @@ export class BattleSession {
     }
 
     this.state.projectiles = this.state.projectiles.filter(
-      (projectile) => projectile.ttl > 0 && projectile.x > 0 && projectile.x < this.canvas.width,
+      (projectile) => projectile.ttl > 0 && projectile.x > 0 && projectile.x < this.battlefieldWidth,
     );
     for (const effect of this.state.particles) {
       effect.life -= dt;
@@ -1084,7 +1092,7 @@ export class BattleSession {
   }
 
   public draw(now: number): void {
-    this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+    this.ctx.clearRect(0, 0, this.battlefieldWidth, this.battlefieldHeight);
     if (!this.state.active && !this.state.outcome) {
       this.drawIdleMessage();
       return;
@@ -1170,13 +1178,13 @@ export class BattleSession {
 
     if (this.state.outcome) {
       this.ctx.fillStyle = "rgba(10, 14, 22, 0.78)";
-      this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+      this.ctx.fillRect(0, 0, this.battlefieldWidth, this.battlefieldHeight);
       this.ctx.fillStyle = this.state.outcome.victory ? "#74d8a0" : "#f28b8b";
       this.ctx.font = "700 34px Trebuchet MS";
-      this.ctx.fillText(this.state.outcome.victory ? "VICTORY" : "DEFEAT", this.canvas.width / 2 - 82, this.canvas.height / 2 - 8);
+      this.ctx.fillText(this.state.outcome.victory ? "VICTORY" : "DEFEAT", this.battlefieldWidth / 2 - 82, this.battlefieldHeight / 2 - 8);
       this.ctx.fillStyle = "#dce8f5";
       this.ctx.font = "16px Trebuchet MS";
-      this.ctx.fillText(this.state.outcome.reason, this.canvas.width / 2 - 110, this.canvas.height / 2 + 24);
+      this.ctx.fillText(this.state.outcome.reason, this.battlefieldWidth / 2 - 110, this.battlefieldHeight / 2 + 24);
     }
   }
 
@@ -1204,12 +1212,12 @@ export class BattleSession {
   }
 
   private createDefaultBase(side: Side): { x: number; y: number; w: number; h: number } {
-    const w = clamp(Math.round(this.canvas.width * (38 / 2000)), 28, 70);
-    const h = clamp(Math.round(this.canvas.height * (160 / 1000)), 90, Math.floor(this.canvas.height * 0.5));
+    const w = clamp(Math.round(this.battlefieldWidth * (38 / 2000)), 28, 70);
+    const h = clamp(Math.round(this.battlefieldHeight * (160 / 1000)), 90, Math.floor(this.battlefieldHeight * 0.5));
     const laneBounds = this.getLaneBounds();
     const verticalMid = (laneBounds.airMaxZ + laneBounds.groundMinY) * 0.5;
-    const y = clamp(Math.round(verticalMid - h * 0.5), 18, Math.max(18, this.canvas.height - h - 18));
-    const x = side === "player" ? 18 : this.canvas.width - w - 18;
+    const y = clamp(Math.round(verticalMid - h * 0.5), 18, Math.max(18, this.battlefieldHeight - h - 18));
+    const x = side === "player" ? 18 : this.battlefieldWidth - w - 18;
     return { x, y, w, h };
   }
 
@@ -1237,7 +1245,7 @@ export class BattleSession {
     groundMaxY: number;
     airTargetTolerance: number;
   } {
-    const h = Math.max(360, this.canvas.height);
+    const h = Math.max(360, this.battlefieldHeight);
     const groundMaxY = h - 8;
     const clampedGroundHeight = clamp(this.groundHeightPx, 80, Math.max(120, h - 40));
     const groundMinY = clamp(groundMaxY - clampedGroundHeight, 0, groundMaxY - 12);
@@ -1270,7 +1278,7 @@ export class BattleSession {
     } else {
       unit.y = clamp(unit.y, bounds.airMinZ, bounds.groundMinY);
     }
-    unit.x = clamp(unit.x, 44, this.canvas.width - 44);
+    unit.x = clamp(unit.x, 44, this.battlefieldWidth - 44);
   }
 
   private minAllowedCenterDistance(a: UnitInstance, b: UnitInstance): number {
@@ -1477,7 +1485,7 @@ export class BattleSession {
     }
 
     const bounds = this.getLaneBounds();
-    const enemy = this.instantiateSpawnWithSpacing(template.id, "enemy", this.canvas.width - 120, bounds);
+    const enemy = this.instantiateSpawnWithSpacing(template.id, "enemy", this.battlefieldWidth - 120, bounds);
     if (!enemy) {
       return false;
     }
@@ -1583,7 +1591,7 @@ export class BattleSession {
       return false;
     }
     const bounds = this.getLaneBounds();
-    const enemy = this.instantiateSpawnWithSpacing(templateId, "enemy", this.canvas.width - 120, bounds, {
+    const enemy = this.instantiateSpawnWithSpacing(templateId, "enemy", this.battlefieldWidth - 120, bounds, {
       deploymentGasCost: typeof opts.deploymentGasCost === "number" && Number.isFinite(opts.deploymentGasCost) ? opts.deploymentGasCost : undefined,
       preferredY: typeof opts.y === "number" && Number.isFinite(opts.y) ? opts.y : undefined,
     });
@@ -2647,9 +2655,9 @@ export class BattleSession {
     if (Math.hypot(controllerAimX, controllerAimY) > 0.01) {
       const aimAngle = Math.atan2(controllerAimY, controllerAimX);
       this.controllerAimAngleRad = aimAngle;
-      const aimDistance = Math.max(this.canvas.width, this.canvas.height);
-      this.aimX = clamp(unit.x + Math.cos(aimAngle) * aimDistance, 0, this.canvas.width);
-      this.aimY = clamp(unit.y + Math.sin(aimAngle) * aimDistance, 0, this.canvas.height);
+      const aimDistance = Math.max(this.battlefieldWidth, this.battlefieldHeight);
+      this.aimX = clamp(unit.x + Math.cos(aimAngle) * aimDistance, 0, this.battlefieldWidth);
+      this.aimY = clamp(unit.y + Math.sin(aimAngle) * aimDistance, 0, this.battlefieldHeight);
     }
 
     const fire: FireRequest[] = [];
@@ -2704,7 +2712,7 @@ export class BattleSession {
   /** Selects the target closest to the forward aim ray for target-dependent player weapons. */
   private findEnemyAlongAim(unit: UnitInstance, slot: number, angleRad: number): UnitInstance | null {
     const weapon = this.getWeaponFireInput(unit, slot);
-    const maxRange = weapon?.effectiveRange ?? Math.max(this.canvas.width, this.canvas.height);
+    const maxRange = weapon?.effectiveRange ?? Math.max(this.battlefieldWidth, this.battlefieldHeight);
     const ux = Math.cos(angleRad);
     const uy = Math.sin(angleRad);
     let best: UnitInstance | null = null;
@@ -3062,7 +3070,7 @@ export class BattleSession {
       const factor = unit.type === "air" ? 0.52 : 0.62;
       best = Math.max(best, this.getEffectiveWeaponRange(unit, range) * factor);
     }
-    const maxBand = unit.type === "air" ? this.canvas.width * 0.56 : this.canvas.width * 0.46;
+    const maxBand = unit.type === "air" ? this.battlefieldWidth * 0.56 : this.battlefieldWidth * 0.46;
     const minBand = unit.type === "air" ? 180 : 140;
     return clamp(best, minBand, maxBand);
   }
@@ -3304,14 +3312,14 @@ export class BattleSession {
   private drawLanes(): void {
     const laneBounds = this.getLaneBounds();
     this.ctx.fillStyle = "rgba(138, 176, 216, 0.08)";
-    this.ctx.fillRect(0, laneBounds.airMinZ - 20, this.canvas.width, laneBounds.airMaxZ - laneBounds.airMinZ + 40);
+    this.ctx.fillRect(0, laneBounds.airMinZ - 20, this.battlefieldWidth, laneBounds.airMaxZ - laneBounds.airMinZ + 40);
 
     this.ctx.fillStyle = "rgba(78, 122, 91, 0.17)";
-    this.ctx.fillRect(0, laneBounds.groundMinY, this.canvas.width, laneBounds.groundMaxY - laneBounds.groundMinY);
+    this.ctx.fillRect(0, laneBounds.groundMinY, this.battlefieldWidth, laneBounds.groundMaxY - laneBounds.groundMinY);
 
     this.ctx.strokeStyle = "rgba(117, 158, 118, 0.18)";
     this.ctx.lineWidth = 1;
-    for (let x = 0; x <= this.canvas.width; x += 34) {
+    for (let x = 0; x <= this.battlefieldWidth; x += 34) {
       this.ctx.beginPath();
       this.ctx.moveTo(x, laneBounds.groundMinY);
       this.ctx.lineTo(x, laneBounds.groundMaxY);
@@ -3320,26 +3328,26 @@ export class BattleSession {
     for (let y = laneBounds.groundMinY; y <= laneBounds.groundMaxY; y += 28) {
       this.ctx.beginPath();
       this.ctx.moveTo(0, y);
-      this.ctx.lineTo(this.canvas.width, y);
+      this.ctx.lineTo(this.battlefieldWidth, y);
       this.ctx.stroke();
     }
 
     this.ctx.strokeStyle = "rgba(188, 219, 255, 0.32)";
     this.ctx.beginPath();
     this.ctx.moveTo(0, laneBounds.airMaxZ + 16);
-    this.ctx.lineTo(this.canvas.width, laneBounds.airMaxZ + 16);
+    this.ctx.lineTo(this.battlefieldWidth, laneBounds.airMaxZ + 16);
     this.ctx.stroke();
   }
 
   private drawIdleMessage(): void {
     this.ctx.fillStyle = "rgba(10, 15, 24, 0.9)";
-    this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+    this.ctx.fillRect(0, 0, this.battlefieldWidth, this.battlefieldHeight);
     this.ctx.fillStyle = "#d6e4f2";
     this.ctx.font = "600 28px Trebuchet MS";
-    this.ctx.fillText("Map/Base Mode", this.canvas.width / 2 - 92, this.canvas.height / 2 - 10);
+    this.ctx.fillText("Map/Base Mode", this.battlefieldWidth / 2 - 92, this.battlefieldHeight / 2 - 10);
     this.ctx.fillStyle = "#98abc3";
     this.ctx.font = "16px Trebuchet MS";
-    this.ctx.fillText("Select a map node and launch battle.", this.canvas.width / 2 - 128, this.canvas.height / 2 + 24);
+    this.ctx.fillText("Select a map node and launch battle.", this.battlefieldWidth / 2 - 128, this.battlefieldHeight / 2 + 24);
   }
 
   private drawBase(base: BattleState["playerBase"], color: string, label: string): void {

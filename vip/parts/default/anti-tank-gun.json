@@ -154,7 +154,7 @@
     "projectileSizeRatio": 1
   },
   "partProperties": {
-    "computingConsumption": 1,
+    "computingConsumption": 0,
     "hasAngleLimit": false,
     "projectileClass": "bullet",
     "projectileShape": "bullet-slug",

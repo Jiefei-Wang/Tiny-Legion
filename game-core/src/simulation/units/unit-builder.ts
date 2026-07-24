@@ -254,18 +254,15 @@ export function instantiateUnit(
   }
   const controlPart = control.partId ? partCatalog.find((part) => part.id === control.partId) : null;
   const controlCapacity = Math.max(0, controlPart?.partProperties?.computing ?? 1);
-  const controlledFunctionalCells = new Set<string>();
+  let computingUse = 0;
   for (const attachment of attachments) {
     if (attachment.id === control.id) {
       continue;
     }
-    for (const offset of attachment.occupiedOffsets) {
-      if (offset.occupiesFunctionalSpace) {
-        controlledFunctionalCells.add(`${attachment.x + offset.x},${attachment.y + offset.y}`);
-      }
-    }
+    const part = attachment.partId ? partCatalog.find((entry) => entry.id === attachment.partId) : null;
+    computingUse += Math.max(0, part?.partProperties?.computingConsumption ?? 0);
   }
-  if (controlledFunctionalCells.size > controlCapacity) {
+  if (computingUse > controlCapacity) {
     return null;
   }
   if (template.type === "air") {

@@ -18,6 +18,12 @@ import { destroyCell } from "../src/simulation/units/structure-grid.ts";
 import { canOperate } from "../src/simulation/units/control-unit-rules.ts";
 import { mergeTemplates, parseTemplate, validateTemplateDetailed } from "../src/app/template-store.ts";
 import { mergePartCatalogs, parsePartDefinition } from "../src/app/part-store.ts";
+import {
+  calculateDestroyTimeSeconds,
+  calculateHitsToDestroy,
+  type StructureComparisonValues,
+  type WeaponComparisonValues,
+} from "../src/app/part-comparison.ts";
 import type { BattleHooks } from "../src/gameplay/battle/battle-session.ts";
 import type { KeyState, MapNode, PartDefinition, UnitInstance, UnitTemplate } from "../src/types.ts";
 
@@ -26,7 +32,7 @@ declare const process: { exit: (code?: number) => void; cwd: () => string };
 type Failure = {
   templateId: number;
   templateName: string;
-  check: "validation" | "movement" | "firing" | "overlap" | "functional-support" | "weapon-capacity" | "air-isotropic" | "air-inertia" | "escape-mode" | "control-loss-crash" | "structure-origin" | "penetration-scaling" | "wreck-damage" | "wreck-lifecycle" | "projectile-collision";
+  check: "validation" | "movement" | "firing" | "overlap" | "functional-support" | "weapon-capacity" | "air-isotropic" | "air-inertia" | "escape-mode" | "control-loss-crash" | "structure-origin" | "penetration-scaling" | "wreck-damage" | "wreck-lifecycle" | "projectile-collision" | "part-comparison";
   detail: string;
 };
 
@@ -35,6 +41,51 @@ const idleKeys: KeyState = { a: false, d: false, w: false, s: false, space: fals
 const moveRightKeys: KeyState = { a: false, d: true, w: false, s: false, space: false };
 const moveUpKeys: KeyState = { a: false, d: false, w: true, s: false, space: false };
 const moveUpRightKeys: KeyState = { a: false, d: true, w: true, s: false, space: false };
+
+function verifyPartComparisonCalculations(failures: Failure[]): void {
+  const weapon = (
+    damage: number,
+    cooldown = 2,
+    maxCapacity = 3,
+    minFireInterval = 0.25,
+  ): WeaponComparisonValues => ({
+    gasCost: 0,
+    mass: 0,
+    damage,
+    penetration: 0,
+    cooldown,
+    maxCapacity,
+    minFireInterval,
+  });
+  const structure = (armor: number, hp: number): StructureComparisonValues => ({
+    gasCost: 0,
+    mass: 0,
+    armor,
+    hp,
+  });
+  const checks: Array<{ label: string; actual: number; expected: number }> = [
+    { label: "damage above armor rounds hits up", actual: calculateHitsToDestroy(weapon(10), structure(3, 15)), expected: 3 },
+    { label: "damage equal to armor floors to one", actual: calculateHitsToDestroy(weapon(10), structure(10, 4)), expected: 4 },
+    { label: "damage below armor floors to one", actual: calculateHitsToDestroy(weapon(2), structure(10, 4)), expected: 4 },
+    { label: "zero hp requires zero hits", actual: calculateHitsToDestroy(weapon(10), structure(0, 0)), expected: 0 },
+    { label: "one hit occurs at zero seconds", actual: calculateDestroyTimeSeconds(1, weapon(10)), expected: 0 },
+    { label: "capacity one uses cooldown per additional hit", actual: calculateDestroyTimeSeconds(4, weapon(10, 2, 1, 0.25)), expected: 6 },
+    { label: "within-magazine shots use interval", actual: calculateDestroyTimeSeconds(3, weapon(10, 2, 3, 0.25)), expected: 0.5 },
+    { label: "magazine boundary uses cooldown", actual: calculateDestroyTimeSeconds(4, weapon(10, 2, 3, 0.25)), expected: 2.5 },
+    { label: "multiple magazines repeat burst cycle", actual: calculateDestroyTimeSeconds(7, weapon(10, 2, 3, 0.25)), expected: 5 },
+    { label: "zero timing values remain zero", actual: calculateDestroyTimeSeconds(8, weapon(10, 0, 2, 0)), expected: 0 },
+  ];
+  for (const check of checks) {
+    if (Math.abs(check.actual - check.expected) > 1e-9) {
+      failures.push({
+        templateId: 0,
+        templateName: "Part comparison",
+        check: "part-comparison",
+        detail: `${check.label}: expected ${check.expected}, got ${check.actual}`,
+      });
+    }
+  }
+}
 
 function createMockCanvas(width: number, height: number): HTMLCanvasElement {
   const contextStub = {} as CanvasRenderingContext2D;
@@ -187,6 +238,7 @@ function getMissingLoaderClasses(template: UnitTemplate): string[] {
 
 function runSmoke(): Failure[] {
   const failures: Failure[] = [];
+  verifyPartComparisonCalculations(failures);
   const halfPenetrationDamage = scaleDamageByRemainingPenetration(220, 250, 125);
   if (halfPenetrationDamage !== 110) {
     failures.push({ templateId: 0, templateName: "penetration model", check: "penetration-scaling", detail: `expected 110 residual damage, got ${halfPenetrationDamage}` });
@@ -311,20 +363,55 @@ function runSmoke(): Failure[] {
       failures.push({ templateId: duplicateControlTemplate.id, templateName: duplicateControlTemplate.name, check: "validation", detail: "multiple controls were not rejected" });
     }
 
-    const overCapacityTemplate: UnitTemplate = {
+    const zeroUseTemplate: UnitTemplate = {
       ...tankTemplate,
       id: 999_011,
-      name: "control capacity fixture",
+      name: "zero computing use fixture",
       attachments: tankTemplate.attachments.map((attachment) => attachment.component === "control"
         ? { ...attachment, partId: 3 }
         : { ...attachment }),
     };
-    const overCapacityValidation = validateTemplateDetailed(overCapacityTemplate, { partCatalog });
-    if (!overCapacityValidation.errors.some((error) => error.startsWith("control unit capacity exceeded"))) {
-      failures.push({ templateId: overCapacityTemplate.id, templateName: overCapacityTemplate.name, check: "validation", detail: "functional-cell capacity overflow was not rejected" });
+    const zeroUseValidation = validateTemplateDetailed(zeroUseTemplate, { partCatalog });
+    if (zeroUseValidation.errors.some((error) => error.startsWith("control unit capacity exceeded"))) {
+      failures.push({ templateId: zeroUseTemplate.id, templateName: zeroUseTemplate.name, check: "validation", detail: "zero-use parts were charged by functional footprint" });
     }
-    if (instantiateUnit([overCapacityTemplate], overCapacityTemplate.id, "player", 0, 0, { partCatalog }) !== null) {
-      failures.push({ templateId: overCapacityTemplate.id, templateName: overCapacityTemplate.name, check: "validation", detail: "runtime instantiated an over-capacity craft" });
+    if (instantiateUnit([zeroUseTemplate], zeroUseTemplate.id, "player", 0, 0, { partCatalog }) === null) {
+      failures.push({ templateId: zeroUseTemplate.id, templateName: zeroUseTemplate.name, check: "validation", detail: "runtime rejected zero-use parts because of their functional footprint" });
+    }
+
+    const capacityWeaponSource = partCatalog.find((part) => part.id === 7);
+    if (capacityWeaponSource) {
+      const capacityWeaponPart: PartDefinition = {
+        ...capacityWeaponSource,
+        id: 999_012,
+        name: "Headless High Computing Use Weapon",
+        partProperties: {
+          ...capacityWeaponSource.partProperties,
+          computingConsumption: 9,
+        },
+      };
+      const capacityPartCatalog = [...partCatalog, capacityWeaponPart];
+      const overCapacityTemplate: UnitTemplate = {
+        ...tankTemplate,
+        id: 999_012,
+        name: "control capacity fixture",
+        attachments: tankTemplate.attachments.map((attachment) => {
+          if (attachment.component === "control") {
+            return { ...attachment, partId: 3 };
+          }
+          if (attachment.partId === capacityWeaponSource.id) {
+            return { ...attachment, partId: capacityWeaponPart.id };
+          }
+          return { ...attachment };
+        }),
+      };
+      const overCapacityValidation = validateTemplateDetailed(overCapacityTemplate, { partCatalog: capacityPartCatalog });
+      if (!overCapacityValidation.errors.some((error) => error.startsWith("control unit capacity exceeded"))) {
+        failures.push({ templateId: overCapacityTemplate.id, templateName: overCapacityTemplate.name, check: "validation", detail: "part computing-use capacity overflow was not rejected" });
+      }
+      if (instantiateUnit([overCapacityTemplate], overCapacityTemplate.id, "player", 0, 0, { partCatalog: capacityPartCatalog }) !== null) {
+        failures.push({ templateId: overCapacityTemplate.id, templateName: overCapacityTemplate.name, check: "validation", detail: "runtime instantiated a craft exceeding authored part computing use" });
+      }
     }
   }
 

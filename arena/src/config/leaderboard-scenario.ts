@@ -58,8 +58,8 @@ export function loadLeaderboardScenario(configPath = defaultConfigPath()): Leade
       initialUnitsPerSide: Math.max(1, Math.floor(finite(phase.initialUnitsPerSide, fallback.initialUnitsPerSide))),
       templateNames: templateNames.length > 0 ? templateNames : fallback.templateNames,
       battlefield: {
-        width: Math.max(640, Math.min(4096, Math.floor(finite(battlefieldRaw.width, fallback.battlefield.width)))),
-        height: Math.max(360, Math.min(2160, Math.floor(finite(battlefieldRaw.height, fallback.battlefield.height)))),
+        width: Math.max(640, Math.floor(finite(battlefieldRaw.width, fallback.battlefield.width))),
+        height: Math.max(360, Math.floor(finite(battlefieldRaw.height, fallback.battlefield.height))),
         groundHeight: Math.max(80, Math.floor(finite(battlefieldRaw.groundHeight, fallback.battlefield.groundHeight ?? 400))),
       },
       maxSimSeconds: Math.max(10, Math.floor(finite(phase.maxSimSeconds, fallback.maxSimSeconds))),

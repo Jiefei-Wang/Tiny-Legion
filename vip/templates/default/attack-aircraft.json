@@ -90,8 +90,8 @@
       "rotateQuarter": 0
     },
     {
-      "component": "explosiveShell",
-      "partId": 7,
+      "component": "rapidGun",
+      "partId": 1,
       "cell": 10,
       "x": 1,
       "y": 1,

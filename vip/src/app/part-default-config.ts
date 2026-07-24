@@ -128,7 +128,7 @@ export function getPartPropertiesDefaultsByType(partType: PartType, partCategory
       needLoader: false,
       maxCapacity: 2,
       minFireInterval: 0.2,
-      computingConsumption: 1,
+      computingConsumption: 0,
     };
   }
   if (partType === "loader") {

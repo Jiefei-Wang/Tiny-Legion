@@ -1,12 +1,12 @@
 {
-  "id": 19,
-  "name": "firearm",
+  "id": 1,
+  "name": "Gatling gun",
   "layer": "functional",
   "partType": "weapon",
   "partCategory": "bullet",
   "baseComponent": "rapidGun",
-  "directional": false,
-  "direction": "up",
+  "directional": true,
+  "direction": "right",
   "anchor": {
     "x": 0,
     "y": 0
@@ -52,7 +52,7 @@
     "hitImpulse": 0.8,
     "damage": 30,
     "range": 420,
-    "cooldown": 0.5,
+    "cooldown": 1,
     "projectileSpeed": 650,
     "projectileGravity": 20,
     "penetration": 0,
@@ -68,15 +68,18 @@
     "projectileShape": "bullet-tracer",
     "projectileSizeRatio": 1,
     "damage": 30,
+    "cooldown": 1,
     "fireSoundVolume": 0.5,
     "fireSoundPool": "rapid-fire",
     "explodeOnHit": false,
     "needLoader": false,
-    "maxCapacity": 1
+    "maxCapacity": 10,
+    "minFireInterval": 0.05
   },
   "properties": {
     "category": "weapon",
     "subcategory": "rapid-fire",
+    "materialAlpha": 1,
     "isEngine": false,
     "isWeapon": true,
     "isLoader": false,

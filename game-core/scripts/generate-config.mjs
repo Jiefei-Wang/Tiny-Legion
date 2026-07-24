@@ -251,7 +251,11 @@ export function validateGameConfig(config) {
   validateScalarObject(shooting.ballisticSolver, ["minTimeSeconds", "horizonRangeScale", "minHorizonSeconds", "maxHorizonSeconds", "bracketSteps", "bisectionSteps", "speedErrorTolerance", "directRangeTolerance", "travelRangeTolerance", "minimumDivisor"], "ai/shooting.yaml.ballisticSolver");
   validateScalarObject(config.ai.levels, ["maxCertifiedLevel"], "ai/levels.yaml");
 
-  const display = exactKeys(config.display.battle, ["view"], "display/battle.yaml");
+  const display = exactKeys(config.display.battle, ["canvas", "view"], "display/battle.yaml");
+  const displayCanvas = validateScalarObject(display.canvas, ["resolutionScale"], "display/battle.yaml.canvas");
+  if (numberAt(displayCanvas, "resolutionScale", "display/battle.yaml.canvas") <= 0) {
+    fail("display/battle.yaml.canvas.resolutionScale", "expected a value greater than zero");
+  }
   validateScalarObject(display.view, ["minScale", "maxScale", "verticalPadding", "cameraMargin", "designerBorderMargin"], "display/battle.yaml.view");
   const editor = exactKeys(config.editor.editor, ["grid", "displayKinds", "gameLoop"], "editor/editor.yaml");
   validateScalarObject(editor.grid, ["maxColumns", "maxRows"], "editor/editor.yaml.grid");

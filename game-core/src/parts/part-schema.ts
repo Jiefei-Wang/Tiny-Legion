@@ -517,7 +517,7 @@ export function createImplicitPartDefinition(component: ComponentId): PartDefini
       maxCapacity: stats.type === "weapon" ? stats.maxLoadedAmmo : undefined,
       minFireInterval: stats.type === "weapon" && (stats.maxLoadedAmmo ?? 1) !== 1 ? 0.2 : undefined,
       computing: stats.type === "control" ? 20 : undefined,
-      computingConsumption: stats.type === "weapon" ? 1 : undefined,
+      computingConsumption: stats.type === "weapon" ? 0 : undefined,
     },
     properties: {
       category: stats.type,
@@ -993,7 +993,7 @@ export function parsePartDefinition(input: unknown): PartDefinition | null {
     partProperties.computing = 1;
   }
   if (inferredPartType === "weapon" && partProperties.computingConsumption === undefined) {
-    partProperties.computingConsumption = 1;
+    partProperties.computingConsumption = 0;
   }
   if (inferredPartType === "weapon" && partProperties.projectileClass) {
     partProperties.projectileShape ??= defaultProjectileShape(partProperties.projectileClass, baseComponent);

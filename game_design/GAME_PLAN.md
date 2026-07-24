@@ -46,7 +46,7 @@ Lose condition chain:
   - Contested
 - Includes a dedicated `Test Arena` top-level tab (parallel to `Battle`) for debug scenarios.
 - Test Arena overrides both battle bases to extremely high HP so base destruction does not end the test run.
-- Test Arena controls allow setting both bases' HP, enemy count, player count, battlefield simulation size (`W`/`H`, each up to `4096` world units), ground-zone height, display zoom percentage, selecting enemy and player auto-spawn templates from one shared two-column craft expansion, toggling `auto spawn on enemy side` and `auto spawn on player side` (both default ON), clearing all currently active arena units, and toggling controlled-unit invincibility (no HP loss, still collides and can be hit).
+- Test Arena controls allow setting both bases' HP, enemy count, player count, uncapped battlefield simulation size (`W`/`H`, subject only to the existing minimum dimensions), ground-zone height, display zoom percentage, selecting enemy and player auto-spawn templates from one shared two-column craft expansion, toggling `auto spawn on enemy side` and `auto spawn on player side` (both default ON), clearing all currently active arena units, and toggling controlled-unit invincibility (no HP loss, still collides and can be hit).
 - Test Arena defaults to four auto-spawned units per side with every available craft type selected for both sides. Its counts, craft selections, toggles, battlefield configuration, AI selections, and manual-spawn choices auto-save locally and restore when the game is opened again. Battlefield W/H and ground height follow the authored Global Settings defaults until a Test Arena field is edited; `Use Global Battlefield` clears that local override. Legacy locally saved `2000x1000` defaults migrate to the current global dimensions.
 - Test Arena Unit controls keep Player/Enemy count and auto-spawn controls side by side; opening the single `Craft types` expansion reveals both sides' checkboxes together for every craft.
 - Test Arena auto-spawn behavior: when enabled per side, the game auto-spawns the selected side template whenever alive units drop below the configured count target.
@@ -58,8 +58,10 @@ Lose condition chain:
 - The development-only Global Settings authoring panel exposes every game-core YAML setting through top-level category tabs (`Balance`, `AI`, `Display`, `Editor`, and `Sound`), file-level sections, and recursively nested subcategories. The modal occupies a stable 90% of the viewport height and scrolls its settings content internally instead of resizing as groups expand. File sections and nested subcategories are collapsed by default so opening the panel shows only its navigational headers, except that a category containing exactly one file section expands that section automatically. Type-aware controls edit numbers, booleans, text, and arrays; hovering a field or focusing its help marker shows the explanation authored in that YAML document's `_descriptions` map. Sound sample paths and fire-sample pools each include a preview button that uses the current unsaved form values, with pool previews choosing a member at the authored weapon-class playback rate. Saving validates and transactionally rewrites the fixed YAML set under `game-core/src/config/` while retaining the descriptions; movement speed and master battle volume apply immediately through explicit live hooks, while other settings take effect after restarting the affected VIP/Arena runtime. The settings endpoint invalidates Vite's generated-config module cache so a browser refresh loads the newly saved values. These values are not browser-local preferences.
 - Test Arena AI presets are local JS/TS-only and run without external Python bridge/service dependencies.
 - Browser battles are presented by Phaser while the shared simulation remains renderer-independent for headless training and verification.
+- Phaser's battle canvas is sized to the visible viewport rather than the logical battlefield. Its independently authored display resolution scale controls pixel density, camera pan/zoom maps viewport coordinates into the uncapped world, and off-screen combat entities remain simulated without being submitted to the immediate-mode draw pass.
 - Test Arena parameter inputs apply on `Enter` or input blur (no separate apply button).
 - Test Arena zoom percentage is live-synced when mouse-wheel zoom changes the battlefield view.
+- Right-dragging the battlefield suspends selected-unit camera follow so manual horizontal or vertical panning remains where released; selecting a unit again restores follow behavior.
 - Test Arena shows live upper-left loss totals for each side: destroyed craft count and the authored gas value wasted by those destroyed craft. Clearing units or withdrawing them does not count as destruction.
 
 ## 3.2 Base Layer (Top-Down)
@@ -182,7 +184,8 @@ Part-level properties:
 - `recover`: structure self-recovery per second.
 - `color`: structure render/debug color.
 - `transparency`: per-block render alpha from `0` (invisible) to `1` (opaque); it does not change collision or damage behavior.
-- `computing`: maximum occupied non-control functional blocks supported by the craft's single Control Unit.
+- `computing`: maximum total computing use supported by the craft's single Control Unit.
+- `computing consumption`: computing capacity consumed once per placed non-control functional part, independent of its footprint size; missing values default to `0`.
 - `power`: engine thrust power source.
 - `max speed`: engine speed cap contribution.
 - `power ground`: engine can provide ground propulsion.
@@ -309,7 +312,7 @@ Cell-level properties:
 - `max capacity`: `2`
 - `min fire interval`: `0.2` when `max capacity` is not `1`
 - `default direction`: `right`
-- `computing consumption`: `1`
+- `computing consumption`: `0`
 
 `loader` defaults:
 
@@ -339,6 +342,14 @@ File operations:
   - Copy creates a new draft with a new id.
   - Save writes a new JSON file for that new id.
 - Saving geometry persists every currently painted Part Editor block; the `boxes` model and compatibility `cells` mirror are synchronized before the file is written.
+- Browser part authoring is default-only: load, new, copy, save, delete, and bulk comparison updates operate on `vip/parts/default`.
+
+Weapon comparison:
+
+- Weapon parts show `Show Info`, opening a large two-tab matrix of default weapons (rows) against default structures (columns); both axes are ordered by effective gas cost from lowest to highest.
+- `Hit Number` uses `ceil(HP / max(1, damage - armor))`; `Destroy Time` treats the first shot as immediate, spaces loaded rounds by `min fire interval`, and inserts `cooldown` between magazines.
+- Clicking a weapon row or structure column opens its parameters in the right inspector. Both show gas consumption and mass; weapons additionally show damage, penetration, cooldown, capacity, and fire interval, while structures show armor and HP. Edits are staged across selections and tabs; `Discard` changes nothing and `Save All` persists every changed default part together.
+- The comparison intentionally excludes penetration, explosions, recovery, accuracy, projectile travel, and loader-part behavior.
 
 Part-level property visibility (left pane):
 
@@ -543,12 +554,9 @@ Display layer provides optional visual mesh/sprite styling and silhouette polish
 ### 4.5 Part Storage
 
 - Developer default part definitions are file-based under `vip/parts/default/`.
-- Developer/user part overrides are stored under `vip/parts/user/`.
 - Canonical default part definitions are explicitly authored in `vip/parts/default/*.json` and are being migrated to the new type-centric schema.
 - Default templates reference these explicit part IDs in `partId` so runtime/editor behavior matches configured part semantics.
-- Runtime part catalog merge order:
-  1. file-backed defaults (`vip/parts/default`),
-  2. user part overrides (`vip/parts/user`).
+- Browser Part Designer authoring and runtime catalog loading use only file-backed defaults; new and copied parts are saved directly to `vip/parts/default`.
 - Part save filenames are derived from part name (illegal filename characters removed); runtime identity remains integer `id`.
 - Part Designer save/load/copy/rename behavior is defined in `4.0.5 Unified Part Editor Behavior (Authoritative)`.
 
@@ -591,7 +599,7 @@ Recommended starter values:
   - Left: player side/base
   - Right: enemy side/base/buildings
 - Battle simulation defaults to a logical battlefield size of `2000x1000` (shared by browser runtime and headless/arena runs).
-- Test Arena can override battlefield simulation size at runtime; this changes combat space dimensions, not just display scale.
+- Test Arena can override uncapped battlefield simulation size at runtime; this changes combat space dimensions, not display-canvas resolution or view scale.
 - Battle camera zoom defaults to a vertical fit that keeps the playable span from the air-lane top through the ground-lane bottom visible; Test Arena recalculates that fit from its runtime battlefield height.
 - Test Arena zoom only changes display scale (camera/view transform), not simulation dimensions, and can still be adjusted manually after the default vertical fit.
 - Ground units move freely on X and Y axes inside the ground combat zone.

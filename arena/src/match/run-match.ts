@@ -133,8 +133,8 @@ export async function runMatch(spec: MatchSpec): Promise<MatchResult> {
     throw new Error(`Unsupported AI spec in runner: expected familyId=composite for side=${side}`);
   };
 
-  const battlefieldWidth = clamp(Math.floor(spec.battlefield?.width ?? BATTLEFIELD_WIDTH), 640, 4096);
-  const battlefieldHeight = clamp(Math.floor(spec.battlefield?.height ?? BATTLEFIELD_HEIGHT), 360, 2160);
+  const battlefieldWidth = Math.max(640, Math.floor(spec.battlefield?.width ?? BATTLEFIELD_WIDTH));
+  const battlefieldHeight = Math.max(360, Math.floor(spec.battlefield?.height ?? BATTLEFIELD_HEIGHT));
   const canvas = createMockCanvas(battlefieldWidth, battlefieldHeight);
   const battle = new BattleSession(canvas, hooks, validTemplates, {
     aiControllers: {

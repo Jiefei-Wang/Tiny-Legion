@@ -1,9 +1,12 @@
 _descriptions:
+  canvas.resolutionScale: Pixel-density multiplier for the viewport-sized battle render canvas, independent of logical battlefield dimensions.
   view.minScale: Smallest camera zoom scale allowed in battle views.
   view.maxScale: Largest camera zoom scale allowed in battle views.
   view.verticalPadding: Vertical screen padding reserved when fitting the battlefield view.
   view.cameraMargin: World-space margin retained around the battlefield during camera fitting.
   view.designerBorderMargin: Screen-space border kept around Craft and Part Designer grid content.
+canvas:
+  resolutionScale: 1
 view:
   minScale: 0.1
   maxScale: 2.4

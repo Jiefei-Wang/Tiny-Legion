@@ -403,6 +403,9 @@ export const GAME_CONFIG = {
   },
   "display": {
     "battle": {
+      "canvas": {
+        "resolutionScale": 1
+      },
       "view": {
         "minScale": 0.1,
         "maxScale": 2.4,
@@ -965,6 +968,7 @@ export const GAME_CONFIG_DESCRIPTIONS = {
   },
   "display": {
     "battle": {
+      "canvas.resolutionScale": "Pixel-density multiplier for the viewport-sized battle render canvas, independent of logical battlefield dimensions.",
       "view.minScale": "Smallest camera zoom scale allowed in battle views.",
       "view.maxScale": "Largest camera zoom scale allowed in battle views.",
       "view.verticalPadding": "Vertical screen padding reserved when fitting the battlefield view.",
