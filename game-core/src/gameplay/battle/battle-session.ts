@@ -851,7 +851,7 @@ export class BattleSession {
       }
 
       for (let i = 0; i < unit.weaponFireTimers.length; i += 1) {
-        unit.weaponFireTimers[i] = Math.max(0, unit.weaponFireTimers[i] - dt);
+        unit.weaponFireTimers[i] = Math.max(0, (unit.weaponFireTimers[i] ?? 0) - dt);
       }
       this.updateWeaponLoaders(unit, dt, isControlled);
       this.activateEscapeIfUnavailable(unit);
@@ -1740,13 +1740,10 @@ export class BattleSession {
     if (attachmentStats.type !== "weapon") {
       return false;
     }
-    const requiresDedicatedLoader = this.requiresDedicatedLoaderForAttachment(attachment);
     // Cooldown/reload commands should be a true no-op: skip recoil if not ready.
-    if (requiresDedicatedLoader) {
-      const charges = unit.weaponReadyCharges[slot] ?? 0;
-      if (charges <= 0) {
-        return false;
-      }
+    const charges = unit.weaponReadyCharges[slot] ?? 0;
+    if (charges <= 0) {
+      return false;
     }
     const shot = applyRecoilForAttachment(unit, attachmentId);
     if (!shot) {
@@ -1855,12 +1852,8 @@ export class BattleSession {
       remainingPenetration: shot.penetration,
       r: capsule.halfLength + capsule.radius,
     });
-    if (requiresDedicatedLoader) {
-      unit.weaponReadyCharges[slot] = Math.max(0, (unit.weaponReadyCharges[slot] ?? 0) - 1);
-      unit.weaponFireTimers[slot] = this.getWeaponMinFireInterval(unit, slot);
-    } else {
-      unit.weaponFireTimers[slot] = shot.cooldown;
-    }
+    unit.weaponReadyCharges[slot] = Math.max(0, (unit.weaponReadyCharges[slot] ?? 0) - 1);
+    unit.weaponFireTimers[slot] = this.getWeaponMinFireInterval(unit, slot);
     this.queueAudioEvent({
       kind: "fire",
       x: muzzle.x,
@@ -2230,24 +2223,6 @@ export class BattleSession {
     if (weaponStats.type !== "weapon") {
       return 0;
     }
-    if (!this.requiresDedicatedLoaderForAttachment(weaponAttachment)) {
-      return 1;
-    }
-    let hasCompatibleLoader = false;
-    for (const loaderState of unit.loaderStates) {
-      const loaderAttachment = unit.attachments.find((entry) => entry.id === loaderState.attachmentId && entry.alive);
-      if (!loaderAttachment) {
-        continue;
-      }
-      const loader = this.getLoaderConfig(loaderAttachment);
-      if (!loader || !loader.supports.includes(this.getAttachmentProjectileClass(weaponAttachment))) {
-        continue;
-      }
-      hasCompatibleLoader = true;
-    }
-    if (!hasCompatibleLoader) {
-      return 0;
-    }
     const partDefinition = weaponAttachment.partId
       ? this.partCatalog.find((part) => part.id === weaponAttachment.partId)
       : undefined;
@@ -2269,9 +2244,32 @@ export class BattleSession {
 
   private updateWeaponLoaders(unit: UnitInstance, dt: number, prioritizeSelectedWeapon: boolean): void {
     for (let i = 0; i < unit.weaponLoadTimers.length; i += 1) {
-      unit.weaponLoadTimers[i] = 0;
       const cap = this.getWeaponChargeCapacity(unit, i);
       unit.weaponReadyCharges[i] = Math.min(cap, Math.max(0, unit.weaponReadyCharges[i] ?? 0));
+      const weaponAttachmentId = unit.weaponAttachmentIds[i];
+      const weaponAttachment = unit.attachments.find((entry) => entry.id === weaponAttachmentId && entry.alive);
+      if (!weaponAttachment || this.requiresDedicatedLoaderForAttachment(weaponAttachment)) {
+        unit.weaponLoadTimers[i] = 0;
+        continue;
+      }
+      if ((unit.weaponReadyCharges[i] ?? 0) >= cap) {
+        unit.weaponLoadTimers[i] = 0;
+        continue;
+      }
+      const weaponStats = COMPONENTS[weaponAttachment.component];
+      if (weaponStats.type !== "weapon") {
+        unit.weaponLoadTimers[i] = 0;
+        continue;
+      }
+      const reloadDuration = Math.max(0, weaponAttachment.stats?.cooldown ?? weaponStats.cooldown ?? 0);
+      const previousRemaining = unit.weaponLoadTimers[i] ?? 0;
+      const remaining = Math.max(0, (previousRemaining > 0 ? previousRemaining : reloadDuration) - dt);
+      if (remaining <= 0) {
+        unit.weaponReadyCharges[i] = Math.min(cap, (unit.weaponReadyCharges[i] ?? 0) + 1);
+        unit.weaponLoadTimers[i] = (unit.weaponReadyCharges[i] ?? 0) < cap ? reloadDuration : 0;
+      } else {
+        unit.weaponLoadTimers[i] = remaining;
+      }
     }
 
     const alreadyLoading = new Set<number>();
@@ -2299,6 +2297,7 @@ export class BattleSession {
           : null;
         if (
           projectileClass === null ||
+          (weaponAttachment !== undefined && !this.requiresDedicatedLoaderForAttachment(weaponAttachment)) ||
           !loaderConfig.supports.includes(projectileClass) ||
           (unit.weaponReadyCharges[targetSlot] ?? 0) >= this.getWeaponChargeCapacity(unit, targetSlot)
         ) {
@@ -2355,6 +2354,9 @@ export class BattleSession {
         }
         const weaponStats = COMPONENTS[weaponAttachment.component];
         if (weaponStats.type !== "weapon") {
+          return false;
+        }
+        if (!this.requiresDedicatedLoaderForAttachment(weaponAttachment)) {
           return false;
         }
         const projectileClass = this.getAttachmentProjectileClass(weaponAttachment);
@@ -2621,11 +2623,9 @@ export class BattleSession {
           } else {
             const stats = COMPONENTS[attachment.component];
             if (stats.type === "weapon") {
-              if (this.requiresDedicatedLoaderForAttachment(attachment)) {
-                const charges = unit.weaponReadyCharges[req.slot] ?? 0;
-                if (charges <= 0) {
-                  reason = "no-charges";
-                }
+              const charges = unit.weaponReadyCharges[req.slot] ?? 0;
+              if (charges <= 0) {
+                reason = "no-charges";
               }
             }
           }

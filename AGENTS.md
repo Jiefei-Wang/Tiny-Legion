@@ -111,6 +111,7 @@ If shell does not support inline env assignment, set env var in shell first, the
 - If both apply, update both docs; prefer small, surgical doc edits over letting them drift.
 - Add durable agent instructions to this `AGENTS.md` so new sessions can discover workflow quickly.
 - Put temporary images and other temporary outputs under `.tmp/` instead of the project root.
+- When taking screenshots or performing visual checks that save images, save every resulting image under `.tmp/`.
 
 ## Leaderboard Configuration Awareness
 

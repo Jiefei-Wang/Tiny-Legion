@@ -819,6 +819,20 @@ button.active {
 .part-comparison-header h2,
 .part-comparison-inspector h3 { margin: 3px 0 0; }
 
+.part-comparison-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.part-comparison-close {
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  font-size: 22px;
+  line-height: 1;
+}
+
 .part-comparison-tabs {
   display: flex;
   gap: 7px;

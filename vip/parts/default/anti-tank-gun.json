@@ -138,8 +138,8 @@
     "requireEmptyFunctionalOffsets": []
   },
   "stats": {
-    "gasCost": 18,
-    "mass": 24,
+    "gasCost": 100,
+    "mass": 40,
     "recoil": 34,
     "hitImpulse": 38,
     "damage": 220,
@@ -154,6 +154,8 @@
     "projectileSizeRatio": 1
   },
   "partProperties": {
+    "gasCost": 100,
+    "mass": 40,
     "computingConsumption": 0,
     "hasAngleLimit": false,
     "projectileClass": "bullet",

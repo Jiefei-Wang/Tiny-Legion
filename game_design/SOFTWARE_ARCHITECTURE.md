@@ -475,7 +475,7 @@ Editor UX implementation details:
 - Canvas editor uses a resizable placement grid up to `10x10`.
 - Shared design tokens and responsive layout rules in `style.css` provide consistent cards, metrics, action states, developer introductions, navigation, focus hierarchy, and compact breakpoints across Base, Map, Test Arena, Leaderboard, and both editors.
 - Right-side palette renders component cards (placeholder thumbnail + label + type) in a scrollable list with hover detail text.
-- Weapon Part Designer fields expose a `Show Info` modal with Hit Number and Destroy Time matrices (default weapons by default structures). Header selection drives a staged parameter inspector for shared gas/mass values, weapon damage/penetration/timing, and structure armor/HP; edits recalculate immediately, Discard is non-mutating, and Save All uses the transactional default-part batch endpoint.
+- Weapon Part Designer fields expose a `Show Info` modal with Hit Number and Destroy Time matrices (default weapons by default structures). Header selection drives a staged parameter inspector for shared gas/mass values, weapon damage/penetration/timing, and structure armor/HP; edits recalculate immediately, Discard is non-mutating, and Save All uses the transactional default-part batch endpoint before refreshing the still-open modal while preserving its tab and selection.
 - The comparison uses flat armor damage (`max(1, damage - armor)`) and a simplified burst schedule: the first shot is immediate, loaded shots use `minFireInterval`, and `cooldown` separates magazines. It intentionally ignores penetration, explosions, recovery, accuracy, travel time, and loader-part behavior.
 - Active layer (`structure`, `functional`, `display`) is switched from right-panel controls above the part palette.
 - Template editor functional palette uses part catalog entries (not only hardcoded component IDs).
@@ -552,8 +552,8 @@ Editor UX implementation details:
 - Loader subsystem is selected per weapon with `needLoader`, while loader compatibility is expressed with `bullet|missile|laser` projectile classes:
 - Loader components (`cannonLoader`, `missileLoader`) are functional modules with per-loader capabilities.
   - Each loader services one weapon at a time via per-unit loader state.
-  - Weapon slots now track ready charges and load timers.
-  - Loader settings (`supports`, `loadMultiplier`, `fastOperation`, `minLoadTime`, `minBurstInterval`) drive reload cadence; each weapon's `maxCapacity` property owns its ready-round limit, and multi-round weapons own the enforced interval between released shots through `minFireInterval`.
+  - Weapon slots initialize ready charges from their authored `maxCapacity` and track load timers independently.
+  - Multi-round weapons consume one ready charge per shot and enforce `minFireInterval` between released shots. Non-loader weapons restore one round per weapon-cooldown cycle; loader settings (`supports`, `loadMultiplier`, `fastOperation`, `minLoadTime`, `minBurstInterval`) drive the equivalent one-round incremental replenishment for `needLoader` weapons.
 - Part-level runtime override coverage now includes full functional tuning:
   - weapon overrides: recoil/hit impulse, projectile speed/gravity, explosive blast settings, tracking turn rate, control-impair factor/duration, and per-attachment fire-sound volume;
   - loader overrides: supports/load-multiplier/fast-operation/min-load-time/min-burst-interval;

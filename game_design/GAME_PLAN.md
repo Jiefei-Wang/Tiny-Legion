@@ -348,7 +348,8 @@ Weapon comparison:
 
 - Weapon parts show `Show Info`, opening a large two-tab matrix of default weapons (rows) against default structures (columns); both axes are ordered by effective gas cost from lowest to highest.
 - `Hit Number` uses `ceil(HP / max(1, damage - armor))`; `Destroy Time` treats the first shot as immediate, spaces loaded rounds by `min fire interval`, and inserts `cooldown` between magazines.
-- Clicking a weapon row or structure column opens its parameters in the right inspector. Both show gas consumption and mass; weapons additionally show damage, penetration, cooldown, capacity, and fire interval, while structures show armor and HP. Edits are staged across selections and tabs; `Discard` changes nothing and `Save All` persists every changed default part together.
+- Clicking a weapon row or structure column opens its parameters in the right inspector. Both show gas consumption and mass; weapons additionally show damage, penetration, cooldown, capacity, and fire interval, while structures show armor and HP. Edits are staged across selections and tabs; `Discard` changes nothing and `Save All` persists every changed default part together, refreshes the modal from disk, and leaves it open on the same tab and selection.
+- The upper-right close button and clicks on the backdrop close the comparison and discard any unsaved staged edits.
 - The comparison intentionally excludes penetration, explosions, recovery, accuracy, projectile travel, and loader-part behavior.
 
 Part-level property visibility (left pane):
@@ -922,7 +923,7 @@ The current playable implementation already includes:
   - Loaders process one supported weapon at a time.
   - Player-controlled selected weapon is prioritized for loading.
   - Loader `loadMultiplier` + `fastOperation` modify load time, bounded by `minLoadTime`.
-  - A weapon's `max capacity` sets its ready-round limit; loaders only control compatibility and reload timing, with a minimum burst interval floor of `0.5s`.
+  - Every weapon starts with its authored `max capacity` loaded. Multi-round weapons release those rounds at `min fire interval`; each self-reload cooldown or compatible-loader operation restores exactly one round, repeating until the weapon reaches capacity.
   - Fire commands sent to a cooling/reloading weapon slot are ignored (no projectile and no recoil/knockback side effects).
 - Weapon availability includes future reload capability: a surviving loaded round remains usable after loader loss. Spending the last loaded round without a reload path starts the ground wreck countdown or, for aircraft, escape mode; destroying every weapon triggers the same platform-specific result immediately.
 - Part-level functional overrides now drive runtime behavior for all current functional families:

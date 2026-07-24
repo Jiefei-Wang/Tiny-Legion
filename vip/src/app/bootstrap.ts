@@ -3019,9 +3019,14 @@ export function bootstrap(options: BootstrapOptions = {}): void {
           || attachment?.component === "trackingMissile"
         );
       const charges = controlled.weaponReadyCharges[index] ?? 0;
+      const capacity = Math.max(
+        1,
+        Math.floor(part?.partProperties?.maxCapacity ?? (attachment ? COMPONENTS[attachment.component].maxLoadedAmmo : 1) ?? 1),
+      );
       const loadTimer = controlled.weaponLoadTimers[index] ?? 0;
-      const loaderText = loaderManaged ? ` | load ${loadTimer > 0.01 ? `${loadTimer.toFixed(2)}s` : "idle"} | chg ${charges}` : "";
-      return `<span class="${chipClass}">[${index + 1}] ${label} ${control} | ${auto} | ${cooldownText} (${cooldownPct.toFixed(0)}%)${loaderText}</span>`;
+      const ammoText = ` | ammo ${charges}/${capacity}`;
+      const loaderText = ` | load ${loadTimer > 0.01 ? `${loadTimer.toFixed(2)}s` : "idle"}${loaderManaged ? " (loader)" : ""}`;
+      return `<span class="${chipClass}">[${index + 1}] ${label} ${control} | ${auto} | ${cooldownText} (${cooldownPct.toFixed(0)}%)${ammoText}${loaderText}</span>`;
     }).join("");
 
     weaponHud.innerHTML = `
@@ -4816,7 +4821,10 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         <section class="part-comparison-modal">
           <header class="part-comparison-header">
             <div><span class="eyebrow">Weapon analysis</span><h2 id="partComparisonTitle">Weapon vs. Structure</h2></div>
-            <span id="partComparisonChangedCount" class="small">${partComparisonDirtyIds.size} changed${partComparisonInvalidKeys.size > 0 ? ` · ${partComparisonInvalidKeys.size} invalid` : ""}</span>
+            <div class="part-comparison-header-actions">
+              <span id="partComparisonChangedCount" class="small">${partComparisonDirtyIds.size} changed${partComparisonInvalidKeys.size > 0 ? ` · ${partComparisonInvalidKeys.size} invalid` : ""}</span>
+              <button id="btnClosePartComparison" class="part-comparison-close" type="button" aria-label="Close comparison">×</button>
+            </div>
           </header>
           <div class="part-comparison-tabs" role="tablist">
             <button type="button" data-comparison-tab="hits" class="${partComparisonTab === "hits" ? "active" : ""}">Hit Number</button>
@@ -6677,13 +6685,21 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       }
     });
 
-    getOptionalElement<HTMLButtonElement>("#btnDiscardPartComparison")?.addEventListener("click", () => {
+    const closePartComparison = (): void => {
       partComparisonOpen = false;
       partComparisonSelection = null;
       partComparisonDrafts.clear();
       partComparisonDirtyIds.clear();
       partComparisonInvalidKeys.clear();
       renderPanels();
+    };
+
+    getOptionalElement<HTMLButtonElement>("#btnDiscardPartComparison")?.addEventListener("click", closePartComparison);
+    getOptionalElement<HTMLButtonElement>("#btnClosePartComparison")?.addEventListener("click", closePartComparison);
+    getOptionalElement<HTMLDivElement>("#partComparisonOverlay")?.addEventListener("click", (event) => {
+      if (event.target === event.currentTarget) {
+        closePartComparison();
+      }
     });
 
     getOptionalElement<HTMLButtonElement>("#btnSavePartComparison")?.addEventListener("click", async () => {
@@ -6770,11 +6786,22 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       }
       await refreshPartsFromStore();
       await refreshTemplatesFromStore();
-      partComparisonOpen = false;
-      partComparisonSelection = null;
-      partComparisonDrafts.clear();
+      const savedSelection = partComparisonSelection;
+      const comparableParts = parts.filter((part) => {
+        const type = getResolvedPartType(part);
+        return type === "weapon" || type === "structure";
+      });
+      partComparisonDrafts = new Map(comparableParts.map((part) => [part.id, clonePartDefinition(part)]));
       partComparisonDirtyIds.clear();
       partComparisonInvalidKeys.clear();
+      if (savedSelection && partComparisonDrafts.has(savedSelection.id)) {
+        partComparisonSelection = savedSelection;
+      } else {
+        const fallback = comparableParts[0] ?? null;
+        partComparisonSelection = fallback
+          ? { kind: getResolvedPartType(fallback) === "structure" ? "structure" : "weapon", id: fallback.id }
+          : null;
+      }
       addLog(`Saved comparison settings for ${saved.length} part${saved.length === 1 ? "" : "s"}.`, "good");
       renderPanels();
     });

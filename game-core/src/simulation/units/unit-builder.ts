@@ -9,7 +9,7 @@ import {
 } from "../../parts/part-schema.ts";
 import { recalcMass } from "../physics/mass-cache.ts";
 import { getControlUnit, validateSingleControlUnit } from "./control-unit-rules.ts";
-import type { LoaderState, PartDefinition, ProjectileClass, Side, UnitInstance, UnitTemplate } from "../../types.ts";
+import type { LoaderState, PartDefinition, Side, UnitInstance, UnitTemplate } from "../../types.ts";
 
 function resolveCatalog(partCatalog?: ReadonlyArray<PartDefinition>): PartDefinition[] {
   const defaults = createDefaultPartDefinitions();
@@ -295,40 +295,6 @@ export function instantiateUnit(
       targetWeaponSlot: null,
       remaining: 0,
     }));
-  const normalizeLoaderSupports = (values: ReadonlyArray<string> | undefined): ProjectileClass[] => {
-    if (!values || values.length <= 0) {
-      return [];
-    }
-    const supports: ProjectileClass[] = [];
-    for (const value of values) {
-      if (
-        value === "bullet"
-        || value === "missile"
-        || value === "laser"
-      ) {
-        supports.push(value);
-      }
-    }
-    return supports;
-  };
-  const getLoaderSupports = (attachment: UnitInstance["attachments"][number]): ProjectileClass[] => {
-    if (attachment.stats?.loaderSupports && attachment.stats.loaderSupports.length > 0) {
-      return attachment.stats.loaderSupports;
-    }
-    if (attachment.partId) {
-      const part = partCatalog.find((entry) => entry.id === attachment.partId);
-      const legacy = normalizeLoaderSupports(part?.properties?.loaderServesTags);
-      if (legacy.length > 0) {
-        return legacy;
-      }
-    }
-    const base = COMPONENTS[attachment.component];
-    if (base.type !== "loader") {
-      return [];
-    }
-    return [...(base.loader?.supports ?? [])];
-  };
-
   const unit: UnitInstance = {
     id: nextUid(`${side}-${template.type}`),
     templateId: template.id,
@@ -372,26 +338,11 @@ export function instantiateUnit(
       const weaponPart = weaponAttachment.partId
         ? partCatalog.find((entry) => entry.id === weaponAttachment.partId)
         : undefined;
-      const projectileClass = weaponAttachment.stats?.projectileClass ?? weaponStats.projectileClass ?? "bullet";
-      const requiresLoader = weaponPart?.partProperties?.needLoader
-        ?? (
-          weaponAttachment.component === "heavyCannon"
-          || weaponAttachment.component === "explosiveShell"
-          || weaponAttachment.component === "trackingMissile"
-        );
-      if (!requiresLoader) {
-        return 1;
-      }
-      const hasCompatibleLoader = loaderStates.some((loaderState) => {
-        const loaderAttachment = attachments.find((entry) => entry.id === loaderState.attachmentId && entry.alive);
-        if (!loaderAttachment) {
-          return false;
-        }
-        const loaderStats = COMPONENTS[loaderAttachment.component];
-        const supports = getLoaderSupports(loaderAttachment);
-        return loaderStats.type === "loader" && supports.includes(projectileClass);
-      });
-      return hasCompatibleLoader ? 1 : 0;
+      return Math.max(1, Math.floor(
+        weaponPart?.partProperties?.maxCapacity
+          ?? weaponStats.maxLoadedAmmo
+          ?? 1,
+      ));
     }),
     weaponLoadTimers: weaponAttachmentIds.map(() => 0),
     loaderStates,

@@ -349,6 +349,129 @@ function runSmoke(): Failure[] {
   }
   const templates = loadRuntimeMergedTemplates(partCatalog);
   const defaultTemplateIds = new Set(readTemplateDir(`${process.cwd().replace(/\\/g, "/")}/templates/default`, partCatalog).map((template) => template.id));
+  const magazineWeaponSource = partCatalog.find((part) => part.name === "firearm");
+  const magazineTemplateSource = templates.find((template) => template.id === 5);
+  if (magazineWeaponSource && magazineTemplateSource) {
+    const magazineWeapon: PartDefinition = {
+      ...magazineWeaponSource,
+      id: 999_013,
+      name: "Headless Magazine Weapon",
+      stats: {
+        ...magazineWeaponSource.stats,
+        cooldown: 0.5,
+      },
+      partProperties: {
+        ...magazineWeaponSource.partProperties,
+        needLoader: false,
+        maxCapacity: 3,
+        minFireInterval: 0.05,
+      },
+    };
+    const magazineTemplate: UnitTemplate = {
+      ...magazineTemplateSource,
+      id: 999_013,
+      name: "Headless Magazine Craft",
+      attachments: magazineTemplateSource.attachments.map((attachment) => (
+        COMPONENTS[attachment.component].type === "weapon"
+          ? { ...attachment, partId: magazineWeapon.id }
+          : { ...attachment }
+      )),
+    };
+    const magazineCatalog = [...partCatalog, magazineWeapon];
+    const magazineUnit = instantiateUnit(
+      [magazineTemplate],
+      magazineTemplate.id,
+      "player",
+      200,
+      700,
+      { partCatalog: magazineCatalog },
+    );
+    if ((magazineUnit?.weaponReadyCharges[0] ?? 0) !== 3) {
+      failures.push({
+        templateId: magazineTemplate.id,
+        templateName: magazineTemplate.name,
+        check: "weapon-capacity",
+        detail: `expected 3 initially loaded rounds, got ${magazineUnit?.weaponReadyCharges[0] ?? 0}`,
+      });
+    }
+
+    const magazineLogs: string[] = [];
+    const magazineBattle = new BattleSession(
+      createMockCanvas(BATTLEFIELD_WIDTH, BATTLEFIELD_HEIGHT),
+      makeHooks(magazineLogs),
+      [magazineTemplate],
+      {
+        partCatalog: magazineCatalog,
+        disableAutoEnemySpawns: true,
+        disableEnemyMinimumPresence: true,
+        disableDefaultStarters: true,
+      },
+    );
+    magazineBattle.start({
+      id: "headless-magazine-test",
+      name: "Headless Magazine Test",
+      owner: "neutral",
+      garrison: false,
+      reward: 0,
+      defense: 1,
+    });
+    magazineBattle.deployUnit(magazineTemplate.id);
+    const deployedMagazineUnit = magazineBattle.getState().units.find((unit) => unit.templateId === magazineTemplate.id);
+    if (deployedMagazineUnit) {
+      magazineBattle.setControlByClick(deployedMagazineUnit.x, deployedMagazineUnit.y);
+      magazineBattle.handleLeftPointerDown(deployedMagazineUnit.x, deployedMagazineUnit.y);
+      for (let i = 0; i < 15; i += 1) {
+        magazineBattle.update(dt, idleKeys);
+      }
+      magazineBattle.handlePointerUp();
+      const burstShots = magazineLogs.filter((line) => line.includes(`${magazineTemplate.name} fired weapon #`)).length;
+      if (burstShots !== 3 || (deployedMagazineUnit.weaponReadyCharges[0] ?? -1) !== 0) {
+        failures.push({
+          templateId: magazineTemplate.id,
+          templateName: magazineTemplate.name,
+          check: "weapon-capacity",
+          detail: `expected a 3-shot magazine before cooldown; fired=${burstShots}, remaining=${deployedMagazineUnit.weaponReadyCharges[0] ?? -1}`,
+        });
+      }
+      if (deployedMagazineUnit.loaderStates.some((loader) => loader.targetWeaponSlot !== null)) {
+        failures.push({
+          templateId: magazineTemplate.id,
+          templateName: magazineTemplate.name,
+          check: "weapon-capacity",
+          detail: "a dedicated loader targeted a self-reloading weapon",
+        });
+      }
+      for (let i = 0; i < 30; i += 1) {
+        magazineBattle.update(dt, idleKeys);
+      }
+      if ((deployedMagazineUnit.weaponReadyCharges[0] ?? 0) !== 1) {
+        failures.push({
+          templateId: magazineTemplate.id,
+          templateName: magazineTemplate.name,
+          check: "weapon-capacity",
+          detail: `one cooldown cycle should reload exactly one round; got ${deployedMagazineUnit.weaponReadyCharges[0] ?? 0}`,
+        });
+      }
+      for (let i = 0; i < 60; i += 1) {
+        magazineBattle.update(dt, idleKeys);
+      }
+      if ((deployedMagazineUnit.weaponReadyCharges[0] ?? 0) !== 3) {
+        failures.push({
+          templateId: magazineTemplate.id,
+          templateName: magazineTemplate.name,
+          check: "weapon-capacity",
+          detail: `three cooldown cycles should restore the 3-round capacity; got ${deployedMagazineUnit.weaponReadyCharges[0] ?? 0}`,
+        });
+      }
+    } else {
+      failures.push({
+        templateId: magazineTemplate.id,
+        templateName: magazineTemplate.name,
+        check: "weapon-capacity",
+        detail: "failed to deploy magazine behavior fixture",
+      });
+    }
+  }
 
   const tankTemplate = templates.find((template) => template.id === 1);
   if (tankTemplate) {
@@ -758,12 +881,12 @@ function runSmoke(): Failure[] {
       const attachment = unit.attachments.find((entry) => entry.id === unit.weaponAttachmentIds[slot]);
       const weaponPart = partCatalog.find((part) => part.id === attachment?.partId);
       const capacity = weaponPart?.partProperties?.maxCapacity ?? (attachment ? COMPONENTS[attachment.component].maxLoadedAmmo : undefined);
-      if (capacity !== undefined && (unit.weaponReadyCharges[slot] ?? 0) > capacity) {
+      if (capacity !== undefined && (unit.weaponReadyCharges[slot] ?? 0) !== capacity) {
         failures.push({
           templateId: template.id,
           templateName: template.name,
           check: "weapon-capacity",
-          detail: `slot ${slot + 1} has ${unit.weaponReadyCharges[slot]} loaded rounds, above weapon maximum ${capacity}`,
+          detail: `slot ${slot + 1} starts with ${unit.weaponReadyCharges[slot]} loaded rounds instead of weapon capacity ${capacity}`,
         });
       }
     }
@@ -887,10 +1010,23 @@ function runSmoke(): Failure[] {
     }
   }
 
-  const loaderTemplate = templates.find((template) => template.id === 5);
+  const loaderTemplateSource = templates.find((template) => template.id === 5);
+  const loaderWeaponPart = partCatalog.find((part) => part.name === "cannons");
+  const loaderTemplate = loaderTemplateSource && loaderWeaponPart
+    ? {
+        ...loaderTemplateSource,
+        id: 999_014,
+        name: "Headless Loader Escape Craft",
+        attachments: loaderTemplateSource.attachments.map((attachment) => (
+          COMPONENTS[attachment.component].type === "weapon"
+            ? { ...attachment, component: loaderWeaponPart.baseComponent, partId: loaderWeaponPart.id }
+            : { ...attachment }
+        )),
+      } satisfies UnitTemplate
+    : undefined;
   const airTemplate = templates.find((template) => template.id === 4);
   if (loaderTemplate && airTemplate) {
-    const escapeBattle = new BattleSession(canvas, makeHooks([]), templates, {
+    const escapeBattle = new BattleSession(canvas, makeHooks([]), [...templates, loaderTemplate], {
       partCatalog,
       disableAutoEnemySpawns: true,
       disableEnemyMinimumPresence: true,

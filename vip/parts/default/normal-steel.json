@@ -45,13 +45,13 @@
     "requireEmptyFunctionalOffsets": []
   },
   "stats": {
-    "gasCost": 8,
+    "gasCost": 10,
     "mass": 50
   },
   "partProperties": {
-    "gasCost": 8,
+    "gasCost": 10,
     "mass": 50,
-    "hp": 100,
+    "hp": 60,
     "tag": "structure",
     "armor": 5,
     "recover": 10,
@@ -66,7 +66,7 @@
     "materialRecoverPerSecond": 10,
     "materialColor": "#66788d",
     "materialAlpha": 1,
-    "hp": 100,
+    "hp": 60,
     "isEngine": false,
     "isWeapon": false,
     "isLoader": false,

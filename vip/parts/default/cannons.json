@@ -93,7 +93,7 @@
   },
   "stats": {
     "gasCost": 12,
-    "mass": 18,
+    "mass": 40,
     "recoil": 14,
     "hitImpulse": 11,
     "damage": 50,
@@ -111,11 +111,13 @@
     "projectileSizeRatio": 1
   },
   "partProperties": {
+    "mass": 40,
     "computingConsumption": 0,
     "hasAngleLimit": false,
     "projectileClass": "bullet",
     "projectileShape": "bullet-round",
     "projectileSizeRatio": 1,
+    "damage": 50,
     "cooldown": 1.5,
     "fireSoundVolume": 2,
     "fireSoundPool": "explosive",
