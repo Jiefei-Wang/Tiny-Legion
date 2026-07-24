@@ -267,7 +267,7 @@ class BattleScene extends Phaser.Scene {
 
   private drawUnit(unit: UnitInstance, options: ReturnType<BattleSession["getRenderOptions"]>, selection: ReturnType<BattleSession["getSelection"]>, projectiles: BattleState["projectiles"]): void {
     const g = this.graphics;
-    const size = getStructureCellSize(unit.radius, unit.type);
+    const size = getStructureCellSize(unit.radius);
     const xs = unit.structure.map((cell) => cell.x);
     const ys = unit.structure.map((cell) => cell.y);
     const minX = Math.min(...xs), maxX = Math.max(...xs), minY = Math.min(...ys), maxY = Math.max(...ys);

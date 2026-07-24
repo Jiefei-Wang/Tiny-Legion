@@ -1,5 +1,4 @@
 import { GAME_CONFIG } from "../generated/game-config.generated.ts";
-import type { UnitType } from "../../types.ts";
 
 const config = GAME_CONFIG.balance.battlefield;
 
@@ -89,15 +88,6 @@ export const GROUND_WRECK_LIFETIME_SECONDS = config.wreck.groundLifetimeSeconds;
 export const GROUND_WRECK_MIN_INITIAL_HP_LOSS_RATIO = config.wreck.minInitialHpLossRatio;
 export const GROUND_WRECK_MAX_INITIAL_HP_LOSS_RATIO = config.wreck.maxInitialHpLossRatio;
 
-/** Global world-size multipliers for units and projectiles. */
-export const GROUND_UNIT_SIZE_RATIO = config.sizeRatios.groundUnit;
-export const AIRCRAFT_UNIT_SIZE_RATIO = config.sizeRatios.aircraftUnit;
-export const PROJECTILE_SIZE_RATIO = config.sizeRatios.projectile;
-
-export function getUnitSizeRatio(unitType: UnitType): number {
-  return unitType === "air" ? AIRCRAFT_UNIT_SIZE_RATIO : GROUND_UNIT_SIZE_RATIO;
-}
-
 /** Minimum and maximum world-space size of one rendered/collidable structure cell. */
 export const MIN_STRUCTURE_CELL_SIZE = config.structure.minCellSize;
 export const MAX_STRUCTURE_CELL_SIZE = config.structure.maxCellSize;
@@ -107,11 +97,8 @@ export const MAX_STRUCTURE_CELL_SIZE = config.structure.maxCellSize;
  * Rendering, projectile collision, targeting, and weapon geometry must use this
  * helper so the visible armor panels and their hitboxes stay aligned.
  */
-export function getStructureCellSize(unitRadius: number, unitType: UnitType): number {
-  const sizeRatio = getUnitSizeRatio(unitType);
-  const unscaledRadius = unitRadius / sizeRatio;
-  const baseCellSize = Math.max(MIN_STRUCTURE_CELL_SIZE, Math.min(MAX_STRUCTURE_CELL_SIZE, unscaledRadius * 0.82));
-  return baseCellSize * sizeRatio;
+export function getStructureCellSize(unitRadius: number): number {
+  return Math.max(MIN_STRUCTURE_CELL_SIZE, Math.min(MAX_STRUCTURE_CELL_SIZE, unitRadius * 0.82));
 }
 
 /**

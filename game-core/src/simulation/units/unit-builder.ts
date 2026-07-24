@@ -1,5 +1,4 @@
 import { COMPONENTS } from "../../config/balance/weapons.ts";
-import { getUnitSizeRatio } from "../../config/balance/battlefield.ts";
 import { nextUid } from "../../core/ids/uid.ts";
 import {
   createDefaultPartDefinitions,
@@ -352,7 +351,7 @@ export function instantiateUnit(
       const ys = structure.map((cell) => cell.y);
       const spanX = (Math.max(...xs) - Math.min(...xs) + 1);
       const spanY = (Math.max(...ys) - Math.min(...ys) + 1);
-      return (16 + Math.max(spanX, spanY) * 3.8) * getUnitSizeRatio(template.type);
+      return 16 + Math.max(spanX, spanY) * 3.8;
     })(),
     structure,
     attachments,

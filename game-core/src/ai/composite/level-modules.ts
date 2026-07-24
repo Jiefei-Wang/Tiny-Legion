@@ -41,7 +41,7 @@ function cellWorldPoint(unit: UnitInstance, cell: StructureCell): { x: number; y
   const maxX = Math.max(...unit.structure.map((candidate) => candidate.x));
   const minY = Math.min(...unit.structure.map((candidate) => candidate.y));
   const maxY = Math.max(...unit.structure.map((candidate) => candidate.y));
-  const cellSize = getStructureCellSize(unit.radius, unit.type);
+  const cellSize = getStructureCellSize(unit.radius);
   const localX = (cell.x - minX) * cellSize - (maxX - minX + 1) * cellSize / 2 + cellSize / 2;
   const localY = (cell.y - minY) * cellSize - (maxY - minY + 1) * cellSize / 2 + cellSize / 2;
   return { x: unit.x + localX * unit.facing, y: unit.y + localY };

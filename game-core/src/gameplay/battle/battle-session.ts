@@ -16,7 +16,6 @@ import {
   GROUND_WRECK_MIN_INITIAL_HP_LOSS_RATIO,
   GROUND_WRECK_MAX_INITIAL_HP_LOSS_RATIO,
   getStructureCellSize,
-  PROJECTILE_SIZE_RATIO,
   UNIT_SEPARATION_ENABLED,
   UNIT_OVERLAP_ALLOWANCE_RATIO,
   UNIT_SEPARATION_POSITION_FACTOR,
@@ -1771,9 +1770,7 @@ export class BattleSession {
     const projectileSpeed = shot.projectileSpeed;
     const gravity = shot.projectileGravity;
     const ttl = Math.max(2.0, effectiveRange / Math.max(120, projectileSpeed));
-    const nominalRadius = Math.max(2, Math.sqrt(shot.damage) * 0.35)
-      * shot.projectileSizeRatio
-      * PROJECTILE_SIZE_RATIO;
+    const nominalRadius = Math.max(2, Math.sqrt(shot.damage) * 0.35) * shot.projectileSizeRatio;
     const projectileAsset = PROJECTILE_ASSETS[shot.projectileShape];
     const visualHeight = nominalRadius * 2 * (shot.projectileClass === "laser" ? 4 : 1);
     const visualWidth = visualHeight * projectileAsset.aspect;
@@ -3108,7 +3105,7 @@ export class BattleSession {
     unit: UnitInstance,
     attachment: UnitInstance["attachments"][number],
   ): { x: number; y: number } {
-    const weaponCellSize = getStructureCellSize(unit.radius, unit.type);
+    const weaponCellSize = getStructureCellSize(unit.radius);
     const weaponOffset = attachment.shootingOffset
       ? this.getCoordOffsetWorld(
           unit,
@@ -3129,7 +3126,7 @@ export class BattleSession {
     angleRad: number,
   ): { x: number; y: number } {
     // Keep this geometry synchronized with structure rendering and collision.
-    const visualCellSize = getStructureCellSize(unit.radius, unit.type);
+    const visualCellSize = getStructureCellSize(unit.radius);
     const center = this.getCoordOffsetWorld(unit, attachment.x, attachment.y, visualCellSize);
     const barrelLength = (visualCellSize / 14) * 10;
     return {
@@ -3164,7 +3161,7 @@ export class BattleSession {
   public getStructureCellWorldCenter(unit: UnitInstance, cellId: number): { x: number; y: number } | null {
     const cell = unit.structure.find((entry) => entry.id === cellId);
     if (!cell) return null;
-    const offset = this.getCellOffsetWorld(unit, cell.id, getStructureCellSize(unit.radius, unit.type));
+    const offset = this.getCellOffsetWorld(unit, cell.id, getStructureCellSize(unit.radius));
     return { x: unit.x + offset.x, y: unit.y + offset.y };
   }
 
@@ -3410,7 +3407,7 @@ export class BattleSession {
     if (aliveCells.length === 0) {
       return;
     }
-    const cellSize = getStructureCellSize(unit.radius, unit.type);
+    const cellSize = getStructureCellSize(unit.radius);
     const pad = 1.5;
     const key = (x: number, y: number): string => `${x},${y}`;
     const aliveSet = new Set(aliveCells.map((cell) => key(cell.x, cell.y)));
@@ -3475,7 +3472,7 @@ export class BattleSession {
       return;
     }
 
-    const cellSize = getStructureCellSize(unit.radius, unit.type);
+    const cellSize = getStructureCellSize(unit.radius);
     for (const item of items) {
       const cell = unit.structure.find((entry) => entry.id === item.cell);
       if (!cell || cell.destroyed) {
@@ -3497,7 +3494,7 @@ export class BattleSession {
   }
 
   private drawStructureAndFunctionalLayer(unit: UnitInstance): void {
-    const cellSize = getStructureCellSize(unit.radius, unit.type);
+    const cellSize = getStructureCellSize(unit.radius);
 
     if (this.debugPartHpEnabled) {
       this.ctx.font = "9px Trebuchet MS";
@@ -3617,7 +3614,7 @@ export class BattleSession {
   }
 
   private getLiveCellRects(unit: UnitInstance): Array<{ id: number; x: number; y: number; w: number; h: number }> {
-    const cellSize = getStructureCellSize(unit.radius, unit.type);
+    const cellSize = getStructureCellSize(unit.radius);
     const rects: Array<{ id: number; x: number; y: number; w: number; h: number }> = [];
     for (const cell of unit.structure) {
       if (cell.destroyed) {
@@ -3655,7 +3652,7 @@ export class BattleSession {
       }
     }
 
-    const cellSize = getStructureCellSize(unit.radius, unit.type);
+    const cellSize = getStructureCellSize(unit.radius);
     const liveStructureByCoord = new Map(
       unit.structure
         .filter((cell) => !cell.destroyed)
@@ -3856,7 +3853,7 @@ export class BattleSession {
     beforeAliveAttachments: Set<number>,
     wasAlive: boolean,
   ): void {
-    const cellSize = getStructureCellSize(unit.radius, unit.type);
+    const cellSize = getStructureCellSize(unit.radius);
 
     for (const cell of unit.structure) {
       if (!cell.destroyed || beforeDestroyed.has(cell.id)) {

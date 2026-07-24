@@ -29,11 +29,6 @@ export const GAME_CONFIG = {
         "minInitialHpLossRatio": 0.01,
         "maxInitialHpLossRatio": 0.5
       },
-      "sizeRatios": {
-        "groundUnit": 0.5,
-        "aircraftUnit": 0.5,
-        "projectile": 1
-      },
       "structure": {
         "minCellSize": 18,
         "maxCellSize": 28
@@ -685,9 +680,6 @@ export const GAME_CONFIG_DESCRIPTIONS = {
       "wreck.groundLifetimeSeconds": "Seconds a mission-killed ground craft remains as a damageable wreck.",
       "wreck.minInitialHpLossRatio": "Minimum fraction of each surviving structure cell's HP removed when a ground wreck is created.",
       "wreck.maxInitialHpLossRatio": "Maximum fraction of each surviving structure cell's HP removed when a ground wreck is created.",
-      "sizeRatios.groundUnit": "Global scale applied to ground-unit visuals, structure hitboxes, and unit collision radius.",
-      "sizeRatios.aircraftUnit": "Global scale applied to aircraft visuals, structure hitboxes, and unit collision radius.",
-      "sizeRatios.projectile": "Global scale applied to projectile visuals and their asset-fitted hitboxes.",
       "structure.minCellSize": "Minimum world-space size of a structure cell.",
       "structure.maxCellSize": "Maximum world-space size of a structure cell.",
       "separation.enabled": "Enables overlap resolution between active units.",

@@ -103,7 +103,7 @@ export function validateGameConfig(config) {
   exactKeys(config.editor, ["editor"], "config.editor");
   exactKeys(config.sound, ["battle"], "config.sound");
   const battlefield = config.balance.battlefield;
-  validateScalarObject(battlefield, ["battlefield", "movement", "air", "combat", "wreck", "sizeRatios", "structure", "separation"], "balance/battlefield.yaml");
+  validateScalarObject(battlefield, ["battlefield", "movement", "air", "combat", "wreck", "structure", "separation"], "balance/battlefield.yaml");
   validateScalarObject(battlefield.battlefield, ["width", "height", "groundHeightRatio", "airMinZRatio", "airGroundGapRatio", "airTargetZToleranceRatio"], "balance/battlefield.yaml.battlefield");
   validateScalarObject(battlefield.movement, ["defaultMultiplier"], "balance/battlefield.yaml.movement");
   validateScalarObject(battlefield.air, ["holdGravity", "dropGravity", "dropSpeedCap", "powerToSpeedScale"], "balance/battlefield.yaml.air");
@@ -114,12 +114,6 @@ export function validateGameConfig(config) {
     && numberAt(wreck, "minInitialHpLossRatio", "balance/battlefield.yaml.wreck") <= numberAt(wreck, "maxInitialHpLossRatio", "balance/battlefield.yaml.wreck")
     && numberAt(wreck, "maxInitialHpLossRatio", "balance/battlefield.yaml.wreck") < 1)) {
     fail("balance/battlefield.yaml.wreck", "expected 0 < minInitialHpLossRatio <= maxInitialHpLossRatio < 1");
-  }
-  const sizeRatios = validateScalarObject(battlefield.sizeRatios, ["groundUnit", "aircraftUnit", "projectile"], "balance/battlefield.yaml.sizeRatios");
-  for (const key of ["groundUnit", "aircraftUnit", "projectile"]) {
-    if (!(numberAt(sizeRatios, key, "balance/battlefield.yaml.sizeRatios") > 0)) {
-      fail(`balance/battlefield.yaml.sizeRatios.${key}`, "expected a positive number");
-    }
   }
   validateScalarObject(battlefield.structure, ["minCellSize", "maxCellSize"], "balance/battlefield.yaml.structure");
   const separation = validateScalarObject(battlefield.separation, ["enabled", "overlapAllowanceRatio", "positionFactor", "velocityDamping", "gridSize", "spawnPlacementAttempts"], "balance/battlefield.yaml.separation");

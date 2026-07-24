@@ -70,7 +70,7 @@ function cellWorldPoint(enemy: UnitInstance, cell: StructureCell | null): { x: n
   const maxX = Math.max(...aliveOrDestroyed.map((candidate) => candidate.x));
   const minY = Math.min(...aliveOrDestroyed.map((candidate) => candidate.y));
   const maxY = Math.max(...aliveOrDestroyed.map((candidate) => candidate.y));
-  const cellSize = getStructureCellSize(enemy.radius, enemy.type);
+  const cellSize = getStructureCellSize(enemy.radius);
   const localX = (cell.x - minX) * cellSize - (maxX - minX + 1) * cellSize / 2 + cellSize / 2;
   const localY = (cell.y - minY) * cellSize - (maxY - minY + 1) * cellSize / 2 + cellSize / 2;
   return { x: enemy.x + localX * enemy.facing, y: enemy.y + localY };
