@@ -25,7 +25,6 @@ function serializeTemplateForStore(template: UnitTemplate): Record<string, unkno
       x: attachment.x,
       y: attachment.y,
       rotateQuarter: attachment.rotateQuarter,
-      rotate90: attachment.rotate90,
     })),
     display: template.display?.map((item) => ({ kind: item.kind, cell: item.cell, x: item.x, y: item.y })) ?? [],
   };

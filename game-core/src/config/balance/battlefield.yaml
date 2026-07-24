@@ -1,3 +1,29 @@
+_descriptions:
+  battlefield.width: Canonical battlefield width in simulation world units.
+  battlefield.height: Canonical battlefield height in simulation world units.
+  battlefield.groundHeightRatio: Fraction of battlefield height occupied by the ground combat zone.
+  battlefield.airMinZRatio: Minimum air-layer altitude as a fraction of battlefield height.
+  battlefield.airGroundGapRatio: Vertical gap between air and ground zones as a fraction of battlefield height.
+  battlefield.airTargetZToleranceRatio: Allowed air-target altitude difference as a fraction of battlefield height.
+  movement.defaultMultiplier: Default multiplier applied to commanded unit movement speed.
+  air.holdGravity: Gravity acceleration applied while an air unit has enough thrust to remain operational.
+  air.dropGravity: Gravity acceleration applied to an air unit that can no longer sustain flight.
+  air.dropSpeedCap: Maximum downward speed of a falling air unit.
+  air.powerToSpeedScale: Conversion factor from air-engine power per unit mass to speed and lift capacity; it does not change speed by direction.
+  combat.groundProjectileMaxDropBelowFireY: Downward distance below its firing point after which an upward-fired ground projectile is removed.
+  combat.salvageRefundFactor: Fraction of deployment gas refunded when a living player unit returns to base.
+  combat.penetrationArmorScaler: Armor-to-penetration-cost multiplier used before a projectile spends penetration on cell HP.
+  wreck.groundLifetimeSeconds: Seconds a mission-killed ground craft remains as a damageable wreck.
+  wreck.minInitialHpLossRatio: Minimum fraction of each surviving structure cell's HP removed when a ground wreck is created.
+  wreck.maxInitialHpLossRatio: Maximum fraction of each surviving structure cell's HP removed when a ground wreck is created.
+  structure.minCellSize: Minimum world-space size of a structure cell.
+  structure.maxCellSize: Maximum world-space size of a structure cell.
+  separation.enabled: Enables overlap resolution between active units.
+  separation.overlapAllowanceRatio: Fraction of unit overlap tolerated before separation correction starts.
+  separation.positionFactor: Fraction of detected overlap corrected through position movement each step.
+  separation.velocityDamping: Velocity retained while resolving an overlap.
+  separation.gridSize: Spatial-hash cell size used to find nearby units for separation.
+  separation.spawnPlacementAttempts: Maximum attempts to find a non-overlapping spawn position.
 battlefield:
   width: 2000
   height: 1000
@@ -7,18 +33,19 @@ battlefield:
   airTargetZToleranceRatio: 0.022
 movement:
   defaultMultiplier: 2
-  minMultiplier: 0.1
-  maxMultiplier: 10
 air:
   holdGravity: 110
   dropGravity: 210
   dropSpeedCap: 260
-  thrustAccelScale: 70
+  powerToSpeedScale: 70
 combat:
   groundProjectileMaxDropBelowFireY: 200
   salvageRefundFactor: 0.6
-  impulseDamageStressFactor: 2.2
   penetrationArmorScaler: 2
+wreck:
+  groundLifetimeSeconds: 10
+  minInitialHpLossRatio: 0.01
+  maxInitialHpLossRatio: 0.5
 structure:
   minCellSize: 18
   maxCellSize: 28

@@ -269,7 +269,6 @@ export function createSkillTierShootAi(tier: AiSkillTier): ShootAiModule {
             weapon.componentId,
             Math.cos(angleRad) * distance,
             Math.sin(angleRad) * distance,
-            weapon.shootAngleDeg,
             weapon.angleLimit,
           )) {
             blockedReason = "angle-locked";

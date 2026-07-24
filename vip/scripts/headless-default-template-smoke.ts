@@ -1,6 +1,13 @@
 import { existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { BattleSession } from "../src/gameplay/battle/battle-session.ts";
-import { BATTLEFIELD_HEIGHT, BATTLEFIELD_WIDTH, UNIT_OVERLAP_ALLOWANCE_RATIO } from "../src/config/balance/battlefield.ts";
+import {
+  BATTLEFIELD_HEIGHT,
+  BATTLEFIELD_WIDTH,
+  GROUND_WRECK_LIFETIME_SECONDS,
+  GROUND_WRECK_MAX_INITIAL_HP_LOSS_RATIO,
+  GROUND_WRECK_MIN_INITIAL_HP_LOSS_RATIO,
+  UNIT_OVERLAP_ALLOWANCE_RATIO,
+} from "../src/config/balance/battlefield.ts";
 import { COMPONENTS } from "../src/config/balance/weapons.ts";
 import { createInitialTemplates } from "../src/simulation/units/unit-builder.ts";
 import { instantiateUnit } from "../src/simulation/units/unit-builder.ts";
@@ -17,7 +24,7 @@ declare const process: { exit: (code?: number) => void; cwd: () => string };
 type Failure = {
   templateId: number;
   templateName: string;
-  check: "validation" | "movement" | "firing" | "overlap" | "functional-support" | "weapon-capacity" | "air-isotropic" | "escape-mode" | "control-loss-crash" | "structure-origin" | "penetration-scaling" | "wreck-damage";
+  check: "validation" | "movement" | "firing" | "overlap" | "functional-support" | "weapon-capacity" | "air-isotropic" | "escape-mode" | "control-loss-crash" | "structure-origin" | "penetration-scaling" | "wreck-damage" | "wreck-lifecycle";
   detail: string;
 };
 
@@ -116,7 +123,6 @@ function serializeTemplateForFile(template: UnitTemplate): Record<string, unknow
       x: attachment.x,
       y: attachment.y,
       rotateQuarter: attachment.rotateQuarter,
-      rotate90: attachment.rotate90,
     })),
     display: template.display?.map((item) => ({ kind: item.kind, cell: item.cell, x: item.x, y: item.y })) ?? [],
   };
@@ -385,6 +391,106 @@ function runSmoke(): Failure[] {
   };
   battle.start(node);
 
+  const groundWreckTemplate = testTemplates.find((template) => template.type === "ground") ?? null;
+  if (groundWreckTemplate) {
+    const wreckBattle = new BattleSession(canvas, makeHooks([]), templates, {
+      partCatalog,
+      disableAutoEnemySpawns: true,
+      disableEnemyMinimumPresence: true,
+      disableDefaultStarters: true,
+    });
+    wreckBattle.start(node);
+    wreckBattle.arenaDeploy("player", groundWreckTemplate.id, { chargeGas: false, ignoreCap: true });
+    const wreckUnit = wreckBattle.getState().units.find((unit) => unit.templateId === groundWreckTemplate.id && unit.side === "player");
+    const control = wreckUnit?.attachments.find((attachment) => COMPONENTS[attachment.component].type === "control");
+    if (!wreckUnit || !control) {
+      failures.push({ templateId: groundWreckTemplate.id, templateName: groundWreckTemplate.name, check: "wreck-lifecycle", detail: "failed to create ground wreck fixture" });
+    } else {
+      const startX = wreckUnit.x;
+      const startY = wreckUnit.y;
+      control.alive = false;
+      wreckBattle.update(dt, idleKeys);
+      const initialRatios = wreckUnit.structure
+        .filter((cell) => !cell.destroyed)
+        .map((cell) => (wreckUnit.groundWreckInitialCellHp[cell.id] ?? 0) / Math.max(1, cell.breakThreshold));
+      const hpRangeValid = initialRatios.length > 0 && initialRatios.every((ratio) =>
+        ratio >= 1 - GROUND_WRECK_MAX_INITIAL_HP_LOSS_RATIO - 1e-6
+        && ratio <= 1 - GROUND_WRECK_MIN_INITIAL_HP_LOSS_RATIO + 1e-6
+      );
+      if (wreckUnit.groundWreckTimerS === null || !hpRangeValid || wreckUnit.x !== startX || wreckUnit.y !== startY) {
+        failures.push({
+          templateId: groundWreckTemplate.id,
+          templateName: groundWreckTemplate.name,
+          check: "wreck-lifecycle",
+          detail: `wreck initialization invalid: timer=${wreckUnit.groundWreckTimerS}, hpRangeValid=${hpRangeValid}, position=${wreckUnit.x},${wreckUnit.y}`,
+        });
+      }
+      const halfFrames = Math.floor((GROUND_WRECK_LIFETIME_SECONDS * 0.5 - dt) / dt);
+      for (let frame = 0; frame < halfFrames; frame += 1) wreckBattle.update(dt, idleKeys);
+      const expectedLifetimeRatio = (wreckUnit.groundWreckTimerS ?? 0) / GROUND_WRECK_LIFETIME_SECONDS;
+      const linearDecayValid = wreckUnit.structure
+        .filter((cell) => !cell.destroyed)
+        .every((cell) => {
+          const initialHp = wreckUnit.groundWreckInitialCellHp[cell.id] ?? 0;
+          const remainingHp = Math.max(0, cell.breakThreshold - cell.strain);
+          return Math.abs(remainingHp - initialHp * expectedLifetimeRatio) <= 1e-4;
+        });
+      if (!linearDecayValid) {
+        failures.push({ templateId: groundWreckTemplate.id, templateName: groundWreckTemplate.name, check: "wreck-lifecycle", detail: "ground wreck cell HP did not follow the configured linear decay curve" });
+      }
+      const framesBeforeDetonation = Math.floor(((wreckUnit.groundWreckTimerS ?? 0) - dt * 2) / dt);
+      for (let frame = 0; frame < framesBeforeDetonation; frame += 1) wreckBattle.update(dt, idleKeys);
+      if (!wreckUnit.alive || !wreckBattle.getState().units.includes(wreckUnit)) {
+        failures.push({ templateId: groundWreckTemplate.id, templateName: groundWreckTemplate.name, check: "wreck-lifecycle", detail: "ground wreck disappeared before its configured lifetime elapsed" });
+      }
+      for (let frame = 0; frame < 4; frame += 1) wreckBattle.update(dt, idleKeys);
+      const wreckExplosionVariants = new Set(wreckBattle.getState().blockExplosions.map((effect) => effect.variant));
+      if (
+        wreckUnit.alive
+        || wreckBattle.getState().units.includes(wreckUnit)
+        || wreckBattle.getState().blockExplosions.length < initialRatios.length
+        || (initialRatios.length > 1 && wreckExplosionVariants.size < 2)
+      ) {
+        failures.push({
+          templateId: groundWreckTemplate.id,
+          templateName: groundWreckTemplate.name,
+          check: "wreck-lifecycle",
+          detail: `wreck did not finish with varied per-block explosions: alive=${wreckUnit.alive}, present=${wreckBattle.getState().units.includes(wreckUnit)}, explosions=${wreckBattle.getState().blockExplosions.length}, variants=${wreckExplosionVariants.size}`,
+        });
+      }
+    }
+
+    for (const missingCapability of ["engine", "weapon"] as const) {
+      const capabilityBattle = new BattleSession(canvas, makeHooks([]), templates, {
+        partCatalog,
+        disableAutoEnemySpawns: true,
+        disableEnemyMinimumPresence: true,
+        disableDefaultStarters: true,
+      });
+      capabilityBattle.start(node);
+      capabilityBattle.arenaDeploy("player", groundWreckTemplate.id, { chargeGas: false, ignoreCap: true });
+      const capabilityUnit = capabilityBattle.getState().units.find((unit) => unit.templateId === groundWreckTemplate.id && unit.side === "player");
+      if (!capabilityUnit) {
+        failures.push({ templateId: groundWreckTemplate.id, templateName: groundWreckTemplate.name, check: "wreck-lifecycle", detail: `failed to create missing-${missingCapability} wreck fixture` });
+        continue;
+      }
+      for (const attachment of capabilityUnit.attachments) {
+        if (COMPONENTS[attachment.component].type === missingCapability) {
+          attachment.alive = false;
+        }
+      }
+      capabilityBattle.update(dt, idleKeys);
+      if (capabilityUnit.groundWreckTimerS === null || canOperate(capabilityUnit)) {
+        failures.push({
+          templateId: groundWreckTemplate.id,
+          templateName: groundWreckTemplate.name,
+          check: "wreck-lifecycle",
+          detail: `ground craft missing its ${missingCapability} did not enter the non-operational wreck countdown`,
+        });
+      }
+    }
+  }
+
   const bastionTemplate = templates.find((template) => template.id === 1);
   const bastion = bastionTemplate
     ? instantiateUnit(templates, bastionTemplate.id, "player", 640, 500, { partCatalog })
@@ -430,33 +536,15 @@ function runSmoke(): Failure[] {
       const weaponAttachment = bastion.attachments.find((attachment) => attachment.id === weaponAttachmentId);
       if (weaponAttachment) weaponAttachment.alive = false;
     }
-    const facingBeforeEscape = bastion.facing;
+    const facingBeforeWreck = bastion.facing;
     battle.getState().units.push(bastion);
     battle.update(dt, idleKeys);
-    if (!bastion.escapeActive || bastion.facing !== facingBeforeEscape) {
+    if (bastion.groundWreckTimerS === null || bastion.escapeActive || bastion.facing !== facingBeforeWreck) {
       failures.push({
         templateId: bastionTemplate.id,
         templateName: bastionTemplate.name,
         check: "structure-origin",
-        detail: "damage-triggered escape changed facing and mirrored the damaged structure grid",
-      });
-    }
-    for (let frame = 1; frame < 59; frame += 1) battle.update(dt, idleKeys);
-    if (bastion.facing !== facingBeforeEscape) {
-      failures.push({
-        templateId: bastionTemplate.id,
-        templateName: bastionTemplate.name,
-        check: "structure-origin",
-        detail: "escaping craft flipped before the one-second facing delay elapsed",
-      });
-    }
-    battle.update(dt, idleKeys);
-    if (bastion.facing !== -1) {
-      failures.push({
-        templateId: bastionTemplate.id,
-        templateName: bastionTemplate.name,
-        check: "structure-origin",
-        detail: "escaping craft did not turn toward its base after the one-second facing delay",
+        detail: "weapon-loss wreck transition changed facing, started escape, or failed to begin its destruction countdown",
       });
     }
   }

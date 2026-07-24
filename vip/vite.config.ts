@@ -3,7 +3,7 @@ import { availableParallelism, cpus } from "node:os";
 import { resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 import { defineConfig } from "vite";
-import { parseDocument } from "yaml";
+import { parseDocument, stringify } from "yaml";
 import { parseTemplate } from "../game-core/src/templates/template-schema.ts";
 import {
   mergePartCatalogs,
@@ -17,9 +17,11 @@ import { MAX_CERTIFIED_AI_LEVEL } from "../game-core/src/ai/composite/level-modu
 import type { MatchAiSpec, MatchResult, MatchSpec } from "../arena/src/match/match-types.ts";
 import {
   audioDir as gameCoreAudioDir,
+  CONFIG_FILES,
   configDir as gameCoreConfigDir,
   generateGameConfig,
   generatedConfigPath,
+  validateGameConfig,
 } from "../game-core/scripts/generate-config.mjs";
 
 function gameCoreAudioPlugin() {
@@ -89,8 +91,6 @@ function gameCoreSettingsPlugin() {
     const { config } = generateGameConfig();
     return {
       movementSpeedMultiplier: config.balance.battlefield.movement.defaultMultiplier,
-      minMovementSpeedMultiplier: config.balance.battlefield.movement.minMultiplier,
-      maxMovementSpeedMultiplier: config.balance.battlefield.movement.maxMultiplier,
       battleSoundVolume: config.sound.battle.volume.default,
       minBattleSoundVolume: config.sound.battle.volume.min,
       maxBattleSoundVolume: config.sound.battle.volume.max,
@@ -101,9 +101,77 @@ function gameCoreSettingsPlugin() {
     res.setHeader("content-type", "application/json");
     res.end(JSON.stringify(payload));
   };
+  const configEntries = Object.entries(CONFIG_FILES).flatMap(([category, files]) => Object.entries(files).map(
+    ([subcategory, relativePath]) => ({ category, subcategory, relativePath }),
+  ));
   return {
     name: "game-core-settings",
     configureServer(server: import("vite").ViteDevServer) {
+      server.middlewares.use("/__config/settings", (req, res) => {
+        if (req.method === "GET") {
+          try {
+            const result = generateGameConfig();
+            json(res, 200, { ok: true, config: result.config, descriptions: result.descriptions });
+          } catch (error) {
+            json(res, 500, { ok: false, reason: "config_read_failed", error: error instanceof Error ? error.message : String(error) });
+          }
+          return;
+        }
+        if (req.method !== "POST") {
+          json(res, 405, { ok: false, reason: "method_not_allowed" });
+          return;
+        }
+        let body = "";
+        req.on("data", (chunk) => {
+          body += String(chunk);
+          if (body.length > 1_048_576) req.destroy();
+        });
+        req.on("end", () => {
+          let payload: { config?: unknown };
+          try {
+            payload = JSON.parse(body || "{}") as typeof payload;
+          } catch {
+            json(res, 400, { ok: false, reason: "bad_json" });
+            return;
+          }
+          if (Object.keys(payload).length !== 1 || !("config" in payload)) {
+            json(res, 400, { ok: false, reason: "unknown_or_missing_keys" });
+            return;
+          }
+          try {
+            validateGameConfig(payload.config);
+          } catch (error) {
+            json(res, 400, { ok: false, reason: "invalid_config", error: error instanceof Error ? error.message : String(error) });
+            return;
+          }
+
+          const config = payload.config as Record<string, Record<string, unknown>>;
+          const backups = new Map<string, string>();
+          const oldGenerated = existsSync(generatedConfigPath) ? readFileSync(generatedConfigPath, "utf8") : null;
+          try {
+            const current = generateGameConfig();
+            for (const entry of configEntries) {
+              const filePath = resolve(gameCoreConfigDir, entry.relativePath);
+              backups.set(filePath, readFileSync(filePath, "utf8"));
+              const descriptionPatterns = current.descriptionPatterns[entry.category]?.[entry.subcategory];
+              writeFileSync(filePath, stringify({
+                _descriptions: descriptionPatterns,
+                ...(config[entry.category]?.[entry.subcategory] as Record<string, unknown>),
+              }, { lineWidth: 0 }), "utf8");
+            }
+            const result = generateGameConfig();
+            json(res, 200, { ok: true, config: result.config, descriptions: result.descriptions });
+          } catch (error) {
+            for (const [filePath, raw] of backups) writeFileSync(filePath, raw, "utf8");
+            if (oldGenerated === null) {
+              if (existsSync(generatedConfigPath)) unlinkSync(generatedConfigPath);
+            } else {
+              writeFileSync(generatedConfigPath, oldGenerated, "utf8");
+            }
+            json(res, 500, { ok: false, reason: "config_write_failed", error: error instanceof Error ? error.message : String(error) });
+          }
+        });
+      });
       server.middlewares.use("/__config/global-settings", (req, res) => {
         if (req.method === "GET") {
           try {
@@ -141,7 +209,6 @@ function gameCoreSettingsPlugin() {
           const movement = payload.movementSpeedMultiplier;
           const sound = payload.battleSoundVolume;
           if (typeof movement !== "number" || !Number.isFinite(movement)
-            || movement < current.minMovementSpeedMultiplier || movement > current.maxMovementSpeedMultiplier
             || typeof sound !== "number" || !Number.isFinite(sound)
             || sound < current.minBattleSoundVolume || sound > current.maxBattleSoundVolume) {
             json(res, 400, { ok: false, reason: "out_of_range", settings: current });
@@ -526,7 +593,6 @@ function templateStorePlugin() {
       x: attachment.x,
       y: attachment.y,
       rotateQuarter: attachment.rotateQuarter,
-      rotate90: attachment.rotate90,
     })),
     display: template.display?.map((item) => ({ kind: item.kind, cell: item.cell, x: item.x, y: item.y })) ?? [],
   });

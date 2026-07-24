@@ -99,7 +99,6 @@
     "damage": 50,
     "range": 360,
     "cooldown": 1.5,
-    "shootAngleDeg": 60,
     "projectileSpeed": 700,
     "projectileGravity": 20,
     "penetration": 0,

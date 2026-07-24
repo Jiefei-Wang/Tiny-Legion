@@ -1,3 +1,27 @@
+_descriptions:
+  components.*.mass: Base mass contributed by this weapon component.
+  components.*.hpMul: Legacy component durability multiplier retained by component stats and authoring compatibility.
+  components.*.gasCost: Gas cost contributed by this weapon to its craft.
+  components.*.type: Runtime component family; weapon entries must use weapon.
+  components.*.directional: Whether rotating the placed part also rotates its functional firing direction; this is separate from its allowed firing arc.
+  components.*.weaponClass: Weapon behavior class used by firing, AI, projectile, and audio systems.
+  components.*.maxLoadedAmmo: Maximum number of ready rounds the weapon can hold.
+  components.*.recoil: Impulse applied to the firing craft.
+  components.*.hitImpulse: Impulse applied to a target struck by this weapon.
+  components.*.damage: Direct damage delivered by one projectile or beam hit before armor.
+  components.*.range: Authored targeting and firing range before global range scaling.
+  components.*.cooldown: Minimum seconds between weapon firing attempts.
+  components.*.hasAngleLimit: Whether the base weapon definition limits aiming around its facing.
+  components.*.cwAngle: Maximum clockwise aiming angle in degrees when the base weapon angle limit is enabled.
+  components.*.ccwAngle: Maximum counter-clockwise aiming angle in degrees when the base weapon angle limit is enabled.
+  components.*.projectileSpeed: Initial speed of projectiles fired by this weapon.
+  components.*.projectileGravity: Downward acceleration applied to this weapon's projectile.
+  components.*.penetration: Initial penetration budget available to pass through hit parts.
+  components.*.spreadDeg: Maximum random angular spread applied to a shot.
+  components.*.explosive.blastRadius: World-space radius affected when this projectile explodes.
+  components.*.explosive.blastDamage: Maximum splash damage at the center of the explosion.
+  components.*.explosive.falloffPower: Curve exponent controlling how splash damage decreases with distance.
+  components.*.tracking.turnRateDegPerSec: Maximum homing rotation rate of the tracking projectile.
 components:
   rapidGun:
     mass: 6
@@ -12,7 +36,7 @@ components:
     damage: 5
     range: 420
     cooldown: 0.5
-    shootAngleDeg: 360
+    hasAngleLimit: false
     projectileSpeed: 650
     projectileGravity: 20
     penetration: 0
@@ -30,7 +54,9 @@ components:
     damage: 220
     range: 680
     cooldown: 4
-    shootAngleDeg: 70
+    hasAngleLimit: true
+    cwAngle: 35
+    ccwAngle: 35
     projectileSpeed: 680
     projectileGravity: 65
     penetration: 250
@@ -48,7 +74,9 @@ components:
     damage: 50
     range: 360
     cooldown: 2
-    shootAngleDeg: 60
+    hasAngleLimit: true
+    cwAngle: 30
+    ccwAngle: 30
     projectileSpeed: 240
     projectileGravity: 95
     penetration: 0
@@ -69,7 +97,9 @@ components:
     damage: 48
     range: 470
     cooldown: 2.2
-    shootAngleDeg: 95
+    hasAngleLimit: true
+    cwAngle: 47.5
+    ccwAngle: 47.5
     projectileSpeed: 230
     projectileGravity: 95
     penetration: 0
@@ -88,7 +118,9 @@ components:
     damage: 5
     range: 340
     cooldown: 0.1
-    shootAngleDeg: 105
+    hasAngleLimit: true
+    cwAngle: 52.5
+    ccwAngle: 52.5
     projectileSpeed: 20000
     projectileGravity: 0
     penetration: 0

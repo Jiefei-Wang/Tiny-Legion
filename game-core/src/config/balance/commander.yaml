@@ -1,3 +1,6 @@
+_descriptions:
+  armyCap.base: Number of units a commander can control without additional command skill.
+  armyCap.skillPerAdditionalUnit: Command skill required for each unit above the base army cap.
 armyCap:
   base: 3
   skillPerAdditionalUnit: 2

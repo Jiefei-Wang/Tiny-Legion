@@ -342,7 +342,6 @@ export function createBaselineShootAi(): ShootAiModule {
           weaponInput.componentId,
           aim.x - weaponInput.firepointX,
           aim.y - weaponInput.firepointY,
-          weaponInput.shootAngleDeg,
           weaponInput.angleLimit,
         );
         if (!angleAllowed) {
@@ -469,7 +468,6 @@ export function createHistoryWeightedShootAi(recencyPowerRaw = 1): ShootAiModule
           weaponInput.componentId,
           aim.x - weaponInput.firepointX,
           aim.y - weaponInput.firepointY,
-          weaponInput.shootAngleDeg,
           weaponInput.angleLimit,
         );
         if (!angleAllowed) {
@@ -592,7 +590,6 @@ export function createAutoregShootAi(alphaRaw: number): ShootAiModule {
           weaponInput.componentId,
           aim.x - weaponInput.firepointX,
           aim.y - weaponInput.firepointY,
-          weaponInput.shootAngleDeg,
           weaponInput.angleLimit,
         );
         if (!angleAllowed) {
@@ -711,7 +708,6 @@ export function createWeightedLagShootAi(alphaRaw: ReadonlyArray<number>): Shoot
           weaponInput.componentId,
           aim.x - weaponInput.firepointX,
           aim.y - weaponInput.firepointY,
-          weaponInput.shootAngleDeg,
           weaponInput.angleLimit,
         );
         if (!angleAllowed) {

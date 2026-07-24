@@ -1,3 +1,102 @@
+_descriptions:
+  volume.default: Default global multiplier applied to battle sound effects.
+  volume.min: Lowest global battle-sound multiplier accepted by validation and developer controls.
+  volume.max: Highest global battle-sound multiplier accepted by validation and developer controls.
+  samples.*: Audio path relative to game-core/assets/audio for this recorded sample key.
+  firePools.*: Recorded sample keys randomly selected for this weapon class.
+  firePlaybackRates.*: Base playback-rate multiplier for recorded fire samples of this weapon class.
+  spatial.maxPan: Maximum absolute stereo-pan value for spatial weapon audio.
+  spatial.attenuationStart: Listener-distance ratio where weapon volume attenuation begins.
+  spatial.attenuationFactor: Strength of weapon volume reduction beyond the attenuation start.
+  spatial.muffleStart: Listener-distance ratio where the weapon low-pass effect begins.
+  spatial.muffleSpan: Distance-ratio span across which weapon audio reaches maximum muffling.
+  spatial.lowpassNearHz: Low-pass cutoff frequency for nearby weapon sounds.
+  spatial.lowpassFarHz: Low-pass cutoff frequency for the most distant weapon sounds.
+  spatial.lowpassQ: Resonance value of the spatial low-pass filter.
+  synth.envelopeFloor: Small positive gain used as the silent endpoint of synthesized envelopes.
+  synth.samplePlayback.minRate: Lowest playback rate allowed after sample profile and random variation.
+  synth.samplePlayback.maxRate: Highest playback rate allowed after sample profile and random variation.
+  synth.samplePlayback.jitterBase: Lowest random playback-rate multiplier applied to a recorded sample.
+  synth.samplePlayback.jitterRange: Width of the random playback-rate variation applied to a recorded sample.
+  synth.noiseBuffer.durationSeconds: Duration of the reusable synthesized noise buffer.
+  synth.noiseBuffer.priorMix: Feedback contribution from the preceding noise sample.
+  synth.noiseBuffer.whiteMix: Fresh random-noise contribution for each buffer sample.
+  synth.fire.partMaxVolume: Maximum per-part fire-sound multiplier accepted by the renderer.
+  synth.fire.strengthDamageScale: Damage value used to normalize weapon-fire sound strength.
+  synth.fire.sampleBaseVolume: Base gain applied to recorded weapon-fire samples.
+  synth.fire.sampleStrengthVolume: Additional recorded-sample gain supplied at maximum fire strength.
+  synth.fire.fallbackBaseVolume: Base gain of synthesized weapon-fire fallback audio.
+  synth.fire.fallbackStrengthVolume: Additional synthesized fallback gain supplied at maximum fire strength.
+  synth.fire.projectileFrequencyMax: Maximum projectile speed contribution to synthesized fire pitch.
+  synth.fire.projectileFrequencyScale: Scale converting projectile speed into synthesized fire pitch.
+  synth.fire.endingFrequencyMin: Minimum ending frequency of the synthesized weapon-fire tone.
+  synth.fire.endingFrequencyRatio: Fraction of starting pitch used as the synthesized fire ending pitch.
+  synth.fire.envelopeStart: Initial gain multiplier of the synthesized weapon-fire envelope.
+  synth.fire.rapidNoiseFilterHz: Noise-filter cutoff frequency used for rapid-fire fallback audio.
+  synth.fire.otherNoiseFilterHz: Noise-filter cutoff frequency used for other weapon fallback audio.
+  synth.fire.profiles.*.frequency: Base oscillator frequency for this weapon class's synthesized fire profile.
+  synth.fire.profiles.*.duration: Duration in seconds of this weapon class's synthesized fire profile.
+  synth.fire.profiles.*.wave: Oscillator waveform used by this weapon class's synthesized fire profile.
+  synth.fire.profiles.*.noise: Noise amount mixed into this weapon class's synthesized fire profile.
+  synth.cannonTail.baseDuration: Base duration of the heavy-cannon low-frequency recoil tail.
+  synth.cannonTail.strengthDuration: Additional cannon-tail duration supplied at maximum fire strength.
+  synth.cannonTail.baseVolume: Base gain of the heavy-cannon recoil tail.
+  synth.cannonTail.strengthVolume: Additional cannon-tail gain supplied at maximum fire strength.
+  synth.cannonTail.startFrequency: Starting oscillator frequency of the heavy-cannon recoil tail.
+  synth.cannonTail.endFrequency: Ending oscillator frequency of the heavy-cannon recoil tail.
+  synth.cannonTail.envelopeStart: Initial gain multiplier of the cannon-tail envelope.
+  synth.impact.severityDamageScale: Delivered damage used to normalize impact severity.
+  synth.impact.heavySamples: Recorded sample keys available for heavy projectile impacts.
+  synth.impact.lightSamples: Recorded sample keys available for light projectile impacts.
+  synth.impact.heavyBaseVolume: Base recorded-sample gain for heavy impacts.
+  synth.impact.heavySeverityVolume: Additional heavy-impact sample gain supplied at maximum severity.
+  synth.impact.lightBaseVolume: Base recorded-sample gain for light impacts.
+  synth.impact.lightSeverityVolume: Additional light-impact sample gain supplied at maximum severity.
+  synth.impact.baseDuration: Base duration of synthesized impact fallback audio.
+  synth.impact.severityDuration: Additional synthesized impact duration supplied at maximum severity.
+  synth.impact.baseVolume: Base gain of synthesized impact fallback audio.
+  synth.impact.severityVolume: Additional synthesized impact gain supplied at maximum severity.
+  synth.impact.armorFrequencyScale: Scale converting struck armor into synthesized impact pitch.
+  synth.impact.endingFrequencyMin: Minimum ending frequency of the synthesized impact tone.
+  synth.impact.endingFrequencyRatio: Fraction of starting pitch used as the synthesized impact ending pitch.
+  synth.impact.envelopeStart: Initial gain multiplier of the synthesized impact envelope.
+  synth.impact.profiles.*.frequency: Base oscillator frequency for this projectile class's impact profile.
+  synth.impact.profiles.*.wave: Oscillator waveform used by this projectile class's impact profile.
+  synth.impact.profiles.*.noise: Noise amount mixed into this projectile class's impact profile.
+  synth.explosion.minimumSeverity: Minimum normalized severity used for an explosion sound.
+  synth.explosion.intensityScale: Explosion intensity used to normalize sound severity.
+  synth.explosion.baseDuration: Base duration of synthesized explosion audio.
+  synth.explosion.severityDuration: Additional explosion duration supplied at maximum severity.
+  synth.explosion.baseVolume: Base gain of synthesized explosion audio.
+  synth.explosion.severityVolume: Additional explosion gain supplied at maximum severity.
+  synth.explosion.lowpassBaseFrequency: Base low-pass cutoff of the explosion noise layer.
+  synth.explosion.lowpassSeverityFrequency: Additional low-pass cutoff supplied at maximum severity.
+  synth.explosion.lowpassEndFrequency: Ending low-pass cutoff of the explosion noise layer.
+  synth.explosion.envelopeStart: Initial gain multiplier of the explosion noise envelope.
+  synth.explosion.boomStartFrequency: Starting oscillator frequency of the explosion boom.
+  synth.explosion.boomEndFrequency: Ending oscillator frequency of the explosion boom.
+  synth.spawn.volume: Gain of synthesized unit-deployment audio.
+  synth.spawn.playerStartFrequency: Starting deployment tone frequency for player units.
+  synth.spawn.enemyStartFrequency: Starting deployment tone frequency for enemy units.
+  synth.spawn.airEndFrequency: Ending deployment tone frequency for air units.
+  synth.spawn.groundEndFrequency: Ending deployment tone frequency for ground units.
+  synth.spawn.rampDuration: Seconds taken for the deployment tone to reach its ending frequency.
+  synth.spawn.envelopeStart: Initial gain multiplier of the deployment envelope.
+  synth.spawn.envelopeDuration: Seconds taken for deployment gain to fade to the envelope floor.
+  synth.spawn.stopDuration: Seconds after start when deployment audio nodes are stopped.
+  synth.engine.minimumMovingSpeed: Unit speed below which no movement-engine pulse is played.
+  synth.engine.maxAudibleUnits: Maximum moving units that may emit engine pulses in one update.
+  synth.engine.baseVolume: Base gain of synthesized engine pulses.
+  synth.engine.speedVolume: Additional engine-pulse gain supplied at maximum normalized speed.
+  synth.engine.airBaseFrequency: Base engine frequency for an air unit.
+  synth.engine.airSpeedFrequency: Additional air-engine frequency supplied at maximum normalized speed.
+  synth.engine.groundBaseFrequency: Base engine frequency for a ground unit.
+  synth.engine.groundSpeedFrequency: Additional ground-engine frequency supplied at maximum normalized speed.
+  synth.engine.envelopeStart: Initial gain multiplier of an engine pulse.
+  synth.engine.envelopeDuration: Seconds taken for an engine pulse to fade to the envelope floor.
+  synth.engine.stopDuration: Seconds after start when engine-pulse audio nodes are stopped.
+  synth.engine.basePulseInterval: Slowest interval in seconds between engine pulses.
+  synth.engine.speedPulseInterval: Interval reduction supplied at maximum normalized speed.
 volume:
   default: 3
   min: 0
@@ -20,11 +119,21 @@ samples:
   impact-heavy-1: battle/impact-heavy-1.mp3
   impact-heavy-2: battle/impact-heavy-2.mp3
 firePools:
-  rapid-fire: [ fire-rapid-1, fire-rapid-2 ]
-  heavy-shot: [ fire-heavy-1, fire-heavy-2 ]
-  explosive: [ fire-explosive-1, fire-explosive-2 ]
-  tracking: [ fire-tracking-1, fire-tracking-2 ]
-  beam-precision: [ fire-beam-1, fire-beam-2 ]
+  rapid-fire:
+    - fire-rapid-1
+    - fire-rapid-2
+  heavy-shot:
+    - fire-heavy-1
+    - fire-heavy-2
+  explosive:
+    - fire-explosive-1
+    - fire-explosive-2
+  tracking:
+    - fire-tracking-1
+    - fire-tracking-2
+  beam-precision:
+    - fire-beam-1
+    - fire-beam-2
 firePlaybackRates:
   rapid-fire: 1.12
   heavy-shot: 0.96
@@ -42,8 +151,15 @@ spatial:
   lowpassQ: 0.7
 synth:
   envelopeFloor: 0.0001
-  samplePlayback: { minRate: 0.5, maxRate: 2, jitterBase: 0.96, jitterRange: 0.08 }
-  noiseBuffer: { durationSeconds: 0.45, priorMix: 0.72, whiteMix: 0.28 }
+  samplePlayback:
+    minRate: 0.5
+    maxRate: 2
+    jitterBase: 0.96
+    jitterRange: 0.08
+  noiseBuffer:
+    durationSeconds: 0.45
+    priorMix: 0.72
+    whiteMix: 0.28
   fire:
     partMaxVolume: 2
     strengthDamageScale: 80
@@ -59,11 +175,31 @@ synth:
     rapidNoiseFilterHz: 1500
     otherNoiseFilterHz: 520
     profiles:
-      rapid-fire: { frequency: 520, duration: 0.045, wave: square, noise: 0.24 }
-      heavy-shot: { frequency: 145, duration: 0.16, wave: sawtooth, noise: 0.5 }
-      explosive: { frequency: 105, duration: 0.2, wave: sawtooth, noise: 0.65 }
-      tracking: { frequency: 260, duration: 0.13, wave: triangle, noise: 0.36 }
-      beam-precision: { frequency: 980, duration: 0.12, wave: sine, noise: 0.08 }
+      rapid-fire:
+        frequency: 520
+        duration: 0.045
+        wave: square
+        noise: 0.24
+      heavy-shot:
+        frequency: 145
+        duration: 0.16
+        wave: sawtooth
+        noise: 0.5
+      explosive:
+        frequency: 105
+        duration: 0.2
+        wave: sawtooth
+        noise: 0.65
+      tracking:
+        frequency: 260
+        duration: 0.13
+        wave: triangle
+        noise: 0.36
+      beam-precision:
+        frequency: 980
+        duration: 0.12
+        wave: sine
+        noise: 0.08
   cannonTail:
     baseDuration: 0.34
     strengthDuration: 0.12
@@ -74,8 +210,14 @@ synth:
     envelopeStart: 0.85
   impact:
     severityDamageScale: 140
-    heavySamples: [impact-heavy-1, impact-heavy-2]
-    lightSamples: [impact-light-1, impact-light-2, impact-light-3, impact-light-4]
+    heavySamples:
+      - impact-heavy-1
+      - impact-heavy-2
+    lightSamples:
+      - impact-light-1
+      - impact-light-2
+      - impact-light-3
+      - impact-light-4
     heavyBaseVolume: 0.12
     heavySeverityVolume: 0.16
     lightBaseVolume: 0.075
@@ -89,11 +231,26 @@ synth:
     endingFrequencyRatio: 0.22
     envelopeStart: 0.8
     profiles:
-      rapid-fire: { frequency: 920, wave: square, noise: 0.45 }
-      heavy-shot: { frequency: 230, wave: sawtooth, noise: 0.72 }
-      explosive: { frequency: 120, wave: sawtooth, noise: 1 }
-      tracking: { frequency: 330, wave: triangle, noise: 0.65 }
-      beam-precision: { frequency: 1280, wave: sine, noise: 0.18 }
+      rapid-fire:
+        frequency: 920
+        wave: square
+        noise: 0.45
+      heavy-shot:
+        frequency: 230
+        wave: sawtooth
+        noise: 0.72
+      explosive:
+        frequency: 120
+        wave: sawtooth
+        noise: 1
+      tracking:
+        frequency: 330
+        wave: triangle
+        noise: 0.65
+      beam-precision:
+        frequency: 1280
+        wave: sine
+        noise: 0.18
   explosion:
     minimumSeverity: 0.15
     intensityScale: 180

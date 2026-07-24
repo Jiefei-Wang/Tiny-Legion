@@ -16,5 +16,8 @@ export function canOperate(unit: UnitInstance): boolean {
   if (!unit.alive) {
     return false;
   }
+  if (unit.groundWreckTimerS !== null) {
+    return false;
+  }
   return unit.attachments.some((attachment) => attachment.alive && COMPONENTS[attachment.component].type === "control");
 }

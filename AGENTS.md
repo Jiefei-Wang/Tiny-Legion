@@ -22,10 +22,10 @@ If you are a new coding agent/session, read this file first, then read:
 
 ## Static Configuration Workflow
 
-- Edit domain YAML under `game-core/src/config/` (`balance`, `ai`, `display`, `editor`, or `sound`); do not add a `global` config folder.
+- Edit domain YAML under `game-core/src/config/` (`balance`, `ai`, `display`, `editor`, or `sound`); do not add a `global` config folder. Every editable leaf must be covered by that document's `_descriptions` map (single-segment `*` wildcards are supported for repeated maps).
 - Run `npm run config:generate` after YAML edits. `npm run config:check` validates YAML, generated output, and audio ownership without rewriting files.
 - VIP dev/build/headless and Arena builds run generation automatically.
-- The development-only Global Settings panel writes movement to `balance/battlefield.yaml` and sound volume to `sound/battle.yaml`, then applies both through live runtime hooks.
+- The development-only Global Settings panel exposes every YAML document through category tabs (`balance`, `ai`, `display`, `editor`, `sound`) and recursive subcategory controls. Hovering or focusing a setting shows its YAML-authored description. Saving validates and transactionally rewrites the fixed YAML file set while preserving description metadata; movement and master sound apply through live hooks, while other settings require restarting the affected runtime.
 - All repository audio source files must remain under `game-core/assets/audio/`; VIP serves and bundles them through its Vite plugin.
 
 ## Current Runtime/Feature Reality
@@ -59,6 +59,7 @@ If you are a new coding agent/session, read this file first, then read:
 - Before starting a new `npm --prefix vip run dev`, check whether a dev server is already running (typically on `http://localhost:5173`).
 - If it responds, reuse the existing server (do not start a second one). Use the running server for all verification/debug steps, including `POST /__debug/*` endpoints.
 - Only start a new server if nothing is listening/responding on the expected port, or if the running server is clearly for a different workspace/build.
+- Keep in mind that there might be multiple agents working in the same repo, so if you find a bug not related to your changes, leave it as it is.
 
 ### Runtime debug UI
 

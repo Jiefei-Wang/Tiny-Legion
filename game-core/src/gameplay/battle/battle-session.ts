@@ -1,8 +1,6 @@
 import { armyCap } from "../../config/balance/commander.ts";
 import {
   DEFAULT_UNIT_MOVEMENT_SPEED_MULTIPLIER,
-  MIN_UNIT_MOVEMENT_SPEED_MULTIPLIER,
-  MAX_UNIT_MOVEMENT_SPEED_MULTIPLIER,
   DEFAULT_GROUND_HEIGHT_RATIO,
   AIR_MIN_Z_RATIO,
   AIR_GROUND_GAP_RATIO,
@@ -10,10 +8,13 @@ import {
   AIR_HOLD_GRAVITY,
   AIR_DROP_GRAVITY,
   AIR_DROP_SPEED_CAP,
-  AIR_THRUST_ACCEL_SCALE,
+  AIR_POWER_TO_SPEED_SCALE,
   GROUND_PROJECTILE_MAX_DROP_BELOW_FIRE_Y,
   BATTLE_SALVAGE_REFUND_FACTOR,
   PENETRATION_ARMOR_SCALER,
+  GROUND_WRECK_LIFETIME_SECONDS,
+  GROUND_WRECK_MIN_INITIAL_HP_LOSS_RATIO,
+  GROUND_WRECK_MAX_INITIAL_HP_LOSS_RATIO,
   getStructureCellSize,
   UNIT_SEPARATION_ENABLED,
   UNIT_OVERLAP_ALLOWANCE_RATIO,
@@ -35,13 +36,14 @@ import { applyHitToUnit, applyStructureRecovery, scaleDamageByRemainingPenetrati
 import { applyRecoilForAttachment, getAliveWeaponAttachments } from "../../simulation/combat/recoil.ts";
 import { clamp } from "../../simulation/physics/impulse-model.ts";
 import { canOperate } from "../../simulation/units/control-unit-rules.ts";
+import { destroyCell } from "../../simulation/units/structure-grid.ts";
 import { instantiateUnit } from "../../simulation/units/unit-builder.ts";
 import { selectBestTarget } from "../../ai/targeting/target-selector.ts";
 import { createBaselineCompositeAiController } from "../../ai/composite/baseline-modules.ts";
 import { validateTemplateDetailed } from "../../templates/template-validation.ts";
 import { createDefaultPartDefinitions, mergePartCatalogs, normalizePartAttachmentRotate } from "../../parts/part-schema.ts";
 import type { BattleAiController, CombatDecision, WeaponFireAiInput } from "../../ai/composite/composite-ai.ts";
-import type { BattleState, CommandResult, ComponentStats, FireBlockDetail, FireRequest, KeyState, MapNode, PartDefinition, PartDirection, Side, UnitCommand, UnitInstance, UnitTemplate, WeaponClass } from "../../types.ts";
+import type { BattleState, CommandResult, ComponentId, ComponentStats, FireBlockDetail, FireRequest, KeyState, MapNode, PartDefinition, PartDirection, Side, UnitCommand, UnitInstance, UnitTemplate, WeaponClass } from "../../types.ts";
 
 export interface BattleHooks {
   addLog: (text: string, tone?: "good" | "warn" | "bad" | "") => void;
@@ -87,6 +89,11 @@ export type BattleAudioEvent =
     }
   | { kind: "explosion"; x: number; y: number; intensity: number; radius: number };
 
+export interface BattleLossStats {
+  player: { destroyedObjects: number; gasWasted: number };
+  enemy: { destroyedObjects: number; gasWasted: number };
+}
+
 type UnitProjectileHit = {
   structureCellId: number;
   ignoreArmor: boolean;
@@ -126,6 +133,7 @@ export class BattleSession {
   private readonly baselineController: BattleAiController;
   private audioEvents: BattleAudioEvent[];
   private movementSpeedMultiplier: number;
+  private lossStats: BattleLossStats;
 
   constructor(canvas: HTMLCanvasElement, hooks: BattleHooks, templates: UnitTemplate[], options: BattleSessionOptions = {}) {
     const context = canvas.getContext("2d");
@@ -170,6 +178,7 @@ export class BattleSession {
     this.baselineController = createBaselineCompositeAiController();
     this.audioEvents = [];
     this.movementSpeedMultiplier = this.normalizeMovementSpeedMultiplier(options.movementSpeedMultiplier);
+    this.lossStats = this.createEmptyLossStats();
   }
 
   public getMovementSpeedMultiplier(): number {
@@ -183,6 +192,13 @@ export class BattleSession {
 
   public getState(): BattleState {
     return this.state;
+  }
+
+  public getLossStats(): BattleLossStats {
+    return {
+      player: { ...this.lossStats.player },
+      enemy: { ...this.lossStats.enemy },
+    };
   }
 
   public getSelection(): { selectedUnitId: string | null; playerControlledId: string | null } {
@@ -595,6 +611,7 @@ export class BattleSession {
 
   public start(node: MapNode): void {
     this.state = this.createEmptyBattle();
+    this.lossStats = this.createEmptyLossStats();
     this.state.active = true;
     this.state.nodeId = node.id;
     this.state.enemyCap = Math.max(3, Math.ceil(node.defense * 3.2 + 1));
@@ -638,6 +655,7 @@ export class BattleSession {
 
   public resetToMapMode(): void {
     this.state = this.createEmptyBattle();
+    this.lossStats = this.createEmptyLossStats();
     this.selectedUnitId = null;
     this.playerControlledId = null;
     this.manualFireHeld = false;
@@ -703,6 +721,16 @@ export class BattleSession {
       if (!unit.alive) {
         continue;
       }
+      if (this.shouldGroundUnitEnterWreck(unit)) {
+        if (unit.id === this.playerControlledId || unit.id === this.selectedUnitId) {
+          this.clearControlSelection();
+        }
+        unit.vx = 0;
+        unit.vy = 0;
+        unit.vibrate = 0;
+        this.updateGroundWreck(unit, dt);
+        continue;
+      }
       if (!canOperate(unit)) {
         if (unit.id === this.playerControlledId || unit.id === this.selectedUnitId) {
           this.clearControlSelection();
@@ -713,11 +741,6 @@ export class BattleSession {
             unit.airDropTargetY = laneBounds.groundMinY + Math.random() * (laneBounds.groundMaxY - laneBounds.groundMinY);
             unit.aiDebugDecisionPath = "air-control-loss-drop";
           }
-        } else {
-          unit.vx = 0;
-          unit.vy = 0;
-          unit.vibrate = 0;
-          continue;
         }
       }
       this.refreshUnitMobility(unit);
@@ -997,6 +1020,10 @@ export class BattleSession {
       effect.life -= dt;
     }
     this.state.particles = this.state.particles.filter((effect) => effect.life > 0);
+    for (const effect of this.state.blockExplosions) {
+      effect.age += dt;
+    }
+    this.state.blockExplosions = this.state.blockExplosions.filter((effect) => effect.age < effect.life);
     for (const beam of this.state.beamEffects) {
       beam.life -= dt;
     }
@@ -1020,6 +1047,7 @@ export class BattleSession {
       }
     }
     this.state.debris = this.state.debris.filter((chunk) => chunk.life > 0);
+    this.recordDestroyedUnits();
     this.state.units = this.state.units.filter((unit) => unit.alive);
 
     if (this.state.playerBase.hp <= 0) {
@@ -1140,6 +1168,7 @@ export class BattleSession {
       units: [],
       projectiles: [],
       beamEffects: [],
+      blockExplosions: [],
       particles: [],
       debris: [],
       playerBase: { hp: 1300, maxHp: 1300, x: playerBase.x, y: playerBase.y, w: playerBase.w, h: playerBase.h },
@@ -1637,9 +1666,13 @@ export class BattleSession {
       const splashHit = this.projectileHitsUnitPart(projectile, target, target.type === "air");
       const hitCellId = splashHit?.structureCellId ?? null;
       const impactSide = dx >= 0 ? 1 : -1;
+      const beforeDestroyed = new Set(target.structure.filter((cell) => cell.destroyed).map((cell) => cell.id));
+      const beforeAliveAttachments = new Set(target.attachments.filter((attachment) => attachment.alive).map((attachment) => attachment.id));
+      const wasAlive = target.alive;
       if (!this.shouldIgnoreDamageForUnit(target)) {
         applyHitToUnit(target, splashDamage, projectile.hitImpulse * 0.45, impactSide, hitCellId, splashHit?.ignoreArmor ?? false);
       }
+      this.spawnBreakDebris(target, beforeDestroyed, beforeAliveAttachments, wasAlive);
       if (projectile.controlImpairDuration > 0) {
         this.applyControlImpair(target, projectile.controlImpairFactor, projectile.controlImpairDuration * 0.8);
       }
@@ -1705,7 +1738,7 @@ export class BattleSession {
       ? (intendedTargetId ?? this.findClosestEnemyToPoint(unit.side, finalIntendedTargetX, finalIntendedTargetY)?.id ?? null)
       : null;
     // Clamp angle directly (no dx/dy round-trip)
-    const fireAngle = this.clampAndAdjustAngle(unit, attachment.component, safeAngle, attachment.stats?.shootAngleDeg, attachment);
+    const fireAngle = this.clampAndAdjustAngle(unit, attachment.component, safeAngle, attachment);
     const spreadRad = (((Math.random() * 2) - 1) * shot.spreadDeg * Math.PI) / 180;
     const finalFireAngle = fireAngle + spreadRad;
     const ux = Math.cos(finalFireAngle);
@@ -1791,7 +1824,6 @@ export class BattleSession {
     unit: UnitInstance,
     componentId: keyof typeof COMPONENTS,
     angleRad: number,
-    shootAngleDegOverride?: number,
     attachment?: UnitInstance["attachments"][number],
   ): number {
     const stats = COMPONENTS[componentId];
@@ -1800,7 +1832,6 @@ export class BattleSession {
       : (unit.facing === 1 ? 0 : Math.PI);
     const angleLimit = this.resolveWeaponAngleLimit(
       stats,
-      shootAngleDegOverride,
       attachment ? this.getAttachmentPart(attachment) : null,
     );
     if (!angleLimit.enabled) {
@@ -1814,6 +1845,113 @@ export class BattleSession {
     const clampedRelative = clamp(relativeAngle, -angleLimit.ccwRad, angleLimit.cwRad);
 
     return facingAngle + clampedRelative;
+  }
+
+  private createEmptyLossStats(): BattleLossStats {
+    return {
+      player: { destroyedObjects: 0, gasWasted: 0 },
+      enemy: { destroyedObjects: 0, gasWasted: 0 },
+    };
+  }
+
+  private updateGroundWreck(unit: UnitInstance, dt: number): void {
+    if (unit.groundWreckTimerS === null) {
+      unit.groundWreckTimerS = GROUND_WRECK_LIFETIME_SECONDS;
+      unit.groundWreckInitialCellHp = [];
+      unit.aiDebugDecisionPath = "ground-wreck";
+      for (const cell of unit.structure) {
+        if (cell.destroyed) {
+          continue;
+        }
+        const roll = this.stableUnitCellRandom(unit.id, cell.id);
+        const initialLossRatio = GROUND_WRECK_MIN_INITIAL_HP_LOSS_RATIO
+          + roll * (GROUND_WRECK_MAX_INITIAL_HP_LOSS_RATIO - GROUND_WRECK_MIN_INITIAL_HP_LOSS_RATIO);
+        const currentRemainingHp = Math.max(0, cell.breakThreshold - cell.strain);
+        const damagedRemainingHp = cell.breakThreshold * (1 - initialLossRatio);
+        const initialRemainingHp = Math.min(currentRemainingHp, damagedRemainingHp);
+        unit.groundWreckInitialCellHp[cell.id] = initialRemainingHp;
+        cell.strain = Math.max(cell.strain, cell.breakThreshold - initialRemainingHp);
+      }
+    }
+
+    unit.groundWreckTimerS = Math.max(0, unit.groundWreckTimerS - dt);
+    const lifetimeRatio = unit.groundWreckTimerS / Math.max(0.001, GROUND_WRECK_LIFETIME_SECONDS);
+    for (const cell of unit.structure) {
+      if (cell.destroyed) {
+        continue;
+      }
+      const initialRemainingHp = unit.groundWreckInitialCellHp[cell.id]
+        ?? Math.max(0, cell.breakThreshold - cell.strain);
+      const linearRemainingHp = initialRemainingHp * lifetimeRatio;
+      cell.strain = Math.max(cell.strain, cell.breakThreshold - linearRemainingHp);
+    }
+    if (unit.groundWreckTimerS <= 0) {
+      this.detonateGroundWreck(unit);
+    }
+  }
+
+  private shouldGroundUnitEnterWreck(unit: UnitInstance): boolean {
+    if (unit.type !== "ground") {
+      return false;
+    }
+    if (unit.groundWreckTimerS !== null || !canOperate(unit)) {
+      return true;
+    }
+    const hasGroundEngine = unit.attachments.some((attachment) => {
+      if (!attachment.alive) {
+        return false;
+      }
+      const stats = COMPONENTS[attachment.component];
+      const power = attachment.stats?.power ?? stats.power ?? 0;
+      return stats.type === "engine" && power > 0 && this.engineSupportsGround(attachment, stats);
+    });
+    return !hasGroundEngine || !this.hasAvailableWeapons(unit);
+  }
+
+  private detonateGroundWreck(unit: UnitInstance): void {
+    const beforeDestroyed = new Set(unit.structure.filter((cell) => cell.destroyed).map((cell) => cell.id));
+    const beforeAliveAttachments = new Set(unit.attachments.filter((attachment) => attachment.alive).map((attachment) => attachment.id));
+    const wasAlive = unit.alive;
+    for (const cell of unit.structure) {
+      if (!cell.destroyed) {
+        destroyCell(unit, cell.id);
+      }
+    }
+    unit.alive = false;
+    unit.groundWreckTimerS = 0;
+    this.spawnBreakDebris(unit, beforeDestroyed, beforeAliveAttachments, wasAlive);
+    this.queueAudioEvent({
+      kind: "explosion",
+      x: unit.x,
+      y: unit.y,
+      intensity: Math.max(12, unit.structure.length * 5),
+      radius: Math.max(24, unit.radius * 1.35),
+    });
+  }
+
+  private stableUnitCellRandom(unitId: string, cellId: number): number {
+    let hash = 2166136261;
+    const key = `${unitId}:${cellId}`;
+    for (let i = 0; i < key.length; i += 1) {
+      hash ^= key.charCodeAt(i);
+      hash = Math.imul(hash, 16777619);
+    }
+    return (hash >>> 0) / 0xffffffff;
+  }
+
+  private recordDestroyedUnits(): void {
+    for (const unit of this.state.units) {
+      if (unit.alive || unit.returnedToBase) {
+        continue;
+      }
+      const sideStats = this.lossStats[unit.side];
+      const templateGasCost = this.templates.find((template) => template.id === unit.templateId)?.gasCost;
+      const gasValue = typeof templateGasCost === "number" && Number.isFinite(templateGasCost)
+        ? templateGasCost
+        : unit.deploymentGasCost;
+      sideStats.destroyedObjects += 1;
+      sideStats.gasWasted += Math.max(0, gasValue);
+    }
   }
 
   public setBaseHp(side: Side | "both", maxHp: number, refill = true): number {
@@ -2204,7 +2342,7 @@ export class BattleSession {
     const powerToMass = totalPower / Math.max(16, unit.mass);
     const rawSpeed = unit.type === "ground"
       ? powerToMass * 74
-      : Math.max(0, powerToMass * AIR_THRUST_ACCEL_SCALE - AIR_HOLD_GRAVITY);
+      : Math.max(0, powerToMass * AIR_POWER_TO_SPEED_SCALE - AIR_HOLD_GRAVITY);
     unit.maxSpeed = clamp(Math.min(rawSpeed, speedCap), 0, speedCap);
     unit.accel = clamp(rawSpeed * 0.92, 0, Math.max(16, unit.maxSpeed * 1.6));
     const speedRatio = unit.maxSpeed / Math.max(1, speedCap);
@@ -2224,7 +2362,7 @@ export class BattleSession {
     return 0;
   }
 
-  private resolveAttachmentFacingQuarter(attachment: { partId?: number; rotateQuarter: number }): 0 | 1 | 2 | 3 {
+  private resolveAttachmentFacingQuarter(attachment: { partId?: number; component: ComponentId; rotateQuarter: number }): 0 | 1 | 2 | 3 {
     const part = attachment.partId
       ? this.partCatalog.find((catalogPart) => catalogPart.id === attachment.partId)
       : undefined;
@@ -2234,7 +2372,9 @@ export class BattleSession {
     const rotateQuarter = part
       ? normalizePartAttachmentRotate(part, attachment.rotateQuarter)
       : ((attachment.rotateQuarter % 4 + 4) % 4) as 0 | 1 | 2 | 3;
-    return ((baseQuarter + rotateQuarter) % 4 + 4) % 4 as 0 | 1 | 2 | 3;
+    const placementChangesFacing = part?.directional ?? COMPONENTS[attachment.component].directional === true;
+    const facingRotation = placementChangesFacing ? rotateQuarter : 0;
+    return ((baseQuarter + facingRotation) % 4 + 4) % 4 as 0 | 1 | 2 | 3;
   }
 
   private getAttachmentPart(attachment: { partId?: number }): PartDefinition | null {
@@ -2268,7 +2408,6 @@ export class BattleSession {
 
   private resolveWeaponAngleLimit(
     stats: ComponentStats,
-    shootAngleDegOverride?: number,
     part: PartDefinition | null = null,
   ): { enabled: boolean; cwRad: number; ccwRad: number } {
     const hasAngleLimit = part?.partProperties?.hasAngleLimit;
@@ -2285,23 +2424,20 @@ export class BattleSession {
       };
     }
 
-    const shootAngleDeg = shootAngleDegOverride ?? part?.partProperties?.shootAngleDeg ?? stats.shootAngleDeg;
-    if (!Number.isFinite(shootAngleDeg)) {
+    if (stats.hasAngleLimit !== true || !Number.isFinite(stats.cwAngle) || !Number.isFinite(stats.ccwAngle)) {
       return { enabled: false, cwRad: 0, ccwRad: 0 };
     }
-    const halfRad = Math.max(0, (shootAngleDeg ?? 0) * 0.5) * Math.PI / 180;
-    return { enabled: true, cwRad: halfRad, ccwRad: halfRad };
+    return {
+      enabled: true,
+      cwRad: Math.max(0, stats.cwAngle ?? 0) * Math.PI / 180,
+      ccwRad: Math.max(0, stats.ccwAngle ?? 0) * Math.PI / 180,
+    };
   }
 
   private normalizeMovementSpeedMultiplier(multiplier: number | undefined): number {
-    const finiteMultiplier = typeof multiplier === "number" && Number.isFinite(multiplier)
+    return typeof multiplier === "number" && Number.isFinite(multiplier)
       ? multiplier
       : DEFAULT_UNIT_MOVEMENT_SPEED_MULTIPLIER;
-    return clamp(
-      finiteMultiplier,
-      MIN_UNIT_MOVEMENT_SPEED_MULTIPLIER,
-      MAX_UNIT_MOVEMENT_SPEED_MULTIPLIER,
-    );
   }
 
   private scaleMovementSpeed(speed: number): number {
@@ -2319,7 +2455,7 @@ export class BattleSession {
         continue;
       }
       const enginePower = Math.max(0, attachment.stats?.power ?? stats.power ?? 0);
-      thrustSpeed += (enginePower / Math.max(16, unit.mass)) * AIR_THRUST_ACCEL_SCALE;
+      thrustSpeed += (enginePower / Math.max(16, unit.mass)) * AIR_POWER_TO_SPEED_SCALE;
     }
     return thrustSpeed;
   }
@@ -2535,9 +2671,8 @@ export class BattleSession {
         componentId: keyof typeof COMPONENTS,
         dx: number,
         dy: number,
-        shootAngleDegOverride?: number,
         angleLimitOverride?: WeaponFireAiInput["angleLimit"],
-      ) => this.canShootAtAngle(unit, componentId, dx, dy, shootAngleDegOverride, angleLimitOverride),
+      ) => this.canShootAtAngle(unit, componentId, dx, dy, angleLimitOverride),
       getEffectiveWeaponRange: (baseRange: number) => this.getEffectiveWeaponRange(unit, baseRange),
       getWeaponFireInput: (slot: number) => this.getWeaponFireInput(unit, slot),
     };
@@ -2688,7 +2823,6 @@ export class BattleSession {
     componentId: keyof typeof COMPONENTS,
     dx: number,
     dy: number,
-    shootAngleDegOverride?: number,
     angleLimitOverride?: WeaponFireAiInput["angleLimit"],
   ): boolean {
     const stats = COMPONENTS[componentId];
@@ -2711,14 +2845,9 @@ export class BattleSession {
               ccwRad: Math.max(0, angleLimitOverride.ccwAngle ?? 0) * Math.PI / 180,
             };
           }
-          const fallbackShootAngle = shootAngleDegOverride ?? stats.shootAngleDeg;
-          if (!Number.isFinite(fallbackShootAngle)) {
-            return { enabled: false, cwRad: 0, ccwRad: 0 };
-          }
-          const halfRad = Math.max(0, (fallbackShootAngle ?? 0) * 0.5) * Math.PI / 180;
-          return { enabled: true, cwRad: halfRad, ccwRad: halfRad };
+          return this.resolveWeaponAngleLimit(stats, null);
         })()
-      : this.resolveWeaponAngleLimit(stats, shootAngleDegOverride, null);
+      : this.resolveWeaponAngleLimit(stats, null);
     if (!limit.enabled) {
       return true;
     }
@@ -2949,7 +3078,7 @@ export class BattleSession {
     if (!attachment) return null;
     const firepoint = this.getAttachmentFirepointWorld(unit, attachment);
     const requestedAngle = unit.weaponAimAngles[slot] ?? this.getAttachmentWeaponFacingAngleRad(unit, attachment);
-    const angleRad = this.clampAndAdjustAngle(unit, attachment.component, requestedAngle, attachment.stats?.shootAngleDeg, attachment);
+    const angleRad = this.clampAndAdjustAngle(unit, attachment.component, requestedAngle, attachment);
     const muzzle = this.getAttachmentVisualMuzzleWorld(unit, attachment, angleRad);
     return {
       angleRad,
@@ -2992,11 +3121,10 @@ export class BattleSession {
       spreadDeg: attachment.stats?.spreadDeg ?? stats.spreadDeg ?? 0,
       explosiveBlastRadius: attachment.stats?.explosiveBlastRadius ?? stats.explosive?.blastRadius ?? 0,
       trackingTurnRateDegPerSec: attachment.stats?.trackingTurnRateDegPerSec ?? stats.tracking?.turnRateDegPerSec ?? 0,
-      shootAngleDeg: attachment.stats?.shootAngleDeg ?? stats.shootAngleDeg,
       angleLimit: {
-        hasAngleLimit: part?.partProperties?.hasAngleLimit,
-        cwAngle: part?.partProperties?.cwAngle,
-        ccwAngle: part?.partProperties?.ccwAngle,
+        hasAngleLimit: part?.partProperties?.hasAngleLimit ?? stats.hasAngleLimit,
+        cwAngle: part?.partProperties?.cwAngle ?? stats.cwAngle,
+        ccwAngle: part?.partProperties?.ccwAngle ?? stats.ccwAngle,
         facingAngleRad: this.getAttachmentWeaponFacingAngleRad(unit, attachment),
       },
       effectiveRange: this.getEffectiveWeaponRange(unit, baseRange),
@@ -3586,6 +3714,17 @@ export class BattleSession {
       }
       const offset = this.getCellOffsetWorld(unit, cell.id, cellSize);
       const materialColor = cell.color;
+      const seed = Math.floor(this.stableUnitCellRandom(unit.id, cell.id) * 0x7fffffff);
+      this.state.blockExplosions.push({
+        x: unit.x + offset.x,
+        y: unit.y + offset.y,
+        age: 0,
+        life: 0.55 + (seed % 13) / 100,
+        size: cellSize,
+        variant: (seed % 3) as 0 | 1 | 2,
+        seed,
+        color: materialColor,
+      });
       this.state.debris.push({
         x: unit.x + offset.x,
         y: unit.y + offset.y,

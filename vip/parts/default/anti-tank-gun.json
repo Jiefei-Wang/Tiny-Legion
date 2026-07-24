@@ -145,7 +145,6 @@
     "damage": 220,
     "range": 680,
     "cooldown": 4,
-    "shootAngleDeg": 70,
     "projectileSpeed": 800,
     "projectileGravity": 65,
     "penetration": 250,

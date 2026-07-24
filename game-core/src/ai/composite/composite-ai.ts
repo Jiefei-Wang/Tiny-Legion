@@ -9,7 +9,6 @@ export interface WeaponFireAiInput {
   spreadDeg: number;
   explosiveBlastRadius: number;
   trackingTurnRateDegPerSec: number;
-  shootAngleDeg?: number;
   angleLimit?: {
     hasAngleLimit?: boolean;
     cwAngle?: number;
@@ -33,7 +32,6 @@ export interface BattleAiInput {
     componentId: ComponentId,
     dx: number,
     dy: number,
-    shootAngleDegOverride?: number,
     angleLimitOverride?: WeaponFireAiInput["angleLimit"],
   ) => boolean;
   getEffectiveWeaponRange: (baseRange: number) => number;

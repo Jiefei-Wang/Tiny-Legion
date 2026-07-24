@@ -17,10 +17,6 @@ export const BATTLEFIELD_HEIGHT: number = config.battlefield.height;
  */
 export const DEFAULT_UNIT_MOVEMENT_SPEED_MULTIPLIER: number = config.movement.defaultMultiplier;
 
-/** Supported customization range for the global unit movement speed multiplier. */
-export const MIN_UNIT_MOVEMENT_SPEED_MULTIPLIER: number = config.movement.minMultiplier;
-export const MAX_UNIT_MOVEMENT_SPEED_MULTIPLIER: number = config.movement.maxMultiplier;
-
 /**
  * Default ground-lane height ratio of total battlefield height.
  * Example: with height=1000, ground lane uses 400 units.
@@ -63,9 +59,10 @@ export const AIR_DROP_GRAVITY: number = config.air.dropGravity;
 export const AIR_DROP_SPEED_CAP: number = config.air.dropSpeedCap;
 
 /**
- * Scale factor converting air-engine power-to-mass into pre-gravity thrust speed.
+ * Converts air-engine power-to-mass into pre-gravity speed and lift capacity.
+ * Direction input is normalized separately, so this does not vary speed by direction.
  */
-export const AIR_THRUST_ACCEL_SCALE: number = config.air.thrustAccelScale;
+export const AIR_POWER_TO_SPEED_SCALE: number = config.air.powerToSpeedScale;
 
 /**
  * Additional downward distance threshold for terminating certain ground-fired projectiles.
@@ -79,16 +76,17 @@ export const GROUND_PROJECTILE_MAX_DROP_BELOW_FIRE_Y = config.combat.groundProje
 export const BATTLE_SALVAGE_REFUND_FACTOR = config.combat.salvageRefundFactor;
 
 /**
- * Converts impulse magnitude into added structure strain in damage model.
- * Larger values make knockback/impact impulses damage structure faster.
- */
-export const IMPULSE_DAMAGE_STRESS_FACTOR = config.combat.impulseDamageStressFactor;
-
-/**
  * Global scalar that maps armor rating into projectile penetration cost.
  * Larger values reduce multi-part penetration depth.
  */
 export const PENETRATION_ARMOR_SCALER = config.combat.penetrationArmorScaler;
+
+/** Seconds a mission-killed ground craft remains as a damageable wreck. */
+export const GROUND_WRECK_LIFETIME_SECONDS = config.wreck.groundLifetimeSeconds;
+
+/** Initial per-cell HP loss range applied when a ground craft becomes a wreck. */
+export const GROUND_WRECK_MIN_INITIAL_HP_LOSS_RATIO = config.wreck.minInitialHpLossRatio;
+export const GROUND_WRECK_MAX_INITIAL_HP_LOSS_RATIO = config.wreck.maxInitialHpLossRatio;
 
 /** Minimum and maximum world-space size of one rendered/collidable structure cell. */
 export const MIN_STRUCTURE_CELL_SIZE = config.structure.minCellSize;

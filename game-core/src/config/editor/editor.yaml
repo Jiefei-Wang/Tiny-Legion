@@ -1,7 +1,18 @@
+_descriptions:
+  grid.maxColumns: Maximum number of columns allowed in Craft and Part Designer grids.
+  grid.maxRows: Maximum number of rows allowed in Craft and Part Designer grids.
+  displayKinds: Allowed visual attachment kinds available to the Display layer editor.
+  gameLoop.stepsPerSecond: Fixed simulation updates processed per real-time second.
+  gameLoop.maxFrameSeconds: Maximum real-time duration accepted from one rendered frame.
+  gameLoop.minTimeScale: Slowest simulation time scale accepted by the game loop.
+  gameLoop.maxTimeScale: Fastest simulation time scale accepted by the game loop.
 grid:
   maxColumns: 10
   maxRows: 10
-displayKinds: [panel, stripe, glass]
+displayKinds:
+  - panel
+  - stripe
+  - glass
 gameLoop:
   stepsPerSecond: 60
   maxFrameSeconds: 0.033

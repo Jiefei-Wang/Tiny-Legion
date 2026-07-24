@@ -1,5 +1,5 @@
 import { COMPONENTS } from "../config/balance/weapons.ts";
-import { AIR_HOLD_GRAVITY, AIR_THRUST_ACCEL_SCALE } from "../config/balance/battlefield.ts";
+import { AIR_HOLD_GRAVITY, AIR_POWER_TO_SPEED_SCALE } from "../config/balance/battlefield.ts";
 import {
   createDefaultPartDefinitions,
   getPartFootprintOffsets,
@@ -95,7 +95,7 @@ function computeAirThrustSpeed(template: UnitTemplate, partCatalog: ReadonlyArra
       continue;
     }
     const power = Math.max(0, part?.stats?.power ?? stats.power ?? 0);
-    thrustSpeed += (power / mass) * AIR_THRUST_ACCEL_SCALE;
+    thrustSpeed += (power / mass) * AIR_POWER_TO_SPEED_SCALE;
   }
   return thrustSpeed;
 }
@@ -173,9 +173,6 @@ export function validateTemplateDetailed(
     }
     if (attachment.rotateQuarter !== undefined && (!Number.isInteger(attachment.rotateQuarter) || attachment.rotateQuarter < 0 || attachment.rotateQuarter > 3)) {
       errors.push("rotateQuarter must be integer 0..3");
-    }
-    if (attachment.rotate90 !== undefined && typeof attachment.rotate90 !== "boolean") {
-      errors.push("rotate90 must be boolean");
     }
 
     const component = part.baseComponent;

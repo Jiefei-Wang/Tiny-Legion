@@ -10,7 +10,7 @@ export const configDir = resolve(gameCoreDir, "src", "config");
 export const audioDir = resolve(gameCoreDir, "assets", "audio");
 export const generatedConfigPath = resolve(configDir, "generated", "game-config.generated.ts");
 
-const CONFIG_FILES = {
+export const CONFIG_FILES = {
   balance: {
     battlefield: "balance/battlefield.yaml",
     range: "balance/range.yaml",
@@ -38,6 +38,7 @@ const CONFIG_FILES = {
 
 const AUDIO_EXTENSIONS = new Set([".mp3", ".wav", ".ogg", ".flac", ".m4a", ".aac"]);
 const IGNORED_SCAN_DIRS = new Set([".git", "node_modules", "dist", "build", ".dist", ".headless-dist", ".tmp"]);
+const DESCRIPTIONS_KEY = "_descriptions";
 
 function fail(path, message) {
   throw new Error(`${path}: ${message}`);
@@ -94,17 +95,26 @@ function validateScalarObject(value, keys, path) {
   return object;
 }
 
-function validateConfig(config) {
+export function validateGameConfig(config) {
+  exactKeys(config, ["balance", "ai", "display", "editor", "sound"], "config");
+  exactKeys(config.balance, ["battlefield", "range", "commander", "economy", "materials", "units", "weapons", "campaign"], "config.balance");
+  exactKeys(config.ai, ["shooting", "levels"], "config.ai");
+  exactKeys(config.display, ["battle"], "config.display");
+  exactKeys(config.editor, ["editor"], "config.editor");
+  exactKeys(config.sound, ["battle"], "config.sound");
   const battlefield = config.balance.battlefield;
-  validateScalarObject(battlefield, ["battlefield", "movement", "air", "combat", "structure", "separation"], "balance/battlefield.yaml");
+  validateScalarObject(battlefield, ["battlefield", "movement", "air", "combat", "wreck", "structure", "separation"], "balance/battlefield.yaml");
   validateScalarObject(battlefield.battlefield, ["width", "height", "groundHeightRatio", "airMinZRatio", "airGroundGapRatio", "airTargetZToleranceRatio"], "balance/battlefield.yaml.battlefield");
-  const movement = validateScalarObject(battlefield.movement, ["defaultMultiplier", "minMultiplier", "maxMultiplier"], "balance/battlefield.yaml.movement");
-  if (!(numberAt(movement, "minMultiplier", "movement") <= numberAt(movement, "defaultMultiplier", "movement")
-    && numberAt(movement, "defaultMultiplier", "movement") <= numberAt(movement, "maxMultiplier", "movement"))) {
-    fail("balance/battlefield.yaml.movement", "expected minMultiplier <= defaultMultiplier <= maxMultiplier");
+  validateScalarObject(battlefield.movement, ["defaultMultiplier"], "balance/battlefield.yaml.movement");
+  validateScalarObject(battlefield.air, ["holdGravity", "dropGravity", "dropSpeedCap", "powerToSpeedScale"], "balance/battlefield.yaml.air");
+  validateScalarObject(battlefield.combat, ["groundProjectileMaxDropBelowFireY", "salvageRefundFactor", "penetrationArmorScaler"], "balance/battlefield.yaml.combat");
+  const wreck = validateScalarObject(battlefield.wreck, ["groundLifetimeSeconds", "minInitialHpLossRatio", "maxInitialHpLossRatio"], "balance/battlefield.yaml.wreck");
+  if (!(numberAt(wreck, "groundLifetimeSeconds", "balance/battlefield.yaml.wreck") > 0)) fail("balance/battlefield.yaml.wreck.groundLifetimeSeconds", "expected a positive number");
+  if (!(numberAt(wreck, "minInitialHpLossRatio", "balance/battlefield.yaml.wreck") > 0
+    && numberAt(wreck, "minInitialHpLossRatio", "balance/battlefield.yaml.wreck") <= numberAt(wreck, "maxInitialHpLossRatio", "balance/battlefield.yaml.wreck")
+    && numberAt(wreck, "maxInitialHpLossRatio", "balance/battlefield.yaml.wreck") < 1)) {
+    fail("balance/battlefield.yaml.wreck", "expected 0 < minInitialHpLossRatio <= maxInitialHpLossRatio < 1");
   }
-  validateScalarObject(battlefield.air, ["holdGravity", "dropGravity", "dropSpeedCap", "thrustAccelScale"], "balance/battlefield.yaml.air");
-  validateScalarObject(battlefield.combat, ["groundProjectileMaxDropBelowFireY", "salvageRefundFactor", "impulseDamageStressFactor", "penetrationArmorScaler"], "balance/battlefield.yaml.combat");
   validateScalarObject(battlefield.structure, ["minCellSize", "maxCellSize"], "balance/battlefield.yaml.structure");
   const separation = validateScalarObject(battlefield.separation, ["enabled", "overlapAllowanceRatio", "positionFactor", "velocityDamping", "gridSize", "spawnPlacementAttempts"], "balance/battlefield.yaml.separation");
   booleanAt(separation, "enabled", "balance/battlefield.yaml.separation");
@@ -149,7 +159,8 @@ function validateConfig(config) {
       "damage",
       "range",
       "cooldown",
-      "shootAngleDeg",
+      "hasAngleLimit",
+      ...(id === "rapidGun" ? [] : ["cwAngle", "ccwAngle"]),
       "projectileSpeed",
       "projectileGravity",
       "penetration",
@@ -181,8 +192,13 @@ function validateConfig(config) {
     } else if (item.type === "weapon") {
       booleanAt(item, "directional", path);
       stringAt(item, "weaponClass", path);
-      for (const key of ["maxLoadedAmmo", "recoil", "hitImpulse", "damage", "range", "cooldown", "shootAngleDeg", "projectileSpeed", "projectileGravity", "penetration"]) {
+      for (const key of ["maxLoadedAmmo", "recoil", "hitImpulse", "damage", "range", "cooldown", "projectileSpeed", "projectileGravity", "penetration"]) {
         numberAt(item, key, path);
+      }
+      booleanAt(item, "hasAngleLimit", path);
+      if (item.hasAngleLimit) {
+        numberAt(item, "cwAngle", path);
+        numberAt(item, "ccwAngle", path);
       }
       if ("spreadDeg" in item) numberAt(item, "spreadDeg", path);
       if ("explosive" in item) validateScalarObject(item.explosive, ["blastRadius", "blastDamage", "falloffPower"], `${path}.explosive`);
@@ -216,9 +232,8 @@ function validateConfig(config) {
   validateScalarObject(shooting.ballisticSolver, ["minTimeSeconds", "horizonRangeScale", "minHorizonSeconds", "maxHorizonSeconds", "bracketSteps", "bisectionSteps", "speedErrorTolerance", "directRangeTolerance", "travelRangeTolerance", "minimumDivisor"], "ai/shooting.yaml.ballisticSolver");
   validateScalarObject(config.ai.levels, ["maxCertifiedLevel"], "ai/levels.yaml");
 
-  const display = exactKeys(config.display.battle, ["view", "renderer"], "display/battle.yaml");
+  const display = exactKeys(config.display.battle, ["view"], "display/battle.yaml");
   validateScalarObject(display.view, ["minScale", "maxScale", "verticalPadding", "cameraMargin", "designerBorderMargin"], "display/battle.yaml.view");
-  validateScalarObject(display.renderer, ["statusX", "statusY", "statusDepth"], "display/battle.yaml.renderer");
   const editor = exactKeys(config.editor.editor, ["grid", "displayKinds", "gameLoop"], "editor/editor.yaml");
   validateScalarObject(editor.grid, ["maxColumns", "maxRows"], "editor/editor.yaml.grid");
   if (!Array.isArray(editor.displayKinds) || editor.displayKinds.some((item) => typeof item !== "string")) fail("editor/editor.yaml.displayKinds", "expected a string array");
@@ -253,14 +268,75 @@ function parseYaml(relativePath) {
   const fullPath = resolve(configDir, relativePath);
   const document = parseDocument(readFileSync(fullPath, "utf8"), { uniqueKeys: true, strict: true });
   if (document.errors.length) fail(relativePath, document.errors.map((error) => error.message).join("; "));
-  return document.toJS({ maxAliasCount: 0 });
+  const parsed = objectAt(document.toJS({ maxAliasCount: 0 }), relativePath);
+  const rawDescriptions = parsed[DESCRIPTIONS_KEY];
+  if (!rawDescriptions || typeof rawDescriptions !== "object" || Array.isArray(rawDescriptions)) {
+    fail(relativePath, `expected a ${DESCRIPTIONS_KEY} map`);
+  }
+  const config = Object.fromEntries(Object.entries(parsed).filter(([key]) => key !== DESCRIPTIONS_KEY));
+  return { config, descriptionPatterns: rawDescriptions };
 }
 
 function loadConfigTree(tree) {
-  return Object.fromEntries(Object.entries(tree).map(([key, value]) => [
-    key,
-    typeof value === "string" ? parseYaml(value) : loadConfigTree(value),
-  ]));
+  const config = {};
+  const descriptionPatterns = {};
+  for (const [key, value] of Object.entries(tree)) {
+    const loaded = typeof value === "string" ? parseYaml(value) : loadConfigTree(value);
+    config[key] = loaded.config;
+    descriptionPatterns[key] = loaded.descriptionPatterns;
+  }
+  return { config, descriptionPatterns };
+}
+
+function collectEditableLeaves(value, path = [], leaves = []) {
+  if (Array.isArray(value) || value === null || typeof value !== "object") {
+    leaves.push(path.join("."));
+    return leaves;
+  }
+  for (const [key, child] of Object.entries(value)) collectEditableLeaves(child, [...path, key], leaves);
+  return leaves;
+}
+
+function patternMatches(pattern, path) {
+  const patternParts = pattern.split(".");
+  const pathParts = path.split(".");
+  return patternParts.length === pathParts.length
+    && patternParts.every((part, index) => part === "*" || part === pathParts[index]);
+}
+
+function resolveDescriptions(config, patterns, relativePath) {
+  const entries = Object.entries(objectAt(patterns, `${relativePath}.${DESCRIPTIONS_KEY}`));
+  for (const [pattern, description] of entries) {
+    if (!pattern || typeof description !== "string" || !description.trim()) {
+      fail(`${relativePath}.${DESCRIPTIONS_KEY}.${pattern}`, "expected a non-empty description");
+    }
+  }
+  const leaves = collectEditableLeaves(config);
+  const resolved = {};
+  for (const leaf of leaves) {
+    const matches = entries
+      .filter(([pattern]) => patternMatches(pattern, leaf))
+      .sort(([left], [right]) => right.split(".").filter((part) => part !== "*").length
+        - left.split(".").filter((part) => part !== "*").length);
+    if (!matches.length) fail(`${relativePath}.${DESCRIPTIONS_KEY}`, `missing description for ${leaf}`);
+    const bestSpecificity = matches[0][0].split(".").filter((part) => part !== "*").length;
+    const bestMatches = matches.filter(([pattern]) => pattern.split(".").filter((part) => part !== "*").length === bestSpecificity);
+    if (bestMatches.length > 1) fail(`${relativePath}.${DESCRIPTIONS_KEY}`, `ambiguous descriptions for ${leaf}`);
+    resolved[leaf] = bestMatches[0][1].trim();
+  }
+  const stale = entries.map(([pattern]) => pattern).filter((pattern) => !leaves.some((leaf) => patternMatches(pattern, leaf)));
+  if (stale.length) fail(`${relativePath}.${DESCRIPTIONS_KEY}`, `unused description patterns: ${stale.join(", ")}`);
+  return resolved;
+}
+
+function resolveDescriptionTree(configTree, patternTree, fileTree) {
+  const descriptions = {};
+  for (const [key, value] of Object.entries(fileTree)) {
+    descriptions[key] = typeof value === "string"
+      ? resolveDescriptions(configTree[key], patternTree[key], value)
+      : resolveDescriptionTree(configTree[key], patternTree[key], value);
+  }
+  return descriptions;
 }
 
 function scanForExternalAudio(directory = repositoryDir) {
@@ -275,31 +351,35 @@ function scanForExternalAudio(directory = repositoryDir) {
   }
 }
 
-function renderGenerated(config) {
+function renderGenerated(config, descriptions) {
   return [
     "/* Generated from the YAML files under game-core/src/config. Do not edit directly. */",
     `export const GAME_CONFIG = ${JSON.stringify(config, null, 2)} as const;`,
     "",
+    `export const GAME_CONFIG_DESCRIPTIONS = ${JSON.stringify(descriptions, null, 2)} as const;`,
+    "",
     "export type GameConfig = typeof GAME_CONFIG;",
+    "export type GameConfigDescriptions = typeof GAME_CONFIG_DESCRIPTIONS;",
     "",
   ].join("\n");
 }
 
 export function generateGameConfig({ check = false } = {}) {
-  const config = loadConfigTree(CONFIG_FILES);
-  validateConfig(config);
+  const { config, descriptionPatterns } = loadConfigTree(CONFIG_FILES);
+  validateGameConfig(config);
+  const descriptions = resolveDescriptionTree(config, descriptionPatterns, CONFIG_FILES);
   scanForExternalAudio();
-  const output = renderGenerated(config);
+  const output = renderGenerated(config, descriptions);
   const current = existsSync(generatedConfigPath) ? readFileSync(generatedConfigPath, "utf8") : "";
   if (check) {
     if (current !== output) throw new Error(`Generated config is stale: ${relative(repositoryDir, generatedConfigPath)}`);
-    return { changed: false, config };
+    return { changed: false, config, descriptions, descriptionPatterns };
   }
   if (current !== output) {
     mkdirSync(dirname(generatedConfigPath), { recursive: true });
     writeFileSync(generatedConfigPath, output, "utf8");
   }
-  return { changed: current !== output, config };
+  return { changed: current !== output, config, descriptions, descriptionPatterns };
 }
 
 const invokedPath = process.argv[1] ? pathToFileURL(resolve(process.argv[1])).href : "";

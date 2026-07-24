@@ -1,3 +1,10 @@
+_descriptions:
+  materials.*.label: Display name used for this structure material.
+  materials.*.mass: Mass contributed by one structure cell made from this material.
+  materials.*.armor: Flat damage reduction and penetration resistance of this material.
+  materials.*.hp: Maximum hit points of one structure cell made from this material.
+  materials.*.recoverPerSecond: Structure HP this material can recover per second where recovery is supported.
+  materials.*.color: Default hexadecimal display color for structure cells made from this material.
 materials:
   basic:
     label: normal steel

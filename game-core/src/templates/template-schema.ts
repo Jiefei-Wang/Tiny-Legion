@@ -130,7 +130,7 @@ export function sanitizeTemplatePlacement(
       continue;
     }
 
-    const rotateQuarterRaw = attachment.rotateQuarter ?? (attachment.rotate90 ? 1 : 0);
+    const rotateQuarterRaw = attachment.rotateQuarter ?? 0;
     const normalizedRotate = normalizePartAttachmentRotate(part, rotateQuarterRaw);
     const anchor = attachment.x !== undefined && attachment.y !== undefined
       ? { x: attachment.x, y: attachment.y }
@@ -275,7 +275,7 @@ function ensureLoaderCoverage(
     if (!part || part.layer !== "functional") {
       continue;
     }
-    const rotateQuarterRaw = attachment.rotateQuarter ?? (attachment.rotate90 ? 1 : 0);
+    const rotateQuarterRaw = attachment.rotateQuarter ?? 0;
     const rotateQuarter = normalizePartAttachmentRotate(part, rotateQuarterRaw);
     const footprint = getPartFootprintOffsets(part, rotateQuarter);
     const baseX = attachment.x;
@@ -416,7 +416,6 @@ export function cloneTemplate(template: UnitTemplate): UnitTemplate {
       x: attachment.x,
       y: attachment.y,
       rotateQuarter: attachment.rotateQuarter,
-      rotate90: attachment.rotate90,
     })),
     display: template.display?.map((item) => ({ kind: item.kind, cell: item.cell, x: item.x, y: item.y })) ?? [],
   };
@@ -519,7 +518,6 @@ export function parseTemplate(input: unknown, options: ParseTemplateOptions = {}
       x,
       y,
       rotateQuarter: typeof record.rotateQuarter === "number" ? ((Math.floor(record.rotateQuarter) % 4 + 4) % 4) : undefined,
-      rotate90: typeof record.rotate90 === "boolean" ? record.rotate90 : undefined,
     });
   }
 

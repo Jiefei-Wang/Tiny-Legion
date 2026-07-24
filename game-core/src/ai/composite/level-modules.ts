@@ -124,7 +124,6 @@ function solvePlan(
     weapon.componentId,
     Math.cos(angleRad) * distance,
     Math.sin(angleRad) * distance,
-    weapon.shootAngleDeg,
     weapon.angleLimit,
   )) return null;
   return {

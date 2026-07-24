@@ -61,7 +61,9 @@ export interface ComponentStats {
   readonly damage?: number;
   readonly range?: number;
   readonly cooldown?: number;
-  readonly shootAngleDeg?: number;
+  readonly hasAngleLimit?: boolean;
+  readonly cwAngle?: number;
+  readonly ccwAngle?: number;
   readonly projectileSpeed?: number;
   readonly projectileGravity?: number;
   readonly penetration?: number;
@@ -120,7 +122,6 @@ export interface PartStats {
   damage?: number;
   range?: number;
   cooldown?: number;
-  shootAngleDeg?: number;
   projectileSpeed?: number;
   projectileGravity?: number;
   penetration?: number;
@@ -153,8 +154,6 @@ export interface PartPropertySet {
   maxSpeed?: number;
   powerGround?: boolean;
   powerAir?: boolean;
-  directional?: boolean;
-  defaultDirection?: PartDirection;
   hasAngleLimit?: boolean;
   cwAngle?: number;
   ccwAngle?: number;
@@ -173,7 +172,6 @@ export interface PartPropertySet {
   projectileGravity?: number;
   tracking?: boolean;
   trackingTurnRate?: number;
-  shootAngleDeg?: number;
   needLoader?: boolean;
   supportedWeaponTags?: string[];
   loadMultiplier?: number;
@@ -253,7 +251,6 @@ export interface AttachmentTemplate {
   x?: number;
   y?: number;
   rotateQuarter?: number;
-  rotate90?: boolean;
 }
 
 export interface DisplayAttachmentTemplate {
@@ -369,6 +366,10 @@ export interface UnitInstance {
   controlImpairFactor: number;
   airDropActive: boolean;
   airDropTargetY: number;
+  /** Remaining lifetime of a mission-killed ground wreck; null until wrecking begins. */
+  groundWreckTimerS: number | null;
+  /** Per-cell HP immediately after wreck-entry damage, indexed by structure-cell id. */
+  groundWreckInitialCellHp: number[];
   alive: boolean;
   vibrate: number;
   mass: number;
@@ -438,6 +439,17 @@ export interface BeamEffect {
   maxLife: number;
 }
 
+export interface BlockExplosionEffect {
+  x: number;
+  y: number;
+  age: number;
+  life: number;
+  size: number;
+  variant: 0 | 1 | 2;
+  seed: number;
+  color: string;
+}
+
 export interface Debris {
   x: number;
   y: number;
@@ -470,6 +482,7 @@ export interface BattleState {
   units: UnitInstance[];
   projectiles: Projectile[];
   beamEffects: BeamEffect[];
+  blockExplosions: BlockExplosionEffect[];
   particles: Particle[];
   debris: Debris[];
   playerBase: BattleBase;

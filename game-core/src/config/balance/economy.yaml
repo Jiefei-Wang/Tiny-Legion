@@ -1,3 +1,7 @@
+_descriptions:
+  baseIncome: Baseline strategic income before refinery and upkeep adjustments.
+  refineryIncome: Additional strategic income provided by each refinery.
+  garrisonUpkeep: Strategic upkeep charged for each node with a garrison.
 baseIncome: 8
 refineryIncome: 6
 garrisonUpkeep: 4

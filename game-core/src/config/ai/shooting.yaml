@@ -1,3 +1,22 @@
+_descriptions:
+  baseline.velocityFilterRatePerSecond: Rate used to smooth observed target velocity; higher values follow changes faster.
+  baseline.leadGainNear: Fraction of predicted target lead applied at close range.
+  baseline.leadGainFar: Fraction of predicted target lead applied at long range.
+  baseline.accelerationSoftCap: Target acceleration where lead prediction begins to be reduced.
+  baseline.accelerationHardCap: Target acceleration treated as too erratic for full lead prediction.
+  baseline.accelerationMinGain: Minimum lead multiplier retained for highly accelerating targets.
+  baseline.aimSlewDegreesPerSecond: Maximum rate at which baseline AI aim may rotate.
+  baseline.aimDeadbandDegrees: Angular change ignored by baseline aim to prevent visual and firing jitter.
+  ballisticSolver.minTimeSeconds: Earliest projectile flight time considered by the ballistic solver.
+  ballisticSolver.horizonRangeScale: Multiplier applied to estimated range when choosing the solve horizon.
+  ballisticSolver.minHorizonSeconds: Minimum flight-time horizon searched for a ballistic solution.
+  ballisticSolver.maxHorizonSeconds: Maximum flight-time horizon searched for a ballistic solution.
+  ballisticSolver.bracketSteps: Number of coarse time samples used to bracket a ballistic solution.
+  ballisticSolver.bisectionSteps: Number of refinement iterations applied after a solution is bracketed.
+  ballisticSolver.speedErrorTolerance: Accepted difference between required and available launch speed.
+  ballisticSolver.directRangeTolerance: Range allowance used when accepting a direct-fire solution.
+  ballisticSolver.travelRangeTolerance: Range allowance used when accepting an arcing travel solution.
+  ballisticSolver.minimumDivisor: Small positive floor used to prevent unstable division.
 baseline:
   velocityFilterRatePerSecond: 6
   leadGainNear: 0.32

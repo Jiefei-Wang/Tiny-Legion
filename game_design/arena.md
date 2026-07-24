@@ -115,7 +115,7 @@ At minimum, expose:
     - slot readiness: `weaponFireTimers`, `weaponLoadTimers`, `weaponReadyCharges`
     - slot mode: `selectedWeaponIndex`, `weaponAutoFire[slot]`
     - derived weapon stats (from balance config at engine build time)
-      - `weaponClass`, `range`, `cooldown`, `shootAngleDeg`, `spreadDeg`
+      - `weaponClass`, `range`, `cooldown`, `hasAngleLimit`, `cwAngle`, `ccwAngle`, `spreadDeg`
       - `damage`, `hitImpulse`
       - ballistic: `projectileSpeed`, `projectileGravity`
       - tracking: `turnRateDegPerSec`

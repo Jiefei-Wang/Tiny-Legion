@@ -176,6 +176,7 @@ class BattleScene extends Phaser.Scene {
     }
     for (const d of state.debris) g.fillStyle(color(d.color), 1).fillRect(d.x - d.size / 2, d.y - d.size / 2, d.size, d.size);
     for (const unit of state.units) this.drawUnit(unit, options, selection, state.projectiles);
+    for (const effect of state.blockExplosions) this.drawBlockExplosion(effect);
 
     if (options.debugTargetLines) {
       for (const unit of state.units) {
@@ -253,7 +254,7 @@ class BattleScene extends Phaser.Scene {
       g.fillStyle(cell.destroyed ? 0x5b3438 : armorColor, cell.destroyed ? 0.18 : 0.72)
         .fillCircle(left + size * 0.17, top + size * 0.17, Math.max(1, size * 0.055))
         .fillCircle(left + size * 0.83, top + size * 0.83, Math.max(1, size * 0.055));
-      g.lineStyle(1, cell.destroyed ? 0xa05e5e : unit.side === "player" ? 0x9fdcdf : 0xe2a29a, cell.destroyed ? 0.55 : 0.28)
+      g.lineStyle(1, cell.destroyed ? 0xa05e5e : unit.side === "player" ? 0x78bfff : 0xff8178, cell.destroyed ? 0.55 : 0.34)
         .strokeRoundedRect(left, top, size, size, 3);
       if (!cell.destroyed) {
         g.fillStyle(0x07121a, 0.34)
@@ -289,6 +290,12 @@ class BattleScene extends Phaser.Scene {
         g.lineStyle(1, 0xeaffff, 0.72).strokeCircle(p.x - size * 0.06, p.y - size * 0.06, size * 0.18);
       }
     }
+    for (const cell of unit.structure) {
+      if (cell.destroyed) continue;
+      const p = at(cell.x, cell.y);
+      this.drawCellDamage(unit, cell, p.x, p.y, size);
+    }
+    this.drawUnitAffiliationBorder(unit, size, at);
     for (const part of unit.attachments) {
       if (!part.alive) continue;
       const p = at(part.x, part.y);
@@ -308,6 +315,127 @@ class BattleScene extends Phaser.Scene {
       }
       g.lineStyle(1, hitboxColor, 0.34).strokeCircle(unit.x, unit.y, unit.radius);
       g.lineStyle(1, 0xffffff, 0.35).lineBetween(unit.x, unit.y, unit.x + unit.vx * 0.25, unit.y + unit.vy * 0.25);
+    }
+  }
+
+  private drawCellDamage(
+    unit: UnitInstance,
+    cell: UnitInstance["structure"][number],
+    x: number,
+    y: number,
+    size: number,
+  ): void {
+    const g = this.graphics;
+    const hpRatio = Math.max(0, Math.min(1, (cell.breakThreshold - cell.strain) / Math.max(1, cell.breakThreshold)));
+    const damage = 1 - hpRatio;
+    if (damage < 0.18) return;
+
+    const left = x - size / 2;
+    const top = y - size / 2;
+    const crackCount = damage >= 0.72 ? 3 : damage >= 0.43 ? 2 : 1;
+    const mirror = ((cell.id + unit.templateId) & 1) === 0 ? 1 : -1;
+    g.lineStyle(Math.max(1, size * 0.055), 0x11171a, 0.48 + damage * 0.28);
+    for (let i = 0; i < crackCount; i += 1) {
+      const anchorX = left + size * (0.3 + i * 0.2);
+      const anchorY = top + size * (0.24 + ((cell.id + i) % 3) * 0.16);
+      const dx = size * (0.1 + i * 0.025) * mirror;
+      g.lineBetween(anchorX, anchorY, anchorX + dx, anchorY + size * 0.14)
+        .lineBetween(anchorX + dx, anchorY + size * 0.14, anchorX - dx * 0.35, anchorY + size * 0.29);
+      if (i > 0) {
+        g.lineBetween(anchorX + dx * 0.45, anchorY + size * 0.2, anchorX + dx * 1.4, anchorY + size * 0.24);
+      }
+    }
+
+    if (hpRatio >= 0.2) return;
+    const now = this.time.now / 1000;
+    for (let puff = 0; puff < 2; puff += 1) {
+      const phase = (now * 0.42 + puff * 0.47 + (cell.id % 7) * 0.11) % 1;
+      const drift = (((cell.id * 13 + puff * 5) % 9) - 4) * size * 0.018;
+      const puffX = Math.round(x + drift + Math.sin(phase * Math.PI * 2) * size * 0.045);
+      const puffY = Math.round(top - phase * size * 0.72);
+      const puffSize = Math.max(2, Math.round(size * (0.12 + phase * 0.055)));
+      const shade = puff === 0 ? 0x343b3d : 0x515858;
+      g.fillStyle(shade, (1 - phase) * 0.3)
+        .fillRect(puffX - puffSize / 2, puffY - puffSize / 2, puffSize, puffSize)
+        .fillRect(puffX + puffSize * 0.35, puffY - puffSize * 0.25, puffSize * 0.7, puffSize * 0.7);
+    }
+  }
+
+  private drawBlockExplosion(effect: BattleState["blockExplosions"][number]): void {
+    const g = this.graphics;
+    const t = Math.max(0, Math.min(1, effect.age / Math.max(0.001, effect.life)));
+    const fade = 1 - t;
+    const pixel = Math.max(2, Math.round(effect.size * 0.13));
+    const extent = effect.size * (0.18 + t * 0.78);
+    const hot = t < 0.28 ? 0xfff0a8 : 0xf29a55;
+    const warm = t < 0.62 ? 0xe9653f : color(effect.color);
+
+    if (t < 0.34) {
+      const core = Math.max(pixel, Math.round(effect.size * (0.28 - t * 0.18)));
+      g.fillStyle(0xffd06b, 0.68 * fade).fillRect(effect.x - core / 2, effect.y - core / 2, core, core);
+    }
+
+    const count = effect.variant === 2 ? 8 : 6;
+    const angleOffset = ((effect.seed % 628) / 100) + (effect.variant === 1 ? Math.PI / 4 : 0);
+    for (let i = 0; i < count; i += 1) {
+      let angle = angleOffset + (i / count) * Math.PI * 2;
+      if (effect.variant === 1) angle += (i % 2 === 0 ? -1 : 1) * 0.16;
+      const distanceScale = effect.variant === 0
+        ? (i % 2 === 0 ? 1 : 0.62)
+        : effect.variant === 1
+        ? (0.55 + ((i * 7 + effect.seed) % 5) * 0.11)
+        : 0.82;
+      const distance = extent * distanceScale;
+      const px = Math.round(effect.x + Math.cos(angle) * distance);
+      const py = Math.round(effect.y + Math.sin(angle) * distance);
+      const shard = Math.max(2, pixel - (effect.variant === 2 && i % 2 ? 1 : 0));
+      g.fillStyle(i % 3 === 0 ? hot : warm, fade * (effect.variant === 2 ? 0.72 : 0.84))
+        .fillRect(px - shard / 2, py - shard / 2, shard, shard);
+    }
+
+    if (effect.variant === 0 && t < 0.45) {
+      const arm = Math.max(pixel, Math.round(effect.size * 0.24 * (1 - t)));
+      g.fillStyle(0xffe49a, fade * 0.48)
+        .fillRect(effect.x - arm - pixel / 2, effect.y - pixel / 2, arm * 2 + pixel, pixel)
+        .fillRect(effect.x - pixel / 2, effect.y - arm - pixel / 2, pixel, arm * 2 + pixel);
+    } else if (effect.variant === 2 && t > 0.12 && t < 0.68) {
+      const ring = Math.max(pixel * 2, Math.round(extent * 0.72));
+      g.lineStyle(pixel, 0xe97845, fade * 0.24).strokeRect(effect.x - ring / 2, effect.y - ring / 2, ring, ring);
+    }
+  }
+
+  private drawUnitAffiliationBorder(
+    unit: UnitInstance,
+    size: number,
+    at: (x: number, y: number) => { x: number; y: number },
+  ): void {
+    if (!unit.alive || unit.groundWreckTimerS !== null) return;
+    const g = this.graphics;
+    const borderColor = unit.side === "player" ? 0x63b5ff : 0xff7068;
+    const aliveCells = unit.structure.filter((cell) => !cell.destroyed);
+    const occupied = new Set(aliveCells.map((cell) => `${cell.x},${cell.y}`));
+    const drawEdge = (x1: number, y1: number, x2: number, y2: number): void => {
+      g.lineStyle(Math.max(2.5, size * 0.18), borderColor, 0.13).lineBetween(x1, y1, x2, y2);
+      g.lineStyle(Math.max(1, size * 0.065), borderColor, 0.78).lineBetween(x1, y1, x2, y2);
+    };
+
+    for (const cell of aliveCells) {
+      const p = at(cell.x, cell.y);
+      const half = size / 2;
+      if (!occupied.has(`${cell.x - 1},${cell.y}`)) {
+        const edgeX = p.x - half * unit.facing;
+        drawEdge(edgeX, p.y - half, edgeX, p.y + half);
+      }
+      if (!occupied.has(`${cell.x + 1},${cell.y}`)) {
+        const edgeX = p.x + half * unit.facing;
+        drawEdge(edgeX, p.y - half, edgeX, p.y + half);
+      }
+      if (!occupied.has(`${cell.x},${cell.y - 1}`)) {
+        drawEdge(p.x - half, p.y - half, p.x + half, p.y - half);
+      }
+      if (!occupied.has(`${cell.x},${cell.y + 1}`)) {
+        drawEdge(p.x - half, p.y + half, p.x + half, p.y + half);
+      }
     }
   }
 

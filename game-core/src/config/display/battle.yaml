@@ -1,10 +1,12 @@
+_descriptions:
+  view.minScale: Smallest camera zoom scale allowed in battle views.
+  view.maxScale: Largest camera zoom scale allowed in battle views.
+  view.verticalPadding: Vertical screen padding reserved when fitting the battlefield view.
+  view.cameraMargin: World-space margin retained around the battlefield during camera fitting.
+  view.designerBorderMargin: Screen-space border kept around Craft and Part Designer grid content.
 view:
   minScale: 0.1
   maxScale: 2.4
   verticalPadding: 16
   cameraMargin: 80
   designerBorderMargin: 72
-renderer:
-  statusX: 16
-  statusY: 14
-  statusDepth: 1000

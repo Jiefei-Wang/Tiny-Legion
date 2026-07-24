@@ -233,14 +233,6 @@ function readOptionalPartCategory(value: unknown): PartCategory | undefined {
   return undefined;
 }
 
-function readLegacyHalfShootAngle(value: unknown): number | undefined {
-  const total = readOptionalNumber(value);
-  if (total === undefined) {
-    return undefined;
-  }
-  return Math.max(0, total * 0.5);
-}
-
 function getDefaultPartDirection(baseComponent: ComponentId): PartDirection {
   void baseComponent;
   return "right";
@@ -453,11 +445,9 @@ export function createImplicitPartDefinition(component: ComponentId): PartDefini
       maxSpeed: stats.maxSpeed,
       powerGround: stats.type === "engine" ? stats.propulsion?.platform === "ground" : undefined,
       powerAir: stats.type === "engine" ? stats.propulsion?.platform === "air" : undefined,
-      directional: stats.directional,
-      defaultDirection: getDefaultPartDirection(component),
-      hasAngleLimit: stats.type === "weapon" ? stats.directional === true : undefined,
-      cwAngle: stats.type === "weapon" && stats.shootAngleDeg !== undefined ? stats.shootAngleDeg * 0.5 : undefined,
-      ccwAngle: stats.type === "weapon" && stats.shootAngleDeg !== undefined ? stats.shootAngleDeg * 0.5 : undefined,
+      hasAngleLimit: stats.type === "weapon" ? stats.hasAngleLimit === true : undefined,
+      cwAngle: stats.type === "weapon" && stats.hasAngleLimit === true ? stats.cwAngle : undefined,
+      ccwAngle: stats.type === "weapon" && stats.hasAngleLimit === true ? stats.ccwAngle : undefined,
       bulletType: stats.type === "weapon"
         ? ((stats.weaponClass === "tracking")
             ? "missile"
@@ -477,7 +467,6 @@ export function createImplicitPartDefinition(component: ComponentId): PartDefini
       projectileGravity: stats.projectileGravity,
       tracking: stats.weaponClass === "tracking",
       trackingTurnRate: stats.tracking?.turnRateDegPerSec,
-      shootAngleDeg: stats.shootAngleDeg,
       needLoader: stats.weaponClass === "tracking" || stats.weaponClass === "heavy-shot" || stats.weaponClass === "explosive",
       supportedWeaponTags: stats.type === "loader" ? (stats.loader?.supports ?? []).map((entry) => String(entry)) : undefined,
       loadMultiplier: stats.loader?.loadMultiplier,
@@ -656,8 +645,6 @@ export function clonePartDefinition(part: PartDefinition): PartDefinition {
           maxSpeed: part.partProperties.maxSpeed,
           powerGround: part.partProperties.powerGround,
           powerAir: part.partProperties.powerAir,
-          directional: part.partProperties.directional,
-          defaultDirection: part.partProperties.defaultDirection,
           hasAngleLimit: part.partProperties.hasAngleLimit,
           cwAngle: part.partProperties.cwAngle,
           ccwAngle: part.partProperties.ccwAngle,
@@ -676,7 +663,6 @@ export function clonePartDefinition(part: PartDefinition): PartDefinition {
           projectileGravity: part.partProperties.projectileGravity,
           tracking: part.partProperties.tracking,
           trackingTurnRate: part.partProperties.trackingTurnRate,
-          shootAngleDeg: part.partProperties.shootAngleDeg,
           needLoader: part.partProperties.needLoader,
           supportedWeaponTags: part.partProperties.supportedWeaponTags ? [...part.partProperties.supportedWeaponTags] : undefined,
           loadMultiplier: part.partProperties.loadMultiplier,
@@ -699,7 +685,6 @@ export function clonePartDefinition(part: PartDefinition): PartDefinition {
           damage: part.stats.damage,
           range: part.stats.range,
           cooldown: part.stats.cooldown,
-          shootAngleDeg: part.stats.shootAngleDeg,
           projectileSpeed: part.stats.projectileSpeed,
           projectileGravity: part.stats.projectileGravity,
           penetration: part.stats.penetration,
@@ -897,14 +882,7 @@ export function parsePartDefinition(input: unknown): PartDefinition | null {
   const hasAngleLimitRaw = readOptionalBoolean(partPropertiesRecord.hasAngleLimit);
   const cwAngleRaw = readOptionalNumber(partPropertiesRecord.cwAngle);
   const ccwAngleRaw = readOptionalNumber(partPropertiesRecord.ccwAngle);
-  const legacyShootHalfAngle = readLegacyHalfShootAngle(partPropertiesRecord.shootAngleDeg);
-  const hasLegacyLimit = legacyShootHalfAngle !== undefined;
-  // The Part Editor renders only an explicit true value as enabled. Normalize
-  // missing weapon flags to false so editor state and runtime behavior agree.
-  const hasAngleLimit = hasAngleLimitRaw ?? (hasLegacyLimit ? true : (normalizedPartType === "weapon" ? false : undefined));
-  const fallbackLegacyHalfAngle = legacyShootHalfAngle;
-  const cwAngle = cwAngleRaw ?? (hasAngleLimit === true ? fallbackLegacyHalfAngle : undefined);
-  const ccwAngle = ccwAngleRaw ?? (hasAngleLimit === true ? fallbackLegacyHalfAngle : undefined);
+  const hasAngleLimit = hasAngleLimitRaw ?? (normalizedPartType === "weapon" ? false : undefined);
   const partProperties: PartPropertySet = {
     gasCost: readOptionalNumber(partPropertiesRecord.gasCost),
     mass: readOptionalNumber(partPropertiesRecord.mass),
@@ -920,11 +898,9 @@ export function parsePartDefinition(input: unknown): PartDefinition | null {
     maxSpeed: readOptionalNumber(partPropertiesRecord.maxSpeed),
     powerGround: readOptionalBoolean(partPropertiesRecord.powerGround),
     powerAir: readOptionalBoolean(partPropertiesRecord.powerAir),
-    directional: readOptionalBoolean(partPropertiesRecord.directional),
-    defaultDirection: readOptionalPartDirection(partPropertiesRecord.defaultDirection),
     hasAngleLimit,
-    cwAngle,
-    ccwAngle,
+    cwAngle: cwAngleRaw,
+    ccwAngle: ccwAngleRaw,
     bulletType: (partPropertiesRecord.bulletType === "bullet" || partPropertiesRecord.bulletType === "missile" || partPropertiesRecord.bulletType === "laser")
       ? partPropertiesRecord.bulletType
       : undefined,
@@ -942,7 +918,6 @@ export function parsePartDefinition(input: unknown): PartDefinition | null {
     projectileGravity: readOptionalNumber(partPropertiesRecord.projectileGravity),
     tracking: readOptionalBoolean(partPropertiesRecord.tracking),
     trackingTurnRate: readOptionalNumber(partPropertiesRecord.trackingTurnRate),
-    shootAngleDeg: readOptionalNumber(partPropertiesRecord.shootAngleDeg),
     needLoader: readOptionalBoolean(partPropertiesRecord.needLoader),
     supportedWeaponTags: normalizeStringList(partPropertiesRecord.supportedWeaponTags),
     loadMultiplier: readOptionalNumber(partPropertiesRecord.loadMultiplier),
@@ -975,8 +950,8 @@ export function parsePartDefinition(input: unknown): PartDefinition | null {
     baseComponent,
     directional: typeof data.directional === "boolean"
       ? data.directional
-      : (partProperties.directional ?? COMPONENTS[baseComponent].directional === true),
-    direction: readOptionalPartDirection(data.direction) ?? partProperties.defaultDirection ?? getDefaultPartDirection(baseComponent),
+      : COMPONENTS[baseComponent].directional === true,
+    direction: readOptionalPartDirection(data.direction) ?? getDefaultPartDirection(baseComponent),
     anchor: { x: resolvedAnchor.x, y: resolvedAnchor.y },
     cells: resolvedBoxes.map((cell) => ({
       x: cell.x,
@@ -1008,7 +983,6 @@ export function parsePartDefinition(input: unknown): PartDefinition | null {
       damage: readOptionalNumber(runtimeRecord.damage ?? partProperties.damage),
       range: readOptionalNumber(runtimeRecord.range ?? partProperties.range),
       cooldown: readOptionalNumber(runtimeRecord.cooldown ?? partProperties.cooldown),
-      shootAngleDeg: readOptionalNumber(runtimeRecord.shootAngleDeg ?? partProperties.shootAngleDeg),
       projectileSpeed: readOptionalNumber(runtimeRecord.projectileSpeed ?? partProperties.projectileSpeed),
       projectileGravity: readOptionalNumber(runtimeRecord.projectileGravity ?? partProperties.projectileGravity),
       penetration: readOptionalNumber(runtimeRecord.penetration ?? partProperties.penetration),

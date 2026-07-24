@@ -1,1 +1,3 @@
+_descriptions:
+  maxCertifiedLevel: Highest built-in AI skill level exposed by certified level selectors.
 maxCertifiedLevel: 5

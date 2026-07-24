@@ -2,14 +2,12 @@ import { armyCap } from "../config/balance/commander.ts";
 import { getIncomeAndUpkeep } from "../config/balance/economy.ts";
 import {
   AIR_HOLD_GRAVITY,
-  AIR_THRUST_ACCEL_SCALE,
+  AIR_POWER_TO_SPEED_SCALE,
   BATTLEFIELD_HEIGHT,
   BATTLEFIELD_WIDTH,
   DEFAULT_UNIT_MOVEMENT_SPEED_MULTIPLIER,
   DEFAULT_GROUND_HEIGHT_RATIO,
   BATTLE_SALVAGE_REFUND_FACTOR,
-  MAX_UNIT_MOVEMENT_SPEED_MULTIPLIER,
-  MIN_UNIT_MOVEMENT_SPEED_MULTIPLIER,
 } from "../config/balance/battlefield.ts";
 import { createMapNodes } from "../gameplay/map/node-graph.ts";
 import {
@@ -31,8 +29,6 @@ import { BattleSession } from "../gameplay/battle/battle-session.ts";
 import type { BattleSessionOptions } from "../gameplay/battle/battle-session.ts";
 import {
   DEFAULT_BATTLE_SOUND_VOLUME,
-  MAX_BATTLE_SOUND_VOLUME,
-  MIN_BATTLE_SOUND_VOLUME,
   PhaserBattleRenderer,
 } from "../rendering/phaser-battle-renderer.ts";
 import type { BattleAiController } from "../gameplay/battle/battle-session.ts";
@@ -234,6 +230,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
             <canvas id="battleCanvas" width="${BATTLEFIELD_WIDTH}" height="${BATTLEFIELD_HEIGHT}"></canvas>
             <canvas id="templateEditorCanvas" class="hidden"></canvas>
             <canvas id="partEditorCanvas" class="hidden"></canvas>
+            <div id="testArenaLossStats" class="test-arena-loss-stats hidden" aria-live="polite"></div>
           </div>
           <div id="leaderboardCenter" class="panel hidden"></div>
           <div id="weaponHud" class="weapon-hud small"></div>
@@ -276,15 +273,9 @@ export function bootstrap(options: BootstrapOptions = {}): void {
           <div class="panel-heading">
             <div><span class="eyebrow">Developer tools</span><h2 id="globalSettingsTitle">Global Settings</h2></div>
           </div>
-          <p class="small">Developer authoring tool: saves update game-core YAML and apply immediately to this session.</p>
-          <label class="global-setting-field" for="globalMovementSpeedMultiplier">
-            <span><strong>Unit movement speed</strong><small>Scales commanded movement for every ground and air unit.</small></span>
-            <span class="global-setting-value"><input id="globalMovementSpeedMultiplier" type="number" min="${MIN_UNIT_MOVEMENT_SPEED_MULTIPLIER}" max="${MAX_UNIT_MOVEMENT_SPEED_MULTIPLIER}" step="0.1" /> ×</span>
-          </label>
-          <label class="global-setting-field" for="globalBattleSoundVolume">
-            <span><strong>Battle sound volume</strong><small>Scales impacts, explosions, deployment, and engine sounds. Set to 0 to mute.</small></span>
-            <span class="global-setting-value"><input id="globalBattleSoundVolume" type="number" min="${MIN_BATTLE_SOUND_VOLUME}" max="${MAX_BATTLE_SOUND_VOLUME}" step="0.1" /> ×</span>
-          </label>
+          <p class="small">Developer YAML authoring tool. Movement and master sound apply live; other settings take effect after restarting the affected runtime.</p>
+          <div id="globalSettingsTabs" class="global-settings-tabs" role="tablist" aria-label="Configuration categories"></div>
+          <div id="globalSettingsContent" class="global-settings-content"></div>
           <div id="globalSettingsError" class="small global-settings-error" aria-live="polite"></div>
           <div class="row global-settings-actions">
             <button id="btnResetGlobalSettings" type="button">Reload YAML</button>
@@ -322,8 +313,8 @@ export function bootstrap(options: BootstrapOptions = {}): void {
   const developerMenu = getElement<HTMLDetailsElement>("#developerMenu");
   const btnOpenGlobalSettings = getElement<HTMLButtonElement>("#btnOpenGlobalSettings");
   const globalSettingsOverlay = getElement<HTMLDivElement>("#globalSettingsOverlay");
-  const globalMovementSpeedInput = getElement<HTMLInputElement>("#globalMovementSpeedMultiplier");
-  const globalBattleSoundInput = getElement<HTMLInputElement>("#globalBattleSoundVolume");
+  const globalSettingsTabs = getElement<HTMLDivElement>("#globalSettingsTabs");
+  const globalSettingsContent = getElement<HTMLDivElement>("#globalSettingsContent");
   const globalSettingsError = getElement<HTMLDivElement>("#globalSettingsError");
   const btnResetGlobalSettings = getElement<HTMLButtonElement>("#btnResetGlobalSettings");
   const btnCancelGlobalSettings = getElement<HTMLButtonElement>("#btnCancelGlobalSettings");
@@ -336,6 +327,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
   const canvas = getElement<HTMLCanvasElement>("#battleCanvas");
   const templateEditorCanvas = getElement<HTMLCanvasElement>("#templateEditorCanvas");
   const partEditorCanvas = getElement<HTMLCanvasElement>("#partEditorCanvas");
+  const testArenaLossStats = getElement<HTMLDivElement>("#testArenaLossStats");
 
   debugMenu.addEventListener("toggle", () => {
     if (debugMenu.open) developerMenu.open = false;
@@ -350,6 +342,12 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     movementSpeedMultiplier: number;
     battleSoundVolume: number;
   }
+  type ConfigTree = Record<string, Record<string, unknown>>;
+  type ConfigDescriptionTree = Record<string, Record<string, Record<string, string>>>;
+  let globalSettingsConfig: ConfigTree | null = null;
+  let globalSettingsDescriptions: ConfigDescriptionTree | null = null;
+  let globalSettingsCategory = "balance";
+  let activeGlobalSettingsPreview: { audio: HTMLAudioElement; button: HTMLButtonElement } | null = null;
   const fetchGlobalSettingsFromYaml = async (): Promise<GlobalSettingsValues> => {
     const response = await fetch("/__config/global-settings");
     if (!response.ok) throw new Error(`Global settings request failed (${response.status}).`);
@@ -2444,8 +2442,19 @@ export function bootstrap(options: BootstrapOptions = {}): void {
 
     if (!replayMode) {
       arenaReplayStats.textContent = "";
+      const showTestArenaStats = screen === "testArena";
+      testArenaLossStats.classList.toggle("hidden", !showTestArenaStats);
+      if (showTestArenaStats) {
+        const losses = battle.getLossStats();
+        testArenaLossStats.innerHTML = `
+          <strong>Arena losses</strong>
+          <span class="player"><b>Player</b><i>${losses.player.destroyedObjects} destroyed</i><i>${Math.floor(losses.player.gasWasted)} gas wasted</i></span>
+          <span class="enemy"><b>Enemy</b><i>${losses.enemy.destroyedObjects} destroyed</i><i>${Math.floor(losses.enemy.gasWasted)} gas wasted</i></span>
+        `;
+      }
       return;
     }
+    testArenaLossStats.classList.add("hidden");
     const state = battle.getState();
     const onFieldPlayer = computeOnFieldGasValue("player");
     const onFieldEnemy = computeOnFieldGasValue("enemy");
@@ -2699,12 +2708,6 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     if (partType === "weapon") {
       part.partProperties.explodeOnHit = weaponExplosive;
     }
-    if (part.partProperties.defaultDirection && !part.direction) {
-      part.direction = part.partProperties.defaultDirection;
-    }
-    if (part.partProperties.directional !== undefined) {
-      part.directional = part.partProperties.directional;
-    }
   };
 
   const syncPartMetaDefaultsIfNotEdited = (): void => {
@@ -2772,7 +2775,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         selectedInfo.innerHTML = `
           <div><strong>Part Designer</strong></div>
           <div class="small">Part: ${partDesignerDraft.name} (${partDesignerDraft.id})</div>
-          <div class="small">Layer: ${partDesignerDraft.layer} | Type: ${partDesignerDraft.partType ?? getPartTypeFromComponent(partDesignerDraft.baseComponent)} | Category: ${partDesignerDraft.partCategory ?? "n/a"} | Directional: ${partDesignerDraft.directional ? "yes" : "no"} | Direction: ${partDesignerDraft.direction ?? getPartDirectionDefault(partDesignerDraft.baseComponent)}</div>
+          <div class="small">Layer: ${partDesignerDraft.layer} | Type: ${partDesignerDraft.partType ?? getPartTypeFromComponent(partDesignerDraft.baseComponent)} | Category: ${partDesignerDraft.partCategory ?? "n/a"} | Placement rotates facing: ${partDesignerDraft.directional ? "yes" : "no"} | Base facing: ${partDesignerDraft.direction ?? getPartDirectionDefault(partDesignerDraft.baseComponent)}</div>
           <div class="small">Cells: ${partDesignerDraft.boxes.length} | Anchor: (${partDesignerDraft.anchor.x},${partDesignerDraft.anchor.y})</div>
           <div class="row">
             <label class="small">Tool
@@ -2914,7 +2917,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
   const updateWeaponHud = (): void => {
     if (isEditorScreen()) {
       if (isPartEditorScreen()) {
-        weaponHud.innerHTML = `<div><strong>Part Designer</strong></div><div class="small">Tool=${partDesignerTool}. Left-click applies the selected tool, right-click erases a box, right-drag pans, and wheel zooms. Q/E rotates preview for directional parts.</div>`;
+        weaponHud.innerHTML = `<div><strong>Part Designer</strong></div><div class="small">Tool=${partDesignerTool}. Left-click applies the selected tool, right-click erases a box, right-drag pans, and wheel zooms. Q/E rotates the functional facing or a multi-cell footprint when allowed.</div>`;
       } else {
         weaponHud.innerHTML = `<div class="small">${editorLayer} | ${editorDeleteMode ? "delete" : "place"} | Left: apply | Right: remove | Drag: pan | Wheel: zoom${isCurrentEditorSelectionRotatable() ? " | Q: rotate 90° counterclockwise | E: rotate 90° clockwise" : ""}</div>`;
       }
@@ -3866,7 +3869,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         }
         const rotateQuarter = typeof attachment.rotateQuarter === "number"
           ? ((attachment.rotateQuarter % 4 + 4) % 4) as 0 | 1 | 2 | 3
-          : (attachment.rotate90 ? 1 : 0);
+          : 0;
         const normalizedRotate = normalizePartAttachmentRotate(part, rotateQuarter);
         const placement = getFootprintSlots(slot, part, normalizedRotate);
         if (!placement || placement.slots.length <= 0) {
@@ -3958,7 +3961,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       const speedCap = Math.max(1, weightedSpeedCap / Math.max(1, capWeight));
       const rawSpeed = editorDraft.type === "ground"
         ? (totalPower / Math.max(16, totalMass)) * 74
-        : Math.max(0, (totalPower / Math.max(16, totalMass)) * AIR_THRUST_ACCEL_SCALE - AIR_HOLD_GRAVITY);
+        : Math.max(0, (totalPower / Math.max(16, totalMass)) * AIR_POWER_TO_SPEED_SCALE - AIR_HOLD_GRAVITY);
       achievableSpeed = Math.max(0, Math.min(speedCap, rawSpeed));
     }
 
@@ -3973,7 +3976,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         }
         const part = resolvePartDefinitionForAttachment({ partId: attachment.partId, component: attachment.component }, parts);
         const enginePower = Math.max(0, part?.stats?.power ?? stats.power ?? 0);
-        liftAccel += (enginePower / mass) * AIR_THRUST_ACCEL_SCALE;
+        liftAccel += (enginePower / mass) * AIR_POWER_TO_SPEED_SCALE;
       }
     }
 
@@ -5164,7 +5167,6 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         damage: baseStats.damage !== undefined ? String(baseStats.damage) : "none",
         range: baseStats.range !== undefined ? String(baseStats.range) : "none",
         cooldown: baseStats.cooldown !== undefined ? String(baseStats.cooldown) : "none",
-        shootAngleDeg: baseStats.shootAngleDeg !== undefined ? String(baseStats.shootAngleDeg) : "none",
         projectileSpeed: baseStats.projectileSpeed !== undefined ? String(baseStats.projectileSpeed) : "none",
         projectileGravity: baseStats.projectileGravity !== undefined ? String(baseStats.projectileGravity) : "none",
         penetration: baseStats.penetration !== undefined ? String(baseStats.penetration) : "0",
@@ -5177,8 +5179,8 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         loaderMinLoadTime: baseStats.loader?.minLoadTime !== undefined ? String(baseStats.loader.minLoadTime) : "none",
         weaponMaxLoadedAmmo: String(baseStats.maxLoadedAmmo ?? 1),
         loaderMinBurstInterval: baseStats.loader?.minBurstInterval !== undefined ? String(baseStats.loader.minBurstInterval) : "none",
-        cwAngle: baseStats.shootAngleDeg !== undefined ? String(baseStats.shootAngleDeg * 0.5) : "none",
-        ccwAngle: baseStats.shootAngleDeg !== undefined ? String(baseStats.shootAngleDeg * 0.5) : "none",
+        cwAngle: baseStats.cwAngle !== undefined ? String(baseStats.cwAngle) : "none",
+        ccwAngle: baseStats.ccwAngle !== undefined ? String(baseStats.ccwAngle) : "none",
       };
 
       const partProps = partDesignerDraft.properties ?? {};
@@ -5242,8 +5244,8 @@ export function bootstrap(options: BootstrapOptions = {}): void {
           </label>` : ""}
         </div>
         ${propIsWeapon ? `<div class="row">
-          <label class="small"><input id="partDirectional" type="checkbox" ${partDesignerDraft.directional ? "checked" : ""} /> Directional</label>
-          <label class="small">Direction
+          <label class="small"><input id="partDirectional" type="checkbox" ${partDesignerDraft.directional ? "checked" : ""} /> Placement rotation changes weapon facing</label>
+          <label class="small">Base facing
             <select id="partDirection">
               <option value="up" ${(partDesignerDraft.direction ?? getPartDirectionDefault(partDesignerDraft.baseComponent)) === "up" ? "selected" : ""}>up</option>
               <option value="right" ${(partDesignerDraft.direction ?? getPartDirectionDefault(partDesignerDraft.baseComponent)) === "right" ? "selected" : ""}>right</option>
@@ -5286,11 +5288,12 @@ export function bootstrap(options: BootstrapOptions = {}): void {
           <label class="small">Max Speed <input id="partMaxSpeed" type="number" step="1" value="${partRuntimeProps.maxSpeed ?? ""}" placeholder="${runtimePlaceholders.maxSpeed}" /></label>
         </div>` : ""}
         ${showAngleLimitControls ? `<div class="row">
-          <label class="small"><input id="partHasAngleLimit" type="checkbox" ${hasAngleLimitChecked ? "checked" : ""} /> hasAngleLimit</label>
+          <label class="small"><input id="partHasAngleLimit" type="checkbox" ${hasAngleLimitChecked ? "checked" : ""} /> Limit firing arc</label>
+          <span class="small">This limits aiming around the weapon's facing; it does not control part placement rotation.</span>
         </div>` : ""}
         ${showAngleLimitControls && hasAngleLimitChecked ? `<div class="row">
-          <label class="small">cwAngle <input id="partCwAngle" type="number" step="0.1" min="0" value="${partRuntimeProps.cwAngle ?? ""}" placeholder="${runtimePlaceholders.cwAngle}" /></label>
-          <label class="small">ccwAngle <input id="partCcwAngle" type="number" step="0.1" min="0" value="${partRuntimeProps.ccwAngle ?? ""}" placeholder="${runtimePlaceholders.ccwAngle}" /></label>
+          <label class="small">Clockwise arc (°) <input id="partCwAngle" type="number" step="0.1" min="0" value="${partRuntimeProps.cwAngle ?? ""}" placeholder="${runtimePlaceholders.cwAngle}" /></label>
+          <label class="small">Counter-clockwise arc (°) <input id="partCcwAngle" type="number" step="0.1" min="0" value="${partRuntimeProps.ccwAngle ?? ""}" placeholder="${runtimePlaceholders.ccwAngle}" /></label>
         </div>` : ""}
         ${propIsWeapon ? `<div class="row">
           <label class="small">Recoil <input id="partRecoil" type="number" step="0.1" value="${partRuntimeProps.recoil ?? ""}" placeholder="${runtimePlaceholders.recoil}" /></label>
@@ -6463,8 +6466,8 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       );
       partDesignerDraft.layer = partDesignerDraft.partType === "structure" ? "structure" : "functional";
       partDesignerDraft.partProperties = getPartPropertiesDefaultsByType(partDesignerDraft.partType, partDesignerDraft.partCategory);
-      partDesignerDraft.direction = partDesignerDraft.partProperties.defaultDirection ?? getPartDirectionDefault(partDesignerDraft.baseComponent);
-      partDesignerDraft.directional = partDesignerDraft.partProperties.directional ?? COMPONENTS[partDesignerDraft.baseComponent].directional === true;
+      partDesignerDraft.direction = getPartDirectionDefault(partDesignerDraft.baseComponent);
+      partDesignerDraft.directional = COMPONENTS[partDesignerDraft.baseComponent].directional === true;
       partDesignerBrushSlot = normalizePartDesignerSlotForLayer(partDesignerBrushSlot, partDesignerDraft.layer);
       recalcPartDraftFromSlots();
       renderPanels();
@@ -6527,7 +6530,6 @@ export function bootstrap(options: BootstrapOptions = {}): void {
           damage: undefined,
           range: undefined,
           cooldown: undefined,
-          shootAngleDeg: undefined,
           projectileSpeed: undefined,
           projectileGravity: undefined,
           penetration: undefined,
@@ -6589,20 +6591,12 @@ export function bootstrap(options: BootstrapOptions = {}): void {
 
     getOptionalElement<HTMLInputElement>("#partDirectional")?.addEventListener("change", (event) => {
       partDesignerDraft.directional = (event.currentTarget as HTMLInputElement).checked;
-      partDesignerDraft.partProperties = {
-        ...(partDesignerDraft.partProperties ?? {}),
-        directional: partDesignerDraft.directional,
-      };
       renderPanels();
     });
     getOptionalElement<HTMLSelectElement>("#partDirection")?.addEventListener("change", (event) => {
       const value = (event.currentTarget as HTMLSelectElement).value;
       if (value === "up" || value === "right" || value === "down" || value === "left") {
         partDesignerDraft.direction = value as PartDirection;
-        partDesignerDraft.partProperties = {
-          ...(partDesignerDraft.partProperties ?? {}),
-          defaultDirection: partDesignerDraft.direction,
-        };
       }
       renderPanels();
     });
@@ -6815,7 +6809,6 @@ export function bootstrap(options: BootstrapOptions = {}): void {
           damage: undefined,
           range: undefined,
           cooldown: undefined,
-          shootAngleDeg: undefined,
           projectileSpeed: undefined,
           projectileGravity: undefined,
           penetration: undefined,
@@ -7138,64 +7131,231 @@ export function bootstrap(options: BootstrapOptions = {}): void {
   });
 
   const closeGlobalSettings = (): void => {
+    stopGlobalSettingsPreview();
     globalSettingsOverlay.classList.add("hidden");
     globalSettingsError.textContent = "";
   };
+  const humanizeConfigKey = (key: string): string => {
+    if (key.toLowerCase() === "ai") return "AI";
+    return key
+      .replace(/([A-Z]+)([A-Z][a-z])/g, "$1 $2")
+      .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+      .replaceAll("-", " ")
+      .replace(/\b\w/g, (letter) => letter.toUpperCase());
+  };
+  const getSoundPreviewKind = (path: string[]): "sample" | "fire-pool" | null => {
+    if (path[0] !== "sound" || path[1] !== "battle") return null;
+    if (path[2] === "samples" && path.length === 4) return "sample";
+    if (path[2] === "firePools" && path.length === 4) return "fire-pool";
+    return null;
+  };
+  const renderConfigNode = (value: unknown, path: string[], descriptions: Record<string, string>, depth = 0): string => {
+    if (value && typeof value === "object" && !Array.isArray(value)) {
+      return Object.entries(value as Record<string, unknown>).map(([key, child]) => {
+        const childPath = [...path, key];
+        if (child && typeof child === "object" && !Array.isArray(child)) {
+          return `<details class="global-settings-group depth-${Math.min(depth, 3)}" ${depth < 1 ? "open" : ""}>
+            <summary>${escapeHtml(humanizeConfigKey(key))}</summary>
+            <div>${renderConfigNode(child, childPath, descriptions, depth + 1)}</div>
+          </details>`;
+        }
+        return renderConfigNode(child, childPath, descriptions, depth + 1);
+      }).join("");
+    }
+    const key = path[path.length - 1] ?? "value";
+    const encodedPath = encodeURIComponent(JSON.stringify(path));
+    const label = escapeHtml(humanizeConfigKey(key));
+    const description = descriptions[path.slice(2).join(".")] ?? "No description is available for this setting.";
+    const descriptionAttribute = escapeHtml(description);
+    const help = `<span class="global-setting-help" title="${descriptionAttribute}" aria-label="${descriptionAttribute}" tabindex="0">?</span>`;
+    const previewKind = getSoundPreviewKind(path);
+    const previewButton = previewKind
+      ? `<button type="button" class="global-setting-preview" data-sound-preview="${previewKind}" data-sound-path="${encodedPath}" aria-label="Preview ${label} sound">&#9654; Preview</button>`
+      : "";
+    if (typeof value === "boolean") {
+      return `<label class="global-setting-field" data-description="${descriptionAttribute}" title="${descriptionAttribute}"><span><strong>${label}</strong><small>Boolean ${help}</small></span>
+        <span class="global-setting-value"><input data-config-path="${encodedPath}" data-config-type="boolean" type="checkbox" ${value ? "checked" : ""} /></span></label>`;
+    }
+    if (typeof value === "number") {
+      return `<label class="global-setting-field" data-description="${descriptionAttribute}" title="${descriptionAttribute}"><span><strong>${label}</strong><small>Number ${help}</small></span>
+        <span class="global-setting-value"><input data-config-path="${encodedPath}" data-config-type="number" type="number" step="any" value="${value}" /></span></label>`;
+    }
+    if (Array.isArray(value)) {
+      return `<label class="global-setting-field global-setting-array" data-description="${descriptionAttribute}" title="${descriptionAttribute}"><span><strong>${label}</strong><small>JSON array ${help}</small></span>
+        <span class="global-setting-array-value"><textarea data-config-path="${encodedPath}" data-config-type="array" rows="2">${escapeHtml(JSON.stringify(value))}</textarea>${previewButton}</span></label>`;
+    }
+    return `<label class="global-setting-field" data-description="${descriptionAttribute}" title="${descriptionAttribute}"><span><strong>${label}</strong><small>Text ${help}</small></span>
+      <span class="global-setting-value global-setting-text"><input data-config-path="${encodedPath}" data-config-type="string" type="text" value="${escapeHtml(String(value ?? ""))}" />${previewButton}</span></label>`;
+  };
+  const stopGlobalSettingsPreview = (): void => {
+    if (!activeGlobalSettingsPreview) return;
+    activeGlobalSettingsPreview.audio.pause();
+    activeGlobalSettingsPreview.audio.currentTime = 0;
+    activeGlobalSettingsPreview.button.disabled = false;
+    activeGlobalSettingsPreview.button.innerHTML = "&#9654; Preview";
+    activeGlobalSettingsPreview = null;
+  };
+  const playGlobalSettingsPreview = async (button: HTMLButtonElement): Promise<void> => {
+    stopGlobalSettingsPreview();
+    const path = JSON.parse(decodeURIComponent(button.dataset.soundPath ?? "")) as string[];
+    const previewKind = button.dataset.soundPreview;
+    const draft = collectGlobalSettingsDraft();
+    const battleSound = draft.sound?.battle as {
+      samples?: Record<string, unknown>;
+      firePools?: Record<string, unknown>;
+      firePlaybackRates?: Record<string, unknown>;
+    } | undefined;
+    if (!battleSound?.samples) throw new Error("Sound sample settings are unavailable.");
+
+    let sampleKey = path[3] ?? "";
+    let playbackRate = 1;
+    if (previewKind === "fire-pool") {
+      const pool = battleSound.firePools?.[sampleKey];
+      if (!Array.isArray(pool) || pool.length === 0 || pool.some((entry) => typeof entry !== "string")) {
+        throw new Error(`${humanizeConfigKey(sampleKey)} must contain at least one valid sample key.`);
+      }
+      sampleKey = pool[Math.floor(Math.random() * pool.length)] as string;
+      const configuredRate = battleSound.firePlaybackRates?.[path[3] ?? ""];
+      if (typeof configuredRate === "number" && Number.isFinite(configuredRate)) playbackRate = configuredRate;
+    }
+    const samplePath = battleSound.samples[sampleKey];
+    if (typeof samplePath !== "string" || samplePath.trim().length === 0) {
+      throw new Error(`No audio path is configured for sample "${sampleKey}".`);
+    }
+
+    const assetUrl = `/assets/audio/${samplePath.split("/").map((segment) => encodeURIComponent(segment)).join("/")}`;
+    const audio = new Audio(assetUrl);
+    audio.playbackRate = playbackRate;
+    button.disabled = true;
+    button.textContent = "Playing...";
+    activeGlobalSettingsPreview = { audio, button };
+    const finish = (): void => {
+      if (activeGlobalSettingsPreview?.audio === audio) stopGlobalSettingsPreview();
+    };
+    audio.addEventListener("ended", finish, { once: true });
+    audio.addEventListener("error", finish, { once: true });
+    try {
+      await audio.play();
+    } catch (error) {
+      finish();
+      throw error;
+    }
+  };
+  const renderGlobalSettings = (): void => {
+    stopGlobalSettingsPreview();
+    if (!globalSettingsConfig) {
+      globalSettingsTabs.innerHTML = "";
+      globalSettingsContent.innerHTML = `<div class="small">Loading YAML settings...</div>`;
+      return;
+    }
+    const categories = Object.keys(globalSettingsConfig);
+    if (!categories.includes(globalSettingsCategory)) globalSettingsCategory = categories[0] ?? "";
+    globalSettingsTabs.innerHTML = categories.map((category) => `<button type="button" role="tab" data-config-category="${escapeHtml(category)}" aria-selected="${category === globalSettingsCategory}" class="${category === globalSettingsCategory ? "active" : ""}">${escapeHtml(humanizeConfigKey(category))}</button>`).join("");
+    const categoryConfig = globalSettingsConfig[globalSettingsCategory] ?? {};
+    globalSettingsContent.innerHTML = Object.entries(categoryConfig).map(([subcategory, value]) => `
+      <section class="global-settings-subcategory">
+        <h3>${escapeHtml(humanizeConfigKey(subcategory))}</h3>
+        ${renderConfigNode(value, [globalSettingsCategory, subcategory], globalSettingsDescriptions?.[globalSettingsCategory]?.[subcategory] ?? {})}
+      </section>
+    `).join("") || `<div class="small">No settings in this category.</div>`;
+    globalSettingsTabs.querySelectorAll<HTMLButtonElement>("[data-config-category]").forEach((button) => {
+      button.addEventListener("click", () => {
+        try {
+          globalSettingsConfig = collectGlobalSettingsDraft();
+        } catch (error) {
+          globalSettingsError.textContent = error instanceof Error ? error.message : String(error);
+          return;
+        }
+        globalSettingsCategory = button.dataset.configCategory ?? globalSettingsCategory;
+        globalSettingsError.textContent = "";
+        renderGlobalSettings();
+      });
+    });
+    globalSettingsContent.querySelectorAll<HTMLButtonElement>("[data-sound-preview]").forEach((button) => {
+      button.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        globalSettingsError.textContent = "";
+        void playGlobalSettingsPreview(button).catch((error) => {
+          globalSettingsError.textContent = `Sound preview failed: ${error instanceof Error ? error.message : String(error)}`;
+        });
+      });
+    });
+  };
   const loadGlobalSettingsForm = async (): Promise<void> => {
-    const settings = await fetchGlobalSettingsFromYaml();
-    globalMovementSpeedInput.value = `${settings.movementSpeedMultiplier}`;
-    globalBattleSoundInput.value = `${settings.battleSoundVolume}`;
+    const response = await fetch("/__config/settings");
+    const payload = await response.json() as { ok?: boolean; config?: ConfigTree; descriptions?: ConfigDescriptionTree; error?: string };
+    if (!response.ok || !payload.ok || !payload.config || !payload.descriptions) {
+      throw new Error(payload.error ?? `Settings request failed (${response.status}).`);
+    }
+    globalSettingsConfig = payload.config;
+    globalSettingsDescriptions = payload.descriptions;
+    renderGlobalSettings();
   };
   const openGlobalSettings = (): void => {
     developerMenu.open = false;
-    globalMovementSpeedInput.value = `${globalMovementSpeedMultiplier}`;
-    globalBattleSoundInput.value = `${globalBattleSoundVolume}`;
     globalSettingsError.textContent = "";
     globalSettingsOverlay.classList.remove("hidden");
-    void loadGlobalSettingsForm()
-      .then(() => {
-        globalMovementSpeedInput.focus();
-        globalMovementSpeedInput.select();
-      })
-      .catch((error) => {
-        globalSettingsError.textContent = error instanceof Error ? error.message : String(error);
-      });
+    renderGlobalSettings();
+    void loadGlobalSettingsForm().catch((error) => {
+      globalSettingsError.textContent = error instanceof Error ? error.message : String(error);
+    });
+  };
+  const setConfigPathValue = (rootConfig: ConfigTree, path: string[], value: unknown): void => {
+    let cursor: Record<string, unknown> = rootConfig;
+    for (let index = 0; index < path.length - 1; index += 1) {
+      const key = path[index] ?? "";
+      const next = cursor[key];
+      if (!next || typeof next !== "object" || Array.isArray(next)) throw new Error(`Invalid setting path: ${path.join(".")}`);
+      cursor = next as Record<string, unknown>;
+    }
+    cursor[path[path.length - 1] ?? ""] = value;
+  };
+  const collectGlobalSettingsDraft = (): ConfigTree => {
+    if (!globalSettingsConfig) throw new Error("Settings have not loaded.");
+    const draft = structuredClone(globalSettingsConfig);
+    const controls = globalSettingsContent.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>("[data-config-path]");
+    for (const control of controls) {
+      const path = JSON.parse(decodeURIComponent(control.dataset.configPath ?? "")) as string[];
+      const type = control.dataset.configType;
+      let value: unknown;
+      if (type === "boolean" && control instanceof HTMLInputElement) {
+        value = control.checked;
+      } else if (type === "number") {
+        value = Number(control.value);
+        if (!Number.isFinite(value)) throw new Error(`${humanizeConfigKey(path[path.length - 1] ?? "Setting")} must be a finite number.`);
+      } else if (type === "array") {
+        value = JSON.parse(control.value);
+        if (!Array.isArray(value)) throw new Error(`${humanizeConfigKey(path[path.length - 1] ?? "Setting")} must be a JSON array.`);
+      } else {
+        value = control.value;
+      }
+      setConfigPathValue(draft, path, value);
+    }
+    return draft;
   };
   const saveGlobalSettings = async (): Promise<void> => {
-    const requestedMovementSpeed = Number(globalMovementSpeedInput.value);
-    if (!Number.isFinite(requestedMovementSpeed)
-      || requestedMovementSpeed < MIN_UNIT_MOVEMENT_SPEED_MULTIPLIER
-      || requestedMovementSpeed > MAX_UNIT_MOVEMENT_SPEED_MULTIPLIER) {
-      globalSettingsError.textContent = `Enter a movement multiplier from ${MIN_UNIT_MOVEMENT_SPEED_MULTIPLIER}× to ${MAX_UNIT_MOVEMENT_SPEED_MULTIPLIER}×.`;
-      globalMovementSpeedInput.focus();
-      return;
-    }
-    const requestedSoundVolume = Number(globalBattleSoundInput.value);
-    if (!Number.isFinite(requestedSoundVolume)
-      || requestedSoundVolume < MIN_BATTLE_SOUND_VOLUME
-      || requestedSoundVolume > MAX_BATTLE_SOUND_VOLUME) {
-      globalSettingsError.textContent = `Enter a battle sound volume from ${MIN_BATTLE_SOUND_VOLUME}× to ${MAX_BATTLE_SOUND_VOLUME}×.`;
-      globalBattleSoundInput.focus();
-      return;
-    }
     try {
-      const response = await fetch("/__config/global-settings", {
+      const config = collectGlobalSettingsDraft();
+      const response = await fetch("/__config/settings", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          movementSpeedMultiplier: requestedMovementSpeed,
-          battleSoundVolume: requestedSoundVolume,
-        }),
+        body: JSON.stringify({ config }),
       });
-      const payload = await response.json() as { ok?: boolean; settings?: Partial<GlobalSettingsValues>; error?: string };
-      if (!response.ok || !payload.ok
-        || typeof payload.settings?.movementSpeedMultiplier !== "number"
-        || typeof payload.settings?.battleSoundVolume !== "number") {
+      const payload = await response.json() as { ok?: boolean; config?: ConfigTree; descriptions?: ConfigDescriptionTree; error?: string };
+      if (!response.ok || !payload.ok || !payload.config || !payload.descriptions) {
         throw new Error(payload.error ?? `Global settings save failed (${response.status}).`);
       }
+      globalSettingsConfig = payload.config;
+      globalSettingsDescriptions = payload.descriptions;
+      const battlefield = payload.config.balance?.battlefield as { movement?: { defaultMultiplier?: unknown } } | undefined;
+      const sound = payload.config.sound?.battle as { volume?: { default?: unknown } } | undefined;
+      if (typeof battlefield?.movement?.defaultMultiplier !== "number" || typeof sound?.volume?.default !== "number") {
+        throw new Error("Saved configuration did not contain live movement and sound settings.");
+      }
       applyGlobalSettingsLive({
-        movementSpeedMultiplier: payload.settings.movementSpeedMultiplier,
-        battleSoundVolume: payload.settings.battleSoundVolume,
+        movementSpeedMultiplier: battlefield.movement.defaultMultiplier,
+        battleSoundVolume: sound.volume.default,
       });
     } catch (error) {
       globalSettingsError.textContent = error instanceof Error ? error.message : String(error);
@@ -7203,12 +7363,15 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       return;
     }
     closeGlobalSettings();
-    addLog(`Global settings saved: movement ${globalMovementSpeedMultiplier.toFixed(1)}×, sound ${globalBattleSoundVolume.toFixed(1)}×.`, "good");
+    addLog(`YAML settings saved. Live movement ${globalMovementSpeedMultiplier.toFixed(1)}×, sound ${globalBattleSoundVolume.toFixed(1)}×.`, "good");
   };
   btnOpenGlobalSettings.addEventListener("click", openGlobalSettings);
   btnCancelGlobalSettings.addEventListener("click", closeGlobalSettings);
   btnResetGlobalSettings.addEventListener("click", () => {
     globalSettingsError.textContent = "";
+    globalSettingsConfig = null;
+    globalSettingsDescriptions = null;
+    renderGlobalSettings();
     void loadGlobalSettingsForm().catch((error) => {
       globalSettingsError.textContent = error instanceof Error ? error.message : String(error);
     });
@@ -7219,13 +7382,9 @@ export function bootstrap(options: BootstrapOptions = {}): void {
   globalSettingsOverlay.addEventListener("click", (event) => {
     if (event.target === globalSettingsOverlay) closeGlobalSettings();
   });
-  globalMovementSpeedInput.addEventListener("keydown", (event) => {
-    if (event.key === "Enter") saveGlobalSettings();
+  globalSettingsOverlay.addEventListener("keydown", (event) => {
     if (event.key === "Escape") closeGlobalSettings();
-  });
-  globalBattleSoundInput.addEventListener("keydown", (event) => {
-    if (event.key === "Enter") saveGlobalSettings();
-    if (event.key === "Escape") closeGlobalSettings();
+    if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) void saveGlobalSettings();
   });
 
   selectedInfo.addEventListener("click", (event) => {

@@ -55,11 +55,12 @@ Lose condition chain:
 - Test Arena options panel is organized as collapsible tabs to save space: battle start/stop actions are always in the first row, `Unit` is expanded by default, and `Manual Spawn`, `AI Selection`, and `UI Configuration` are collapsed by default. `Manual Spawn` deploys exactly one chosen craft immediately for either Player or Enemy during an active Test Arena.
 - Developer-only destinations (`Test Arena`, `Leaderboard`, `Craft Designer`, `Part Designer`, and `Global Settings`) live in the top-bar `Developer Tools` dropdown. The campaign sidebar is reserved for Base/Map/Battle, and its navigation/panel split can be dragged vertically and is persisted locally.
 - Runtime debug controls live in a compact top-bar dropdown that matches the `Developer Tools` trigger and popover presentation.
-- The development-only Global Settings authoring panel includes a unit movement-speed multiplier for every ground and air unit plus a battle sound-volume multiplier for impacts, explosions, deployment, and engines. Movement defaults to `2x`; sound defaults to a louder `3x` and supports `0x` mute through `5x`. Saving writes each value to its domain YAML under `game-core/src/config/` and applies both immediately through explicit live runtime hooks; these values are no longer browser-local preferences.
+- The development-only Global Settings authoring panel exposes every game-core YAML setting through top-level category tabs (`Balance`, `AI`, `Display`, `Editor`, and `Sound`), file-level sections, and recursively nested subcategories. Type-aware controls edit numbers, booleans, text, and arrays; hovering a field or focusing its help marker shows the explanation authored in that YAML document's `_descriptions` map. Sound sample paths and fire-sample pools each include a preview button that uses the current unsaved form values, with pool previews choosing a member at the authored weapon-class playback rate. Saving validates and transactionally rewrites the fixed YAML set under `game-core/src/config/` while retaining the descriptions; movement speed and master battle volume apply immediately through explicit live hooks, while other settings take effect after restarting the affected VIP/Arena runtime. These values are not browser-local preferences.
 - Test Arena AI presets are local JS/TS-only and run without external Python bridge/service dependencies.
 - Browser battles are presented by Phaser while the shared simulation remains renderer-independent for headless training and verification.
 - Test Arena parameter inputs apply on `Enter` or input blur (no separate apply button).
 - Test Arena zoom percentage is live-synced when mouse-wheel zoom changes the battlefield view.
+- Test Arena shows live upper-left loss totals for each side: destroyed craft count and the authored gas value wasted by those destroyed craft. Clearing units or withdrawing them does not count as destruction.
 
 ## 3.2 Base Layer (Top-Down)
 
@@ -108,8 +109,8 @@ Current implementation includes dedicated in-app editor tabs where the player ca
 - Functional template entries now persist both `component` and `partId` so user templates can reference developer-authored parts.
 - Weapon functional parts store additive orientation (`rotateQuarter`, 0..3 in 90-degree steps).
 - Functional placement now uses part footprints from part catalog definitions (instead of hardcoded component-only footprints), and footprint rotation follows `rotateQuarter`.
-- Functional parts may declare `directional: true` to rotate their aiming/facing direction. Craft Editor footprint rotation is independent: `Q`/`E` can rotate any directional part or multi-cell functional part, including non-directional control units and engines.
-- For weapon parts with `directional: false`, template placement rotation is disabled and runtime firing facing stays fixed to the part `default direction`.
+- Functional parts may declare `directional: true`, meaning placement rotation also rotates their functional aiming/facing direction. Craft Editor footprint rotation is independent: `Q`/`E` can rotate any directional part or multi-cell functional part, including non-directional control units and engines.
+- For weapon parts with `directional: false`, runtime firing facing stays fixed to the part's base `direction`, even if a multi-cell footprint is rotated for placement.
 - Effective facing for directional weapon parts is computed as `part.direction` (default facing) + template `rotateQuarter` (user rotation).
 - Functional placement supports `center place on click` mode in template editor (developer/user toggle).
 - Editor canvas uses a resizable grid up to `10x10` with right-drag panning.
@@ -186,9 +187,9 @@ Part-level properties:
 - `max speed`: engine speed cap contribution.
 - `power ground`: engine can provide ground propulsion.
 - `power air`: engine can provide air propulsion/lift.
-- `directional`: weapon directional firing mode.
+- `directional`: whether placement rotation changes the weapon's functional facing; it does not define the firing arc.
 - `default direction`: default facing (`up|down|left|right`) before template rotation.
-- `has angle limit`: enables directional angle limits on weapons.
+- `has angle limit`: limits weapon aiming around its resolved facing using separate clockwise/counter-clockwise arcs.
 - `cw angle`: clockwise limit angle relative to part direction.
 - `ccw angle`: anti-clockwise limit angle relative to part direction.
 - `bullet type`: weapon projectile family (`bullet|missile|laser`).
@@ -205,7 +206,7 @@ Part-level properties:
 - `projectile gravity`: gravity/drop for non-laser projectiles.
 - `tracking`: projectile can seek targets (non-laser).
 - `tracking turn rate`: homing turn acceleration/rate.
-- `shoot angle`: legacy one-sided directional shoot cone half-angle (`180` means omni); replaced by `has angle limit + cw/ccw`.
+- Firing arcs use only `has angle limit + cw/ccw`; the former `shoot angle` field is not accepted.
 - `need loader`: weapon requires loader participation to reload/fire cycle.
 - `supported weapon tags`: weapon tags that a loader can service.
 - `load multiplier`: loader time multiplier on weapon cooldown.
@@ -468,7 +469,7 @@ Attachment rules:
 - Structure overlapped by a functional part receives direct hits normally, including its armor deduction.
 - Hits on exposed functional geometry relay all damage to the attached structure cell closest to the hit point and ignore that cell's armor.
 - A functional component can attach to multiple structure cells; destruction of any attached cell destroys the whole functional component.
-- Destroying every controller makes a ground craft an inoperable wreck that remains visible at a fixed battlefield position and cannot move or fire. An aircraft instead loses flight control immediately, drops vertically, and is destroyed on ground impact.
+- A ground craft becomes an inoperable wreck when it has no surviving Control Unit, or when it no longer has both a usable ground engine and a fireable weapon. The wreck remains fixed in place and cannot move or fire. On entry, every surviving structure block takes a deterministic-random 1%-50% initial HP loss (never healing a block that was already lower), then its remaining HP decays linearly to zero across 10 seconds. Incoming damage can reduce it faster but never resets or slows the decay. At 10 seconds every surviving block explodes and the craft is removed. An aircraft with no Control Unit instead loses flight control immediately, drops vertically, and is destroyed on ground impact.
 - A unit can have one or more Control Units.
 
 ### Functional Module Catalog
@@ -568,9 +569,9 @@ Recommended starter values:
 - Non-controlled units are AI-driven.
 - Player can switch controlled unit instantly (short cooldown recommended).
 - A unit has an available weapon when at least one surviving weapon can fire a loaded round or has a surviving compatible loader that can reload it.
-- If every weapon is destroyed, or all loader paths are destroyed and all loaded rounds are exhausted, the unit enters irreversible escape mode, returns to its base, and cannot be selected for player control. Escape movement preserves the craft's current facing for one second, then turns it toward its base and continues retreating.
+- If every weapon is destroyed, or all loader paths are destroyed and all loaded rounds are exhausted, a ground unit enters its 10-second wreck countdown. An aircraft instead enters irreversible escape mode, returns to its base, and cannot be selected for player control. Aircraft escape movement preserves the craft's current facing for one second, then turns it toward its base and continues retreating.
 - Campaign battles and the strategic layer are continuous real time; there is no **Next Round** action or artificial round deadline.
-- Battlefield presentation uses two deliberately simple illustrated layers: an air image above the runtime ground boundary and a ground-surface image below it. Hand-painted command-bunker sprites, plated modular craft without per-unit ground shades, and glowing projectile trails sit above those layers. Friendly and enemy bunkers share a transparent source sprite with side tinting, edge anchoring, and in-world health treatment.
+- Battlefield presentation uses two deliberately simple illustrated layers: an air image above the runtime ground boundary and a ground-surface image below it. Hand-painted command-bunker sprites, plated modular craft with restrained blue-player/red-enemy illuminated borders, and glowing projectile trails sit above those layers. Block seams carry a light faction tint, while brighter low-opacity strokes follow only exposed outer structure-cell edges so ownership reads from the designed silhouette without adding a detached floor glow. Friendly and enemy bunkers share a transparent source sprite with side tinting, edge anchoring, and in-world health treatment.
 - Tactical overlays are enabled by default outside replay mode: live structure-cell hitboxes, faint faction-colored effective weapon ranges for every craft (with stronger controlled/selected emphasis), movement vectors, and AI aimed-target lines with target reticles. They can still be disabled from Runtime Debug.
 - Every live weapon renders its own barrel from the attachment anchor to the simulation muzzle. Barrel direction follows the per-slot clamped world-space aim angle for both AI and manual control, including mirrored left-facing craft; projectiles spawn exactly at that visible barrel tip, while weapon spread affects their outgoing velocity rather than shifting the spawn point.
 
@@ -596,7 +597,7 @@ Recommended starter values:
   - Aircraft use only engines with `power air = true` for movement and anti-gravity.
   - Pre-gravity thrust speed is total air-engine power divided by current mass and scaled by the shared air-thrust factor.
   - Effective movement speed is `max(0, preGravityThrustSpeed - gravity)`, capped by the aggregate engine speed cap.
-  - Horizontal, vertical, and diagonal commands all use the same speed magnitude; only the normalized direction vector changes.
+  - Horizontal, vertical, and diagonal commands all use the same speed magnitude; only the normalized direction vector changes. Air-engine power-to-mass uses a shared conversion factor to determine speed/lift capacity, not directional acceleration.
   - If pre-gravity thrust cannot overcome gravity, the aircraft enters a crash state and falls toward the ground.
 - Altitude affects:
   - weapon effectiveness
@@ -662,7 +663,7 @@ No simple fixed hitpoint exchange for whole units. Damage emerges from impacts, 
 6. An exposed functional hit relays full damage to its closest attached structure cell with no armor deduction.
 7. If any attached structure cell is destroyed or detached, the functional module is removed with it.
 8. Connectivity rule: any structure cluster disconnected from the craft's alive Control Unit is destroyed immediately.
-   - Destroying the Control Unit makes remaining ground structure a stationary, inoperable wreck. An aircraft enters an uncontrolled vertical crash and is destroyed when it hits the ground.
+   - Destroying the Control Unit, the last usable ground engine, or the last fireable weapon makes remaining ground structure a stationary, inoperable wreck. An aircraft that loses control enters an uncontrolled vertical crash and is destroyed when it hits the ground.
 9. Armor is applied as flat damage deduction per impacted cell: `damageAfterArmor = incomingDamage - cellArmor`, `effectiveDamage = damageAfterArmor <= 0 ? 1 : damageAfterArmor`.
 10. Hit impulse still applies physical response (knockback/vibration) even on low/fully mitigated hits.
 11. Projectile penetration controls both continuation and residual direct-hit damage:
@@ -673,6 +674,12 @@ No simple fixed hitpoint exchange for whole units. Damage emerges from impacts, 
    - each later cell receives `baseDamage * (remainingPenetration / initialPenetration)` before its own penetration cost is deducted,
    - a zero-penetration shot still damages its first cell and then stops.
 12. A structure cell's visible world-space panel and projectile hitbox use the same canonical size, so hits anywhere on a live displayed cell register consistently.
+
+Damage presentation:
+
+- Structure blocks gain progressively denser code-drawn cracks as their remaining HP falls.
+- Blocks below 20% HP emit restrained, low-opacity pixel smoke.
+- Every destroyed block emits one short pixel-art burst selected deterministically from three variants; synchronized wreck cleanup uses the same per-block effects without creating a screen-filling blast.
 
 Structure durability recovery:
 
@@ -897,12 +904,13 @@ The current playable implementation already includes:
   - Loader `loadMultiplier` + `fastOperation` modify load time, bounded by `minLoadTime`.
   - A weapon's `max capacity` sets its ready-round limit; loaders only control compatibility and reload timing, with a minimum burst interval floor of `0.5s`.
   - Fire commands sent to a cooling/reloading weapon slot are ignored (no projectile and no recoil/knockback side effects).
-- Weapon availability includes future reload capability: a surviving loaded round remains usable after loader loss, but escape mode begins immediately after the last loaded round is spent; destroying every weapon starts escape mode immediately.
+- Weapon availability includes future reload capability: a surviving loaded round remains usable after loader loss. Spending the last loaded round without a reload path starts the ground wreck countdown or, for aircraft, escape mode; destroying every weapon triggers the same platform-specific result immediately.
 - Part-level functional overrides now drive runtime behavior for all current functional families:
   - weapon parts can override recoil/hit impulse, projectile speed/gravity, explosive blast parameters, tracking turn rate, control-impair tuning, and their own fire-sound volume;
   - loader parts can override supported weapon classes and loader timing parameters;
   - armor `hp` metadata is translated into effective attachment durability scaling.
 - Projectile gravity, range-limited lifetime, and debris persistence.
+- A ground craft missing control, a usable ground engine, or a fireable weapon now becomes a stationary, damageable 10-second wreck. Its surviving cells take a deterministic-random 1%-50% initial HP loss and then lose remaining HP linearly until they detonate together at zero. Phaser renders that progression with increasing cracks, subtle smoke below 20% HP, and varied per-cell pixel bursts.
 - Ground-vehicle-fired non-tracking projectiles now auto-terminate after falling `200` Y-units below their firing Y origin only when the shot was fired above horizontal (`initialVy < 0`); downward-fired shots are excluded.
 - Runtime now applies soft same-layer unit separation (ground-ground, air-air) with overlap allowance, inverse-mass push-out, and broad-phase spatial grid lookup to prevent full unit stacking while preserving movement flow.
 - AI split into targeting, movement, and shooting modules with a shared composite interface in `game-core/src/ai/composite/`.

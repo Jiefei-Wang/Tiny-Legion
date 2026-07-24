@@ -82,7 +82,6 @@ export function getPartPropertiesDefaultsByType(partType: PartType, partCategory
       maxSpeed: 100,
       powerGround: partCategory !== "jet",
       powerAir: partCategory === "jet",
-      directional: false,
     };
   }
   if (partType === "weapon") {
@@ -106,14 +105,11 @@ export function getPartPropertiesDefaultsByType(partType: PartType, partCategory
       projectileGravity: bulletType === "laser" ? undefined : 100,
       tracking: bulletType !== "laser" ? partCategory === "missile" : false,
       trackingTurnRate: partCategory === "missile" ? 50 : undefined,
-      directional: true,
       hasAngleLimit: true,
       cwAngle: 15,
       ccwAngle: 15,
-      shootAngleDeg: 30,
       needLoader: false,
       maxCapacity: 2,
-      defaultDirection: "right",
       computingConsumption: 1,
     };
   }

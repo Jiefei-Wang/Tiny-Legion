@@ -105,7 +105,6 @@ function serializeTemplateForFile(template: UnitTemplate): Record<string, unknow
       x: attachment.x,
       y: attachment.y,
       rotateQuarter: attachment.rotateQuarter,
-      rotate90: attachment.rotate90,
     })),
     display: template.display?.map((item) => ({ kind: item.kind, cell: item.cell, x: item.x, y: item.y })) ?? [],
   };
@@ -156,12 +155,16 @@ function patchRapidGunRuntime(partCatalog: PartDefinition[]): () => void {
   const originalComponent = {
     spreadDeg: rapidGun.spreadDeg,
     range: rapidGun.range,
-    shootAngleDeg: rapidGun.shootAngleDeg,
+    hasAngleLimit: rapidGun.hasAngleLimit,
+    cwAngle: rapidGun.cwAngle,
+    ccwAngle: rapidGun.ccwAngle,
     projectileSpeed: rapidGun.projectileSpeed,
   };
   rapidGun.spreadDeg = 0;
   rapidGun.range = 20000;
-  rapidGun.shootAngleDeg = 360;
+  rapidGun.hasAngleLimit = false;
+  rapidGun.cwAngle = undefined;
+  rapidGun.ccwAngle = undefined;
   rapidGun.projectileSpeed = 900;
 
   const rapidGunParts = partCatalog.filter((part) => part.baseComponent === "rapidGun");
@@ -172,7 +175,6 @@ function patchRapidGunRuntime(partCatalog: PartDefinition[]): () => void {
       ...(part.stats ?? {}),
       spreadDeg: 0,
       range: 20000,
-      shootAngleDeg: 360,
       projectileSpeed: 900,
     };
   }
@@ -180,7 +182,9 @@ function patchRapidGunRuntime(partCatalog: PartDefinition[]): () => void {
   return () => {
     rapidGun.spreadDeg = originalComponent.spreadDeg;
     rapidGun.range = originalComponent.range;
-    rapidGun.shootAngleDeg = originalComponent.shootAngleDeg;
+    rapidGun.hasAngleLimit = originalComponent.hasAngleLimit;
+    rapidGun.cwAngle = originalComponent.cwAngle;
+    rapidGun.ccwAngle = originalComponent.ccwAngle;
     rapidGun.projectileSpeed = originalComponent.projectileSpeed;
     for (const part of rapidGunParts) {
       part.stats = originalPartStats.get(part.id);

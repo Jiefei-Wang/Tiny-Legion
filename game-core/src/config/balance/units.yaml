@@ -1,3 +1,17 @@
+_descriptions:
+  components.*.mass: Base mass contributed by this functional component.
+  components.*.hpMul: Legacy component durability multiplier retained by component stats and authoring compatibility.
+  components.*.gasCost: Gas cost contributed by this component to its craft.
+  components.*.type: Runtime component family used for behavior and compatibility checks.
+  components.*.power: Engine power used in thrust-to-mass movement calculations.
+  components.*.maxSpeed: Hard movement-speed cap contributed by this engine.
+  components.*.propulsion.platform: Unit platform this engine supports, such as ground or air.
+  components.*.propulsion.mode: Directions in which this engine can provide thrust.
+  components.*.loader.supports: Weapon classes this loader is allowed to service.
+  components.*.loader.loadMultiplier: Multiplier applied to the serviced weapon's reload duration.
+  components.*.loader.fastOperation: Allows this loader to use fast-operation reload behavior.
+  components.*.loader.minLoadTime: Minimum seconds required for this loader to prepare a round.
+  components.*.loader.minBurstInterval: Minimum seconds between rounds released from loaded capacity.
 components:
   control:
     mass: 8
@@ -11,7 +25,9 @@ components:
     type: engine
     power: 500
     maxSpeed: 170
-    propulsion: { platform: ground, mode: omni }
+    propulsion:
+      platform: ground
+      mode: omni
   engineM:
     mass: 45
     hpMul: 1
@@ -19,7 +35,9 @@ components:
     type: engine
     power: 900
     maxSpeed: 65
-    propulsion: { platform: ground, mode: omni }
+    propulsion:
+      platform: ground
+      mode: omni
   jetEngine:
     mass: 14
     hpMul: 0.8
@@ -27,14 +45,18 @@ components:
     type: engine
     power: 600
     maxSpeed: 320
-    propulsion: { platform: air, mode: omni }
+    propulsion:
+      platform: air
+      mode: omni
   cannonLoader:
     mass: 8
     hpMul: 0.85
     gasCost: 3
     type: loader
     loader:
-      supports: [heavy-shot, explosive]
+      supports:
+        - heavy-shot
+        - explosive
       loadMultiplier: 0.95
       fastOperation: false
       minLoadTime: 1.15
@@ -45,7 +67,8 @@ components:
     gasCost: 3
     type: loader
     loader:
-      supports: [tracking]
+      supports:
+        - tracking
       loadMultiplier: 0.92
       fastOperation: true
       minLoadTime: 0.85

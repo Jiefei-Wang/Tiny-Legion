@@ -151,7 +151,7 @@ export function instantiateUnit(
     const host = structure[attachment.cell];
     const rotateQuarterRaw = typeof attachment.rotateQuarter === "number"
       ? attachment.rotateQuarter
-      : (attachment.rotate90 ? 1 : 0);
+      : 0;
     const rotateQuarter = normalizePartAttachmentRotate(
       part ?? {
         id: -1,
@@ -221,7 +221,6 @@ export function instantiateUnit(
             damage: part.stats.damage,
             range: part.stats.range,
             cooldown: part.stats.cooldown,
-            shootAngleDeg: part.stats.shootAngleDeg,
             projectileSpeed: part.stats.projectileSpeed,
             projectileGravity: part.stats.projectileGravity,
             penetration: part.stats.penetration,
@@ -414,6 +413,8 @@ export function instantiateUnit(
     controlImpairFactor: 1,
     airDropActive: false,
     airDropTargetY: y,
+    groundWreckTimerS: null,
+    groundWreckInitialCellHp: [],
     alive: true,
     vibrate: 0,
     mass: 0,
