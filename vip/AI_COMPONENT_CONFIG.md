@@ -18,7 +18,7 @@ Each module dropdown shows:
 
 The composed-model selector is separate:
 
-- `L1 AI` through `L5 AI` are built in and resolve locally through `levelCompositeConfig(...)`.
+- `L1 AI` through `L6 AI` are built in and resolve locally through `levelCompositeConfig(...)`.
 - Entries returned by `GET /__arena/composite/models` are genuine saved training artifacts only. A built-in level is never labeled or duplicated as a saved AI.
 
 The game dev server exposes:

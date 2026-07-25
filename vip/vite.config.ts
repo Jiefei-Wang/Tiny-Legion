@@ -15,6 +15,11 @@ import { compareMirroredSeries } from "../arena/src/match/mirrored-series.ts";
 import { levelCompositeConfig } from "../arena/src/ai/composite-controller.ts";
 import { aiLevelCertificationSeed } from "../arena/src/eval/evaluate-ai-levels.ts";
 import { MAX_CERTIFIED_AI_LEVEL } from "../game-core/src/ai/composite/level-modules.ts";
+import {
+  BATTLEFIELD_HEIGHT,
+  BATTLEFIELD_WIDTH,
+  DEFAULT_GROUND_HEIGHT,
+} from "../game-core/src/config/balance/battlefield.ts";
 import type { MatchAiSpec, MatchResult, MatchSpec } from "../arena/src/match/match-types.ts";
 import {
   audioDir as gameCoreAudioDir,
@@ -1091,7 +1096,7 @@ function arenaModelPlugin() {
     updatedAtMs: number;
   };
   type RatingStore = {
-    version: 6;
+    version: 8;
     updatedAt: string;
     ratings: Record<string, RatingEntry>;
     matchupRounds: Record<string, number>;
@@ -1272,7 +1277,7 @@ function arenaModelPlugin() {
       withBase: true,
       initialUnitsPerSide: 4,
       templateNames: ["*"],
-      battlefield: { width: 2000, height: 1000 },
+      battlefield: { width: BATTLEFIELD_WIDTH, height: BATTLEFIELD_HEIGHT, groundHeight: DEFAULT_GROUND_HEIGHT },
       maxSimSeconds: 180,
       nodeDefense: 1,
       baseHp: 1200,
@@ -1307,8 +1312,11 @@ function arenaModelPlugin() {
       const templateNames = Array.isArray(source.templateNames) && source.templateNames.length > 0
         ? source.templateNames.map((v) => String(v)).filter((v) => v.trim().length > 0)
         : fallback.templateNames;
+      const useGlobalBattlefield = source.useGlobalBattlefield === true;
       const bf = source.battlefield && typeof source.battlefield === "object" ? source.battlefield as Record<string, unknown> : null;
-      const battlefield = bf
+      const battlefield = useGlobalBattlefield
+        ? { width: BATTLEFIELD_WIDTH, height: BATTLEFIELD_HEIGHT, groundHeight: DEFAULT_GROUND_HEIGHT }
+        : bf
         ? {
           ...(typeof bf.width === "number" ? { width: Math.max(640, Math.floor(bf.width)) } : {}),
           ...(typeof bf.height === "number" ? { height: Math.max(360, Math.floor(bf.height)) } : {}),
@@ -1343,17 +1351,17 @@ function arenaModelPlugin() {
 
   const loadRatingStore = (): RatingStore => {
     if (!existsSync(leaderboardFile)) {
-      return { version: 6, updatedAt: new Date().toISOString(), ratings: {}, matchupRounds: {}, matchupResults: {} };
+      return { version: 8, updatedAt: new Date().toISOString(), ratings: {}, matchupRounds: {}, matchupResults: {} };
     }
     try {
       const raw = readFileSync(leaderboardFile, "utf8");
       const parsed = JSON.parse(raw) as unknown;
       if (!parsed || typeof parsed !== "object") {
-        return { version: 6, updatedAt: new Date().toISOString(), ratings: {}, matchupRounds: {}, matchupResults: {} };
+        return { version: 8, updatedAt: new Date().toISOString(), ratings: {}, matchupRounds: {}, matchupResults: {} };
       }
       const obj = parsed as Record<string, unknown>;
-      if (obj.version !== 6) {
-        return { version: 6, updatedAt: new Date().toISOString(), ratings: {}, matchupRounds: {}, matchupResults: {} };
+      if (obj.version !== 8) {
+        return { version: 8, updatedAt: new Date().toISOString(), ratings: {}, matchupRounds: {}, matchupResults: {} };
       }
       const ratingsRaw = (obj.ratings && typeof obj.ratings === "object") ? obj.ratings as Record<string, unknown> : {};
       const matchupRaw = (obj.matchupRounds && typeof obj.matchupRounds === "object")
@@ -1396,14 +1404,14 @@ function arenaModelPlugin() {
         };
       }
       return {
-        version: 6,
+        version: 8,
         updatedAt: typeof obj.updatedAt === "string" ? obj.updatedAt : new Date().toISOString(),
         ratings,
         matchupRounds,
         matchupResults,
       };
     } catch {
-      return { version: 6, updatedAt: new Date().toISOString(), ratings: {}, matchupRounds: {}, matchupResults: {} };
+      return { version: 8, updatedAt: new Date().toISOString(), ratings: {}, matchupRounds: {}, matchupResults: {} };
     }
   };
 
@@ -1632,6 +1640,7 @@ function arenaModelPlugin() {
         try {
           const parsed = JSON.parse(readFileSync(craftArenaSeedFile, "utf8")) as {
             revision?: unknown;
+            settings?: unknown;
             scenarios?: unknown;
           };
           if (typeof parsed.revision !== "string" || !Array.isArray(parsed.scenarios)) {
@@ -1641,6 +1650,7 @@ function arenaModelPlugin() {
             ok: true,
             found: true,
             revision: parsed.revision,
+            settings: parsed.settings,
             scenarios: parsed.scenarios,
           });
         } catch (error) {
@@ -1671,8 +1681,9 @@ function arenaModelPlugin() {
             craftACount?: unknown;
             craftBId?: unknown;
             craftBCount?: unknown;
-            simulations?: unknown;
+            durationMinutes?: unknown;
             aiSpec?: unknown;
+            battlefield?: unknown;
           };
           let payload: CraftArenaPayload;
           try {
@@ -1693,8 +1704,8 @@ function arenaModelPlugin() {
           const craftBId = readInteger(payload.craftBId, 1, Number.MAX_SAFE_INTEGER);
           const craftACount = readInteger(payload.craftACount, 1, 40);
           const craftBCount = readInteger(payload.craftBCount, 1, 40);
-          const simulations = readInteger(payload.simulations, 1, 1_000);
-          if (craftAId === null || craftBId === null || craftACount === null || craftBCount === null || simulations === null) {
+          const durationMinutes = readInteger(payload.durationMinutes, 1, 60);
+          if (craftAId === null || craftBId === null || craftACount === null || craftBCount === null || durationMinutes === null) {
             json(res, 400, { ok: false, reason: "invalid_scenario" });
             return;
           }
@@ -1702,15 +1713,25 @@ function arenaModelPlugin() {
             json(res, 400, { ok: false, reason: "invalid_ai_spec" });
             return;
           }
+          const battlefieldSource = payload.battlefield && typeof payload.battlefield === "object"
+            ? payload.battlefield as Record<string, unknown>
+            : {};
+          const battlefieldWidth = readInteger(battlefieldSource.width, 640, 100_000);
+          const battlefieldHeight = readInteger(battlefieldSource.height, 360, 100_000);
+          const groundHeight = readInteger(battlefieldSource.groundHeight, 80, 99_960);
+          if (
+            battlefieldWidth === null
+            || battlefieldHeight === null
+            || groundHeight === null
+            || groundHeight > battlefieldHeight - 40
+          ) {
+            json(res, 400, { ok: false, reason: "invalid_battlefield" });
+            return;
+          }
 
-          const baseSeed = (Date.now() ^ Math.floor(Math.random() * 0x7fffffff)) >>> 0;
-          const makeSpec = (
-            seed: number,
-            player: { templateId: number; count: number },
-            enemy: { templateId: number; count: number },
-          ): MatchSpec => ({
-            seed,
-            maxSimSeconds: 120,
+          const spec: MatchSpec = {
+            seed: (Date.now() ^ Math.floor(Math.random() * 0x7fffffff)) >>> 0,
+            maxSimSeconds: durationMinutes * 60,
             nodeDefense: 0,
             playerGas: 0,
             enemyGas: 0,
@@ -1719,97 +1740,38 @@ function arenaModelPlugin() {
             scenario: {
               withBase: false,
               initialUnitsPerSide: 1,
-              initialLineup: { player, enemy },
+              initialLineup: {
+                player: { templateId: craftAId, count: craftACount },
+                enemy: { templateId: craftBId, count: craftBCount },
+              },
+              replenishInitialLineup: true,
             },
             templateNames: [String(craftAId), String(craftBId)],
-          });
-          const jobs = Array.from({ length: simulations }, (_, index) => {
-            const seed = (baseSeed + Math.imul(index + 1, 9973)) >>> 0;
-            return {
-              aAsPlayer: makeSpec(
-                seed,
-                { templateId: craftAId, count: craftACount },
-                { templateId: craftBId, count: craftBCount },
-              ),
-              aAsEnemy: makeSpec(
-                seed,
-                { templateId: craftBId, count: craftBCount },
-                { templateId: craftAId, count: craftACount },
-              ),
-            };
-          });
+            battlefield: {
+              width: battlefieldWidth,
+              height: battlefieldHeight,
+              groundHeight,
+            },
+          };
 
           try {
             const pool = await getWorkerPool();
-            const run = (spec: MatchSpec): Promise<MatchResult> => pool
+            const result = await (pool
               ? pool.run(spec).then((result) => result as MatchResult)
-              : runMatch(spec);
-            const results: Array<{ aAsPlayer: MatchResult; aAsEnemy: MatchResult }> = [];
-            const firstJob = jobs[0];
-            if (!firstJob) {
-              throw new Error("No craft arena simulation jobs were created.");
-            }
-            results.push({
-              aAsPlayer: await run(firstJob.aAsPlayer),
-              aAsEnemy: await run(firstJob.aAsEnemy),
-            });
-            if (pool) {
-              const completed = await Promise.all(jobs.slice(1).map(async (job) => ({
-                aAsPlayer: await run(job.aAsPlayer),
-                aAsEnemy: await run(job.aAsEnemy),
-              })));
-              results.push(...completed);
-            } else {
-              for (const job of jobs.slice(1)) {
-                results.push({
-                  aAsPlayer: await run(job.aAsPlayer),
-                  aAsEnemy: await run(job.aAsEnemy),
-                });
-              }
-            }
-
-            let craftAWins = 0;
-            let craftBWins = 0;
-            let ties = 0;
-            let craftADestroyed = 0;
-            let craftBDestroyed = 0;
-            let craftAGasWasted = 0;
-            let craftBGasWasted = 0;
-            for (const result of results) {
-              const comparison = compareMirroredSeries(result.aAsPlayer, result.aAsEnemy);
-              if (comparison.outcomeA > 0) craftAWins += 1;
-              else if (comparison.outcomeA < 0) craftBWins += 1;
-              else ties += 1;
-              craftADestroyed += result.aAsPlayer.losses.player.destroyedObjects
-                + result.aAsEnemy.losses.enemy.destroyedObjects;
-              craftBDestroyed += result.aAsPlayer.losses.enemy.destroyedObjects
-                + result.aAsEnemy.losses.player.destroyedObjects;
-              craftAGasWasted += result.aAsPlayer.losses.player.gasWasted
-                + result.aAsEnemy.losses.enemy.gasWasted;
-              craftBGasWasted += result.aAsPlayer.losses.enemy.gasWasted
-                + result.aAsEnemy.losses.player.gasWasted;
-            }
-            const battlesCompleted = results.length * 2;
-            const average = (value: number): number => battlesCompleted > 0 ? round2(value / battlesCompleted) : 0;
+              : runMatch(spec));
             json(res, 200, {
               ok: true,
-              simulationsRequested: simulations,
-              simulationsCompleted: results.length,
-              battlesCompleted,
+              durationMinutes,
+              simSecondsElapsed: round2(result.simSecondsElapsed),
               parallelWorkers: pool ? leaderboardParallelWorkers : 1,
               parallelMode: pool ? "worker-threads" : "single-thread-fallback",
-              pairOutcomes: { craftAWins, craftBWins, ties },
               craftA: {
-                destroyedTotal: craftADestroyed,
-                destroyedAverage: average(craftADestroyed),
-                gasWastedTotal: round2(craftAGasWasted),
-                gasWastedAverage: average(craftAGasWasted),
+                destroyed: result.losses.player.destroyedObjects,
+                gasWasted: round2(result.losses.player.gasWasted),
               },
               craftB: {
-                destroyedTotal: craftBDestroyed,
-                destroyedAverage: average(craftBDestroyed),
-                gasWastedTotal: round2(craftBGasWasted),
-                gasWastedAverage: average(craftBGasWasted),
+                destroyed: result.losses.enemy.destroyedObjects,
+                gasWasted: round2(result.losses.enemy.gasWasted),
               },
             });
           } catch (error) {
@@ -2041,7 +2003,7 @@ function arenaModelPlugin() {
           return;
         }
         try {
-          const store: RatingStore = { version: 6, updatedAt: new Date().toISOString(), ratings: {}, matchupRounds: {}, matchupResults: {} };
+          const store: RatingStore = { version: 8, updatedAt: new Date().toISOString(), ratings: {}, matchupRounds: {}, matchupResults: {} };
           saveRatingStore(store);
           res.setHeader("content-type", "application/json");
           res.end(JSON.stringify({ ok: true, message: "Leaderboard scores reset" }));

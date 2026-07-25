@@ -75,6 +75,10 @@ function aliveCount(units: any[], side: "player" | "enemy"): number {
   return units.filter((unit: any) => unit.alive && canOperate(unit) && unit.side === side).length;
 }
 
+function livingCraftCount(units: any[], side: "player" | "enemy"): number {
+  return units.filter((unit: any) => unit.alive && unit.side === side).length;
+}
+
 export async function runMatch(spec: MatchSpec): Promise<MatchResult> {
   setMathRandomSeed(spec.seed);
   resetUidCounter();
@@ -341,6 +345,29 @@ export async function runMatch(spec: MatchSpec): Promise<MatchResult> {
     spawnIntervalS = Math.max(0.5, Math.min(6.0, minInterval));
   };
 
+  const replenishInitialLineup = (): void => {
+    if (!scenario.initialLineup || scenario.replenishInitialLineup !== true) {
+      return;
+    }
+    const state = battle.getState();
+    for (const side of ["player", "enemy"] as const) {
+      const lineup = scenario.initialLineup[side];
+      const missing = Math.max(0, Math.floor(lineup.count) - livingCraftCount(state.units, side));
+      for (let index = 0; index < missing; index += 1) {
+        const y = 220 + spawnRng() * 260;
+        const deployed = battle.arenaDeploy(side, lineup.templateId, {
+          chargeGas: false,
+          ignoreCap: true,
+          ignoreLowGasThreshold: true,
+          y,
+        });
+        if (!deployed) {
+          throw new Error(`runMatch: could not replenish ${side} lineup unit ${index + 1}/${missing}`);
+        }
+      }
+    }
+  };
+
   while (battle.getState().active && !battle.getState().outcome && t < spec.maxSimSeconds) {
     if (allowSpawns) {
       spawnTimer += dt;
@@ -351,11 +378,12 @@ export async function runMatch(spec: MatchSpec): Promise<MatchResult> {
     }
     battle.update(dt, noKeys);
     t += dt;
+    replenishInitialLineup();
     if (!scenario.withBase) {
       const s = battle.getState();
       const alivePlayer = aliveCount(s.units, "player");
       const aliveEnemy = aliveCount(s.units, "enemy");
-      if (alivePlayer === 0 || aliveEnemy === 0) {
+      if (scenario.replenishInitialLineup !== true && (alivePlayer === 0 || aliveEnemy === 0)) {
         battle.forceEnd(alivePlayer > aliveEnemy, "Unit elimination");
         break;
       }
@@ -365,15 +393,25 @@ export async function runMatch(spec: MatchSpec): Promise<MatchResult> {
   const state1 = battle.getState();
   if (state1.active && !state1.outcome) {
     if (scenario.withBase) {
-      const baseHpDelta = state1.playerBase.hp - state1.enemyBase.hp;
+      const deadlineLosses = battle.getLossStats();
       const integrityFor = (side: "player" | "enemy"): number => state1.units
         .filter((unit) => unit.alive && canOperate(unit) && unit.side === side)
         .reduce((total, unit) => total + structureIntegrity(unit), 0);
+      const gasDestroyedDelta = deadlineLosses.enemy.gasWasted - deadlineLosses.player.gasWasted;
+      const destroyedCraftDelta = deadlineLosses.enemy.destroyedObjects - deadlineLosses.player.destroyedObjects;
       const integrityDelta = integrityFor("player") - integrityFor("enemy");
-      if (Math.abs(baseHpDelta) > 1e-6) {
-        battle.forceEnd(baseHpDelta > 0, "Arena deadline reached (base HP)");
+      const operationalDelta = aliveCount(state1.units, "player") - aliveCount(state1.units, "enemy");
+      const baseHpDelta = state1.playerBase.hp - state1.enemyBase.hp;
+      if (Math.abs(gasDestroyedDelta) > 1e-6) {
+        battle.forceEnd(gasDestroyedDelta > 0, "Arena deadline reached (destroyed craft gas)");
+      } else if (destroyedCraftDelta !== 0) {
+        battle.forceEnd(destroyedCraftDelta > 0, "Arena deadline reached (destroyed craft count)");
       } else if (Math.abs(integrityDelta) > 1e-6) {
         battle.forceEnd(integrityDelta > 0, "Arena deadline reached (unit integrity)");
+      } else if (operationalDelta !== 0) {
+        battle.forceEnd(operationalDelta > 0, "Arena deadline reached (operational units)");
+      } else if (Math.abs(baseHpDelta) > 1e-6) {
+        battle.forceEnd(baseHpDelta > 0, "Arena deadline reached (base HP)");
       } else {
         battle.forceEnd(false, "Arena deadline reached (tie)");
       }

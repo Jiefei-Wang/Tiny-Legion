@@ -2,21 +2,34 @@ import type { MatchResult } from "./match-types.ts";
 
 export type MirroredSeriesComparison = {
   outcomeA: -1 | 0 | 1;
-  decidingMetric: "base-hp" | "unit-integrity" | "operational-units" | "gas-worth" | "tie";
+  decidingMetric:
+    | "destroyed-gas"
+    | "destroyed-craft"
+    | "unit-integrity"
+    | "operational-units"
+    | "base-hp"
+    | "gas-worth"
+    | "tie";
   margin: number;
 };
 
 /**
  * Compare model A over two games: A as player, then A as enemy. Side-swapping
- * removes battlefield-side bias while the ordered tie-breaks preserve combat
- * margin information that a pair of opposite binary wins would discard.
+ * removes battlefield-side bias. Craft destruction and damage are deliberately
+ * ranked before base HP so a model cannot certify by ignoring enemy craft and
+ * racing the objective.
  */
 export function compareMirroredSeries(aAsPlayer: MatchResult, aAsEnemy: MatchResult): MirroredSeriesComparison {
   const comparisons: Array<{ metric: MirroredSeriesComparison["decidingMetric"]; margin: number }> = [
     {
-      metric: "base-hp",
-      margin: (aAsPlayer.final.playerBaseHp - aAsPlayer.final.enemyBaseHp)
-        + (aAsEnemy.final.enemyBaseHp - aAsEnemy.final.playerBaseHp),
+      metric: "destroyed-gas",
+      margin: (aAsPlayer.losses.enemy.gasWasted - aAsPlayer.losses.player.gasWasted)
+        + (aAsEnemy.losses.player.gasWasted - aAsEnemy.losses.enemy.gasWasted),
+    },
+    {
+      metric: "destroyed-craft",
+      margin: (aAsPlayer.losses.enemy.destroyedObjects - aAsPlayer.losses.player.destroyedObjects)
+        + (aAsEnemy.losses.player.destroyedObjects - aAsEnemy.losses.enemy.destroyedObjects),
     },
     {
       metric: "unit-integrity",
@@ -27,6 +40,11 @@ export function compareMirroredSeries(aAsPlayer: MatchResult, aAsEnemy: MatchRes
       metric: "operational-units",
       margin: (aAsPlayer.final.playerOperationalUnits - aAsPlayer.final.enemyOperationalUnits)
         + (aAsEnemy.final.enemyOperationalUnits - aAsEnemy.final.playerOperationalUnits),
+    },
+    {
+      metric: "base-hp",
+      margin: (aAsPlayer.final.playerBaseHp - aAsPlayer.final.enemyBaseHp)
+        + (aAsEnemy.final.enemyBaseHp - aAsEnemy.final.playerBaseHp),
     },
     {
       metric: "gas-worth",

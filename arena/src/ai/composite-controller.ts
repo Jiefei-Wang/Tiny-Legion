@@ -522,20 +522,39 @@ export function skillTierCompositeConfig(tier: AiSkillTier): CompositeConfig {
 
 export function levelCompositeConfig(level: number): CompositeConfig {
   const normalized = Math.max(1, Math.min(MAX_CERTIFIED_AI_LEVEL, Math.floor(level)));
-  if (normalized === 3) {
+  if (normalized === 2) {
     return {
       target: { familyId: "level-2-target", params: {} },
-      movement: { familyId: "level-2-movement", params: {} },
-      shoot: { familyId: "history-shoot", params: { "history.recencyPower": 1 } },
+      movement: { familyId: "level-6-movement", params: {} },
+      shoot: { familyId: "level-5-shoot", params: {} },
     };
   }
-  if (normalized >= 4) {
+  if (normalized === 3) {
     return {
-      target: { familyId: "dt-target", params: { "target.strategy": 3, "target.distanceWeight": 0.6 } },
-      movement: { familyId: "level-2-movement", params: {} },
-      shoot: normalized === 4
-        ? { familyId: "history-shoot", params: { "history.recencyPower": 1 } }
-        : { familyId: "autoreg-shoot", params: { alpha: 0.2 } },
+      target: { familyId: "level-3-target", params: {} },
+      movement: { familyId: "level-4-movement", params: {} },
+      shoot: { familyId: "level-1-shoot", params: {} },
+    };
+  }
+  if (normalized === 4) {
+    return {
+      target: { familyId: "level-2-target", params: {} },
+      movement: { familyId: "level-6-movement", params: {} },
+      shoot: { familyId: "level-1-shoot", params: {} },
+    };
+  }
+  if (normalized === 5) {
+    return {
+      target: { familyId: "level-3-target", params: {} },
+      movement: { familyId: "level-6-movement", params: {} },
+      shoot: { familyId: "level-4-shoot", params: {} },
+    };
+  }
+  if (normalized === 6) {
+    return {
+      target: { familyId: "level-3-target", params: {} },
+      movement: { familyId: "level-6-movement", params: {} },
+      shoot: { familyId: "level-7-shoot", params: {} },
     };
   }
   return {

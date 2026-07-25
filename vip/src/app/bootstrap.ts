@@ -637,21 +637,24 @@ export function bootstrap(options: BootstrapOptions = {}): void {
   let testArenaHasStoredEnemyCraftSelection = false;
   let testArenaTemplateStoreReady = false;
   type CraftArenaSideResult = {
-    destroyedTotal: number;
-    destroyedAverage: number;
-    gasWastedTotal: number;
-    gasWastedAverage: number;
+    destroyed: number;
+    gasWasted: number;
   };
   type CraftArenaResult = {
-    simulationsRequested: number;
-    simulationsCompleted: number;
-    battlesCompleted: number;
+    durationMinutes: number;
+    simSecondsElapsed: number;
     parallelWorkers: number;
     parallelMode: string;
-    pairOutcomes: { craftAWins: number; craftBWins: number; ties: number };
     craftA: CraftArenaSideResult;
     craftB: CraftArenaSideResult;
     completedAt: string;
+  };
+  type CraftArenaSettings = {
+    durationMinutes: number;
+    aiModelId: string;
+    battlefieldWidth: number;
+    battlefieldHeight: number;
+    groundHeight: number;
   };
   type CraftArenaScenario = {
     id: string;
@@ -660,11 +663,16 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     craftACount: number;
     craftBId: number;
     craftBCount: number;
-    aiModelId: string;
-    simulations: number;
     result?: CraftArenaResult;
     error?: string;
     busy?: boolean;
+  };
+  let craftArenaSettings: CraftArenaSettings = {
+    durationMinutes: 4,
+    aiModelId: `builtin-level-${MAX_CERTIFIED_AI_LEVEL}-composite`,
+    battlefieldWidth: BATTLEFIELD_WIDTH,
+    battlefieldHeight: BATTLEFIELD_HEIGHT,
+    groundHeight: Math.floor(BATTLEFIELD_HEIGHT * DEFAULT_GROUND_HEIGHT_RATIO),
   };
   const newCraftArenaScenario = (copy?: CraftArenaScenario): CraftArenaScenario => ({
     id: typeof crypto?.randomUUID === "function"
@@ -675,8 +683,6 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     craftACount: copy?.craftACount ?? 1,
     craftBId: copy?.craftBId ?? templates[1]?.id ?? templates[0]?.id ?? 0,
     craftBCount: copy?.craftBCount ?? 1,
-    aiModelId: copy?.aiModelId ?? "builtin-level-5-composite",
-    simulations: copy?.simulations ?? 100,
   });
   let craftArenaScenarios: CraftArenaScenario[] = [];
   const parseCraftArenaScenario = (value: unknown): CraftArenaScenario | null => {
@@ -684,39 +690,61 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     const scenario = value as Partial<CraftArenaScenario>;
     if (
       typeof scenario.id !== "string"
-      || typeof scenario.name !== "string"
       || typeof scenario.craftAId !== "number"
       || !Number.isInteger(scenario.craftAId)
       || typeof scenario.craftBId !== "number"
       || !Number.isInteger(scenario.craftBId)
-      || typeof scenario.craftACount !== "number"
-      || !Number.isInteger(scenario.craftACount)
-      || typeof scenario.craftBCount !== "number"
-      || !Number.isInteger(scenario.craftBCount)
-      || typeof scenario.aiModelId !== "string"
-      || typeof scenario.simulations !== "number"
-      || !Number.isInteger(scenario.simulations)
     ) return null;
     return {
       id: scenario.id,
-      name: scenario.name,
+      name: typeof scenario.name === "string" ? scenario.name : "Craft matchup",
       craftAId: scenario.craftAId,
-      craftACount: Math.max(1, Math.min(40, scenario.craftACount)),
+      craftACount: typeof scenario.craftACount === "number" ? Math.max(1, Math.min(40, Math.floor(scenario.craftACount))) : 1,
       craftBId: scenario.craftBId,
-      craftBCount: Math.max(1, Math.min(40, scenario.craftBCount)),
-      aiModelId: scenario.aiModelId,
-      simulations: Math.max(1, Math.min(1_000, scenario.simulations)),
-      ...(scenario.result && typeof scenario.result === "object" ? { result: scenario.result } : {}),
+      craftBCount: typeof scenario.craftBCount === "number" ? Math.max(1, Math.min(40, Math.floor(scenario.craftBCount))) : 1,
+      ...(scenario.result && typeof scenario.result === "object" && "durationMinutes" in scenario.result ? { result: scenario.result } : {}),
       ...(typeof scenario.error === "string" ? { error: scenario.error } : {}),
     };
   };
   const loadCraftArenaScenarios = (): void => {
     try {
-      const parsed = JSON.parse(localStorage.getItem("forge-command.craft-arena-scenarios.v1") ?? "null") as {
+      const parsed = JSON.parse(localStorage.getItem("forge-command.craft-arena-scenarios.v3") ?? "null") as {
         version?: unknown;
+        settings?: Partial<CraftArenaSettings>;
         scenarios?: unknown;
       } | null;
-      if (parsed?.version !== 1 || !Array.isArray(parsed.scenarios)) return;
+      if (parsed?.version !== 3 || !Array.isArray(parsed.scenarios)) {
+        const previous = JSON.parse(localStorage.getItem("forge-command.craft-arena-scenarios.v2") ?? "null") as {
+          settings?: { craftACount?: unknown; craftBCount?: unknown; aiModelId?: unknown; battlefieldWidth?: unknown; battlefieldHeight?: unknown; groundHeight?: unknown };
+          scenarios?: unknown[];
+        } | null;
+        const countA = typeof previous?.settings?.craftACount === "number" ? previous.settings.craftACount : 1;
+        const countB = typeof previous?.settings?.craftBCount === "number" ? previous.settings.craftBCount : 1;
+        if (Array.isArray(previous?.scenarios)) {
+          craftArenaScenarios = previous.scenarios.flatMap((value): CraftArenaScenario[] => {
+            const scenario = parseCraftArenaScenario(value);
+            return scenario ? [{ ...scenario, craftACount: countA, craftBCount: countB, result: undefined }] : [];
+          });
+          craftArenaSettings = {
+            ...craftArenaSettings,
+            aiModelId: typeof previous.settings?.aiModelId === "string" ? previous.settings.aiModelId : craftArenaSettings.aiModelId,
+            battlefieldWidth: typeof previous.settings?.battlefieldWidth === "number" ? previous.settings.battlefieldWidth : craftArenaSettings.battlefieldWidth,
+            battlefieldHeight: typeof previous.settings?.battlefieldHeight === "number" ? previous.settings.battlefieldHeight : craftArenaSettings.battlefieldHeight,
+            groundHeight: typeof previous.settings?.groundHeight === "number" ? previous.settings.groundHeight : craftArenaSettings.groundHeight,
+          };
+        }
+        return;
+      }
+      const storedSettings = parsed.settings;
+      if (storedSettings && typeof storedSettings === "object") {
+        craftArenaSettings = {
+          durationMinutes: typeof storedSettings.durationMinutes === "number" ? Math.max(1, Math.min(60, Math.floor(storedSettings.durationMinutes))) : craftArenaSettings.durationMinutes,
+          aiModelId: typeof storedSettings.aiModelId === "string" ? storedSettings.aiModelId : craftArenaSettings.aiModelId,
+          battlefieldWidth: typeof storedSettings.battlefieldWidth === "number" ? Math.max(640, Math.floor(storedSettings.battlefieldWidth)) : craftArenaSettings.battlefieldWidth,
+          battlefieldHeight: typeof storedSettings.battlefieldHeight === "number" ? Math.max(360, Math.floor(storedSettings.battlefieldHeight)) : craftArenaSettings.battlefieldHeight,
+          groundHeight: typeof storedSettings.groundHeight === "number" ? Math.max(80, Math.floor(storedSettings.groundHeight)) : craftArenaSettings.groundHeight,
+        };
+      }
       craftArenaScenarios = parsed.scenarios.flatMap((value): CraftArenaScenario[] => {
         const scenario = parseCraftArenaScenario(value);
         return scenario ? [scenario] : [];
@@ -727,8 +755,9 @@ export function bootstrap(options: BootstrapOptions = {}): void {
   };
   const saveCraftArenaScenarios = (): void => {
     try {
-      localStorage.setItem("forge-command.craft-arena-scenarios.v1", JSON.stringify({
-        version: 1,
+      localStorage.setItem("forge-command.craft-arena-scenarios.v3", JSON.stringify({
+        version: 3,
+        settings: craftArenaSettings,
         scenarios: craftArenaScenarios.map(({ busy: _busy, ...scenario }) => scenario),
       }));
     } catch {
@@ -742,6 +771,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       const payload = await response.json().catch(() => null) as {
         found?: boolean;
         revision?: unknown;
+        settings?: Partial<CraftArenaSettings>;
         scenarios?: unknown;
       } | null;
       if (!payload?.found || typeof payload.revision !== "string" || !Array.isArray(payload.scenarios)) return false;
@@ -754,6 +784,21 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         return scenario ? [scenario] : [];
       });
       if (seeded.length <= 0) return false;
+      if (payload.settings && typeof payload.settings === "object") {
+        const settings = payload.settings;
+        const height = typeof settings.battlefieldHeight === "number"
+          ? Math.max(360, Math.floor(settings.battlefieldHeight))
+          : craftArenaSettings.battlefieldHeight;
+        craftArenaSettings = {
+          durationMinutes: typeof settings.durationMinutes === "number" ? Math.max(1, Math.min(60, Math.floor(settings.durationMinutes))) : craftArenaSettings.durationMinutes,
+          aiModelId: typeof settings.aiModelId === "string" ? settings.aiModelId : craftArenaSettings.aiModelId,
+          battlefieldWidth: typeof settings.battlefieldWidth === "number" ? Math.max(640, Math.floor(settings.battlefieldWidth)) : craftArenaSettings.battlefieldWidth,
+          battlefieldHeight: height,
+          groundHeight: typeof settings.groundHeight === "number"
+            ? Math.max(80, Math.min(height - 40, Math.floor(settings.groundHeight)))
+            : craftArenaSettings.groundHeight,
+        };
+      }
       const seedIds = new Set(seeded.map((scenario) => scenario.id));
       craftArenaScenarios = [
         ...craftArenaScenarios.filter((scenario) => !seedIds.has(scenario.id)),
@@ -1672,7 +1717,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
   const runCraftArenaScenario = async (scenarioId: string): Promise<void> => {
     const scenario = craftArenaScenarios.find((entry) => entry.id === scenarioId);
     if (!scenario || scenario.busy) return;
-    const aiOption = findCompositeModelOptionById(scenario.aiModelId);
+    const aiOption = findCompositeModelOptionById(craftArenaSettings.aiModelId);
     const craftAExists = templates.some((template) => template.id === scenario.craftAId);
     const craftBExists = templates.some((template) => template.id === scenario.craftBId);
     if (!craftAExists || !craftBExists || !aiOption?.spec || aiOption.compatible === false) {
@@ -1693,8 +1738,13 @@ export function bootstrap(options: BootstrapOptions = {}): void {
           craftACount: scenario.craftACount,
           craftBId: scenario.craftBId,
           craftBCount: scenario.craftBCount,
-          simulations: scenario.simulations,
+          durationMinutes: craftArenaSettings.durationMinutes,
           aiSpec: aiOption.spec,
+          battlefield: {
+            width: craftArenaSettings.battlefieldWidth,
+            height: craftArenaSettings.battlefieldHeight,
+            groundHeight: craftArenaSettings.groundHeight,
+          },
         }),
       });
       const parsed = await response.json().catch(() => null) as (Partial<CraftArenaResult> & {
@@ -1705,21 +1755,18 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       if (
         !response.ok
         || !parsed?.ok
-        || typeof parsed.simulationsCompleted !== "number"
-        || typeof parsed.battlesCompleted !== "number"
-        || !parsed.pairOutcomes
+        || typeof parsed.durationMinutes !== "number"
+        || typeof parsed.simSecondsElapsed !== "number"
         || !parsed.craftA
         || !parsed.craftB
       ) {
         throw new Error(parsed?.error || parsed?.reason || `Simulation request failed (${response.status}).`);
       }
       scenario.result = {
-        simulationsRequested: Number(parsed.simulationsRequested ?? scenario.simulations),
-        simulationsCompleted: parsed.simulationsCompleted,
-        battlesCompleted: parsed.battlesCompleted,
+        durationMinutes: parsed.durationMinutes,
+        simSecondsElapsed: parsed.simSecondsElapsed,
         parallelWorkers: Number(parsed.parallelWorkers ?? 1),
         parallelMode: String(parsed.parallelMode ?? "unknown"),
-        pairOutcomes: parsed.pairOutcomes,
         craftA: parsed.craftA,
         craftB: parsed.craftB,
         completedAt: new Date().toISOString(),
@@ -5345,14 +5392,6 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       </details>
     `;
 
-    craftArenaPanel.innerHTML = `
-      <div class="panel-heading"><div><span class="eyebrow">Balance laboratory</span><h2>Craft Arena</h2></div></div>
-      <div class="developer-intro">Run mirrored, headless craft matchups without rendering a battle or changing leaderboard scores.</div>
-      <div class="sidebar-metric"><span>Saved scenarios</span><strong>${craftArenaScenarios.length}</strong></div>
-      <div class="sidebar-metric"><span>Per simulation</span><strong>2 battles</strong></div>
-      <div class="small">Every pair swaps Player and Enemy sides with the same seed. Battles end on elimination or after 120 simulated seconds.</div>
-      <div class="row"><button id="btnAddCraftArenaScenario" class="button-primary">Add scenario</button></div>
-    `;
     const craftTemplateOptions = (selectedId: number): string => {
       const selectedExists = templates.some((template) => template.id === selectedId);
       return `${selectedExists ? "" : `<option value="${selectedId}" selected>Missing craft (${selectedId})</option>`}${templates
@@ -5366,62 +5405,65 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         .map((option) => `<option value="${escapeHtml(option.id)}" ${option.id === selectedId ? "selected" : ""} ${option.compatible === false ? "disabled" : ""}>${escapeHtml(option.label)}</option>`)
         .join("")}`;
     };
-    const craftScenarioCards = craftArenaScenarios.map((scenario) => {
+    const craftArenaAnyBusy = craftArenaScenarios.some((scenario) => scenario.busy);
+    const craftArenaGlobalDisabled = craftArenaAnyBusy ? "disabled" : "";
+    craftArenaPanel.innerHTML = `
+      <div class="panel-heading"><div><span class="eyebrow">Balance laboratory</span><h2>Craft Arena</h2></div></div>
+      <div class="developer-intro">Global settings apply to every headless scenario. Craft A always starts on the left; Craft B always starts on the right.</div>
+      <div class="sidebar-metric"><span>Saved scenarios</span><strong>${craftArenaScenarios.length}</strong></div>
+      <div class="sidebar-metric"><span>Run mode</span><strong>1 continuous battle</strong></div>
+      <div class="craft-arena-global-settings">
+        <label class="small">Battle duration (minutes)<input id="craftArenaGlobalDuration" type="number" min="1" max="60" step="1" value="${craftArenaSettings.durationMinutes}" ${craftArenaGlobalDisabled} /></label>
+        <label class="small">Shared AI<select id="craftArenaGlobalAi" ${craftArenaGlobalDisabled}>${craftAiOptions(craftArenaSettings.aiModelId)}</select></label>
+        <div class="section-divider"></div>
+        <div class="section-label">Battlefield</div>
+        <div class="test-arena-ui-grid">
+          <label class="small">Width<input id="craftArenaGlobalWidth" type="number" min="640" step="10" value="${craftArenaSettings.battlefieldWidth}" ${craftArenaGlobalDisabled} /></label>
+          <label class="small">Height<input id="craftArenaGlobalHeight" type="number" min="360" step="10" value="${craftArenaSettings.battlefieldHeight}" ${craftArenaGlobalDisabled} /></label>
+          <label class="small">Ground H<input id="craftArenaGlobalGroundHeight" type="number" min="80" max="${Math.max(120, craftArenaSettings.battlefieldHeight - 40)}" step="10" value="${craftArenaSettings.groundHeight}" ${craftArenaGlobalDisabled} /></label>
+        </div>
+        <button id="btnCraftArenaUseTestSettings" type="button" ${craftArenaGlobalDisabled}>Use Test Arena settings</button>
+      </div>
+      <div class="small">Destroyed craft respawn immediately, keeping each scenario's left/right quantities constant for the full duration. Changing a global setting clears prior results.</div>
+      <div class="row"><button id="btnAddCraftArenaScenario" class="button-primary">Add scenario</button></div>
+    `;
+    const craftScenarioRows = craftArenaScenarios.map((scenario) => {
       const craftA = templates.find((template) => template.id === scenario.craftAId);
       const craftB = templates.find((template) => template.id === scenario.craftBId);
-      const ai = findCompositeModelOptionById(scenario.aiModelId);
+      const ai = findCompositeModelOptionById(craftArenaSettings.aiModelId);
       const valid = Boolean(craftA && craftB && ai?.spec && ai.compatible !== false);
       const result = scenario.result;
-      const resultMarkup = result ? `
-        <div class="craft-arena-result">
-          <div class="craft-arena-result-summary">
-            <span><b>${escapeHtml(craftA?.name ?? `Craft ${scenario.craftAId}`)}</b> ${result.pairOutcomes.craftAWins} wins</span>
-            <span><b>${escapeHtml(craftB?.name ?? `Craft ${scenario.craftBId}`)}</b> ${result.pairOutcomes.craftBWins} wins</span>
-            <span><b>Ties</b> ${result.pairOutcomes.ties}</span>
-            <span><b>Completed</b> ${result.simulationsCompleted} pairs / ${result.battlesCompleted} battles</span>
-          </div>
-          <div class="craft-arena-table-wrap">
-            <table class="craft-arena-table">
-              <thead><tr><th>Craft</th><th>Destroyed total</th><th>Destroyed / battle</th><th>Gas wasted total</th><th>Gas wasted / battle</th></tr></thead>
-              <tbody>
-                <tr><td>${escapeHtml(craftA?.name ?? `Missing craft ${scenario.craftAId}`)}</td><td>${result.craftA.destroyedTotal}</td><td>${result.craftA.destroyedAverage.toFixed(2)}</td><td>${result.craftA.gasWastedTotal.toFixed(2)}</td><td>${result.craftA.gasWastedAverage.toFixed(2)}</td></tr>
-                <tr><td>${escapeHtml(craftB?.name ?? `Missing craft ${scenario.craftBId}`)}</td><td>${result.craftB.destroyedTotal}</td><td>${result.craftB.destroyedAverage.toFixed(2)}</td><td>${result.craftB.gasWastedTotal.toFixed(2)}</td><td>${result.craftB.gasWastedAverage.toFixed(2)}</td></tr>
-              </tbody>
-            </table>
-          </div>
-          <div class="small">Finished ${escapeHtml(new Date(result.completedAt).toLocaleString())} using ${result.parallelWorkers} worker(s) (${escapeHtml(result.parallelMode)}).</div>
-        </div>
-      ` : `<div class="small">No result yet.</div>`;
+      const sideResult = (side: CraftArenaSideResult | undefined): string => side
+        ? `${side.destroyed} destroyed · ${side.gasWasted.toFixed(0)} gas wasted`
+        : "Not run";
       return `
-        <article class="craft-arena-card" data-craft-arena-id="${escapeHtml(scenario.id)}">
-          <div class="craft-arena-card-header">
-            <label>Name <input data-craft-arena-field="name" value="${escapeHtml(scenario.name)}" /></label>
-            <div class="row">
+        <details class="craft-arena-row" data-craft-arena-id="${escapeHtml(scenario.id)}">
+          <summary>
+            <span class="craft-arena-row-side left"><strong>${escapeHtml(craftA?.name ?? `Missing craft ${scenario.craftAId}`)} × ${scenario.craftACount}</strong><small>${scenario.busy ? "Running…" : sideResult(result?.craftA)}</small></span>
+            <span class="craft-arena-row-side right"><strong>${escapeHtml(craftB?.name ?? `Missing craft ${scenario.craftBId}`)} × ${scenario.craftBCount}</strong><small>${scenario.busy ? "Running…" : sideResult(result?.craftB)}</small></span>
+          </summary>
+          <div class="craft-arena-row-settings">
+            <div class="craft-arena-matchup-grid">
+              <label>Craft A · Left<select data-craft-arena-field="craftAId">${craftTemplateOptions(scenario.craftAId)}</select></label>
+              <label>Quantity<input data-craft-arena-field="craftACount" type="number" min="1" max="40" step="1" value="${scenario.craftACount}" /></label>
+              <label>Craft B · Right<select data-craft-arena-field="craftBId">${craftTemplateOptions(scenario.craftBId)}</select></label>
+              <label>Quantity<input data-craft-arena-field="craftBCount" type="number" min="1" max="40" step="1" value="${scenario.craftBCount}" /></label>
+            </div>
+            <div class="craft-arena-run-row">
+              <button data-craft-arena-action="run" class="button-primary" ${scenario.busy || !valid ? "disabled" : ""}>${scenario.busy ? "Running…" : `Run ${craftArenaSettings.durationMinutes} min`}</button>
               <button data-craft-arena-action="duplicate">Duplicate</button>
               <button data-craft-arena-action="delete" class="warn">Delete</button>
+              ${!valid ? `<span class="small warn">Select available crafts and AI.</span>` : ""}
             </div>
+            ${scenario.error ? `<div class="notice warn"><strong>Simulation failed</strong><span>${escapeHtml(scenario.error)}</span></div>` : ""}
+            ${result ? `<div class="small">Completed one ${result.durationMinutes}-minute battle on ${escapeHtml(new Date(result.completedAt).toLocaleString())} using ${result.parallelWorkers} worker(s) (${escapeHtml(result.parallelMode)}).</div>` : ""}
           </div>
-          <div class="craft-arena-config-grid">
-            <label>Craft A<select data-craft-arena-field="craftAId">${craftTemplateOptions(scenario.craftAId)}</select></label>
-            <label>Count A<input data-craft-arena-field="craftACount" type="number" min="1" max="40" step="1" value="${scenario.craftACount}" /></label>
-            <label>Craft B<select data-craft-arena-field="craftBId">${craftTemplateOptions(scenario.craftBId)}</select></label>
-            <label>Count B<input data-craft-arena-field="craftBCount" type="number" min="1" max="40" step="1" value="${scenario.craftBCount}" /></label>
-            <label>Shared AI<select data-craft-arena-field="aiModelId">${craftAiOptions(scenario.aiModelId)}</select></label>
-            <label>Simulations<input data-craft-arena-field="simulations" type="number" min="1" max="1000" step="1" value="${scenario.simulations}" /></label>
-          </div>
-          <div class="craft-arena-run-row">
-            <button data-craft-arena-action="run" class="button-primary" ${scenario.busy || !valid ? "disabled" : ""}>${scenario.busy ? "Running..." : "Run scenario"}</button>
-            <span class="small">${scenario.simulations} simulations = ${scenario.simulations * 2} headless battles</span>
-            ${!valid ? `<span class="small warn">Select available crafts and AI.</span>` : ""}
-          </div>
-          ${scenario.error ? `<div class="notice warn"><strong>Simulation failed</strong><span>${escapeHtml(scenario.error)}</span></div>` : ""}
-          ${resultMarkup}
-        </article>
+        </details>
       `;
     }).join("");
     craftArenaCenter.innerHTML = `
-      <div class="workspace-header"><div><span class="eyebrow">Developer Tools / Craft Arena</span><h1>Craft Matchups</h1><p>Compare craft design with identical AI in mirrored, renderer-free battles.</p></div><div class="workspace-actions"><button id="btnAddCraftArenaScenarioCenter" class="button-primary">Add scenario</button></div></div>
-      <div class="craft-arena-list">${craftScenarioCards || `<div class="empty-state"><span class="empty-state-icon">+</span><div><strong>No craft scenarios</strong><small>Add a scenario to configure the first matchup.</small></div><button id="btnAddCraftArenaScenarioEmpty" class="button-primary">Add scenario</button></div>`}</div>
+      <div class="workspace-header"><div><span class="eyebrow">Developer Tools / Craft Arena</span><h1>Craft Matchups</h1><p>One continuous, replenishing battle per scenario. Expand a row to change its crafts and quantities.</p></div><div class="workspace-actions"><button id="btnAddCraftArenaScenarioCenter" class="button-primary">Add scenario</button></div></div>
+      <div class="craft-arena-list">${craftScenarioRows || `<div class="empty-state"><span class="empty-state-icon">+</span><div><strong>No craft scenarios</strong><small>Add a scenario to configure the first matchup.</small></div><button id="btnAddCraftArenaScenarioEmpty" class="button-primary">Add scenario</button></div>`}</div>
     `;
 
     const leaderboardRows = testArenaLeaderboardEntries
@@ -6161,6 +6203,55 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     getOptionalElement<HTMLButtonElement>("#btnAddCraftArenaScenario")?.addEventListener("click", addCraftArenaScenario);
     getOptionalElement<HTMLButtonElement>("#btnAddCraftArenaScenarioCenter")?.addEventListener("click", addCraftArenaScenario);
     getOptionalElement<HTMLButtonElement>("#btnAddCraftArenaScenarioEmpty")?.addEventListener("click", addCraftArenaScenario);
+    const commitCraftArenaGlobalSettings = (update: () => void): void => {
+      if (craftArenaScenarios.some((scenario) => scenario.busy)) return;
+      update();
+      for (const scenario of craftArenaScenarios) {
+        scenario.result = undefined;
+        scenario.error = undefined;
+      }
+      saveCraftArenaScenarios();
+      renderPanels();
+    };
+    const bindCraftArenaNumber = (
+      selector: string,
+      min: number,
+      max: number,
+      apply: (value: number) => void,
+    ): void => {
+      const input = getOptionalElement<HTMLInputElement>(selector);
+      input?.addEventListener("change", () => {
+        const parsed = Number.parseInt(input.value, 10);
+        commitCraftArenaGlobalSettings(() => apply(Math.max(min, Math.min(max, Number.isFinite(parsed) ? parsed : min))));
+      });
+    };
+    bindCraftArenaNumber("#craftArenaGlobalDuration", 1, 60, (value) => { craftArenaSettings.durationMinutes = value; });
+    bindCraftArenaNumber("#craftArenaGlobalWidth", 640, 100_000, (value) => { craftArenaSettings.battlefieldWidth = value; });
+    bindCraftArenaNumber("#craftArenaGlobalHeight", 360, 100_000, (value) => {
+      craftArenaSettings.battlefieldHeight = value;
+      craftArenaSettings.groundHeight = Math.min(craftArenaSettings.groundHeight, Math.max(80, value - 40));
+    });
+    bindCraftArenaNumber("#craftArenaGlobalGroundHeight", 80, Math.max(80, craftArenaSettings.battlefieldHeight - 40), (value) => {
+      craftArenaSettings.groundHeight = value;
+    });
+    getOptionalElement<HTMLSelectElement>("#craftArenaGlobalAi")?.addEventListener("change", (event) => {
+      commitCraftArenaGlobalSettings(() => {
+        craftArenaSettings.aiModelId = (event.currentTarget as HTMLSelectElement).value;
+      });
+    });
+    getOptionalElement<HTMLButtonElement>("#btnCraftArenaUseTestSettings")?.addEventListener("click", () => {
+      commitCraftArenaGlobalSettings(() => {
+        craftArenaSettings.battlefieldWidth = testArenaBattlefieldWidth;
+        craftArenaSettings.battlefieldHeight = testArenaBattlefieldHeight;
+        craftArenaSettings.groundHeight = testArenaGroundHeight;
+        if (
+          testArenaCompositeModelSelections.player === testArenaCompositeModelSelections.enemy
+          && testArenaCompositeModelSelections.player !== "custom-components"
+        ) {
+          craftArenaSettings.aiModelId = testArenaCompositeModelSelections.player;
+        }
+      });
+    });
     craftArenaCenter.querySelectorAll<HTMLElement>("[data-craft-arena-id]").forEach((card) => {
       const scenario = craftArenaScenarios.find((entry) => entry.id === card.dataset.craftArenaId);
       if (!scenario) return;
@@ -6175,12 +6266,11 @@ export function bootstrap(options: BootstrapOptions = {}): void {
           if (field === "craftBId") scenario.craftBId = Number.parseInt(control.value, 10);
           if (field === "craftACount") scenario.craftACount = Math.max(1, Math.min(40, Number.parseInt(control.value, 10) || 1));
           if (field === "craftBCount") scenario.craftBCount = Math.max(1, Math.min(40, Number.parseInt(control.value, 10) || 1));
-          if (field === "simulations") scenario.simulations = Math.max(1, Math.min(1_000, Number.parseInt(control.value, 10) || 1));
-          if (field === "aiModelId") scenario.aiModelId = control.value;
           scenario.result = undefined;
           scenario.error = undefined;
           saveCraftArenaScenarios();
           renderPanels();
+          craftArenaCenter.querySelector<HTMLDetailsElement>(`[data-craft-arena-id="${CSS.escape(scenario.id)}"]`)?.setAttribute("open", "");
         });
       });
       card.querySelector<HTMLButtonElement>('[data-craft-arena-action="run"]')?.addEventListener("click", () => {
@@ -6193,7 +6283,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         renderPanels();
       });
       card.querySelector<HTMLButtonElement>('[data-craft-arena-action="delete"]')?.addEventListener("click", () => {
-        if (!window.confirm(`Delete craft scenario "${scenario.name}"?`)) return;
+        if (!window.confirm("Delete this craft matchup?")) return;
         craftArenaScenarios = craftArenaScenarios.filter((entry) => entry.id !== scenario.id);
         saveCraftArenaScenarios();
         renderPanels();

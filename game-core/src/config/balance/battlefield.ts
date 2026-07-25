@@ -23,6 +23,9 @@ export const DEFAULT_UNIT_MOVEMENT_SPEED_MULTIPLIER: number = config.movement.de
  */
 export const DEFAULT_GROUND_HEIGHT_RATIO: number = config.battlefield.groundHeightRatio;
 
+/** Canonical ground-zone height shared by Test Arena and AI Arena defaults. */
+export const DEFAULT_GROUND_HEIGHT: number = Math.floor(BATTLEFIELD_HEIGHT * DEFAULT_GROUND_HEIGHT_RATIO);
+
 /**
  * Air lane top boundary ratio of total battlefield height.
  * Smaller value means aircraft can fly closer to top edge.

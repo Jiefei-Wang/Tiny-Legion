@@ -3240,6 +3240,11 @@ export class BattleSession {
       projectileGravity: attachment.stats?.projectileGravity ?? stats.projectileGravity ?? PROJECTILE_GRAVITY,
       firepointX: firepoint.x,
       firepointY: firepoint.y,
+      cooldownS: Math.max(0.05, attachment.stats?.cooldown ?? stats.cooldown ?? 1),
+      minimumFireIntervalS: this.getWeaponMinFireInterval(unit, slot),
+      maximumAmmo: this.getWeaponChargeCapacity(unit, slot),
+      loadedAmmo: Math.max(0, unit.weaponReadyCharges[slot] ?? 0),
+      requiresLoader: this.requiresDedicatedLoaderForAttachment(attachment),
     };
   }
 

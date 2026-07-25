@@ -15,6 +15,8 @@ export * from "./config/sound/battle.ts";
 export * from "./ai/decision-tree/combat-decision-tree.ts";
 export * from "./ai/composite/composite-ai.ts";
 export * from "./ai/composite/baseline-modules.ts";
+export * from "./ai/composite/craft-profile.ts";
+export * from "./ai/composite/level-modules.ts";
 export * from "./ai/movement/threat-movement.ts";
 export * from "./ai/shooting/ballistic-aim.ts";
 export * from "./ai/shooting/weapon-ai-policy.ts";

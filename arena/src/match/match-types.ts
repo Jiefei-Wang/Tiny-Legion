@@ -37,6 +37,7 @@ export type MatchSpec = {
       player: { templateId: number; count: number };
       enemy: { templateId: number; count: number };
     };
+    replenishInitialLineup?: boolean;
   };
   templateNames?: string[];
   battlefield?: {

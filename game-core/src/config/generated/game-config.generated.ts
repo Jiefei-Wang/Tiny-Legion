@@ -398,7 +398,7 @@ export const GAME_CONFIG = {
       }
     },
     "levels": {
-      "maxCertifiedLevel": 5
+      "maxCertifiedLevel": 6
     }
   },
   "display": {

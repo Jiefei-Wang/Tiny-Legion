@@ -20,6 +20,12 @@ export interface WeaponFireAiInput {
   projectileGravity: number;
   firepointX: number;
   firepointY: number;
+  /** Reload/capacity properties exposed to property-derived craft tactics. */
+  cooldownS: number;
+  minimumFireIntervalS: number;
+  maximumAmmo: number;
+  loadedAmmo: number;
+  requiresLoader: boolean;
 }
 
 export interface BattleAiInput {

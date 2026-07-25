@@ -6,6 +6,11 @@ import type { MatchResult, MatchSpec } from "../match/match-types.ts";
 import { WorkerPool } from "../lib/worker-pool.ts";
 import { aggregateResults, wilsonLowerBound } from "./fitness.ts";
 import { crossover, defaultParams, mutate, randomParams } from "./param-genetics.ts";
+import {
+  BATTLEFIELD_HEIGHT,
+  BATTLEFIELD_WIDTH,
+  DEFAULT_GROUND_HEIGHT,
+} from "../../../game-core/src/config/balance/battlefield.ts";
 
 type ModuleKind = "shoot" | "movement" | "target";
 type TrainScope = ModuleKind | "all";
@@ -33,6 +38,7 @@ type PhaseDef = {
     height: number;
     groundHeight?: number;
   };
+  useGlobalBattlefield?: boolean;
   maxSimSeconds: number;
   nodeDefense?: number;
   baseHp?: number;
@@ -94,6 +100,7 @@ function makePhase(
   seeds: number,
   config?: Partial<PhaseDef>,
 ): PhaseDef {
+  const useGlobalBattlefield = config?.useGlobalBattlefield === true;
   return {
     id,
     withBase,
@@ -101,10 +108,15 @@ function makePhase(
     seeds,
     templateNames: config?.templateNames ?? ["*"],
     battlefield: {
-      width: config?.battlefield?.width ?? 2000,
-      height: config?.battlefield?.height ?? 1000,
-      ...(typeof config?.battlefield?.groundHeight === "number" ? { groundHeight: config.battlefield.groundHeight } : {}),
+      width: useGlobalBattlefield ? BATTLEFIELD_WIDTH : config?.battlefield?.width ?? BATTLEFIELD_WIDTH,
+      height: useGlobalBattlefield ? BATTLEFIELD_HEIGHT : config?.battlefield?.height ?? BATTLEFIELD_HEIGHT,
+      ...(useGlobalBattlefield
+        ? { groundHeight: DEFAULT_GROUND_HEIGHT }
+        : typeof config?.battlefield?.groundHeight === "number"
+          ? { groundHeight: config.battlefield.groundHeight }
+          : {}),
     },
+    ...(useGlobalBattlefield ? { useGlobalBattlefield: true } : {}),
     maxSimSeconds: config?.maxSimSeconds ?? 240,
     ...(typeof config?.nodeDefense === "number" ? { nodeDefense: config.nodeDefense } : {}),
     ...(typeof config?.baseHp === "number" ? { baseHp: config.baseHp } : {}),
