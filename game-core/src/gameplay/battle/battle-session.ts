@@ -2159,8 +2159,17 @@ export class BattleSession {
     return supports;
   }
 
+  private normalizeBulletName(value: string | undefined): string {
+    return value?.trim().toLocaleLowerCase() ?? "";
+  }
+
+  private getWeaponBulletName(weaponAttachment: UnitInstance["attachments"][number]): string {
+    return this.normalizeBulletName(this.getAttachmentPart(weaponAttachment)?.partProperties?.bulletName);
+  }
+
   private getLoaderConfig(loaderAttachment: UnitInstance["attachments"][number]): {
     supports: ProjectileClass[];
+    bulletName: string;
     loadMultiplier: number;
     fastOperation: boolean;
     minLoadTime: number;
@@ -2186,6 +2195,7 @@ export class BattleSession {
         : [...loaderStats.loader.supports];
     return {
       supports,
+      bulletName: this.normalizeBulletName(partDefinition?.partProperties?.bulletName),
       loadMultiplier: loaderAttachment.stats?.loaderLoadMultiplier
         ?? partDefinition?.properties?.loaderCooldownMultiplier
         ?? loaderStats.loader.loadMultiplier,
@@ -2193,6 +2203,17 @@ export class BattleSession {
       minLoadTime: loaderAttachment.stats?.loaderMinLoadTime ?? loaderStats.loader.minLoadTime,
       minBurstInterval: loaderAttachment.stats?.loaderMinBurstInterval ?? loaderStats.loader.minBurstInterval,
     };
+  }
+
+  private loaderMatchesWeapon(
+    loader: { supports: ProjectileClass[]; bulletName: string },
+    weaponAttachment: UnitInstance["attachments"][number],
+  ): boolean {
+    const bulletName = this.getWeaponBulletName(weaponAttachment);
+    return loader.supports.includes(this.getAttachmentProjectileClass(weaponAttachment))
+      && bulletName.length > 0
+      && loader.bulletName.length > 0
+      && loader.bulletName === bulletName;
   }
 
   private getWeaponMinFireInterval(unit: UnitInstance, slot: number): number {
@@ -2298,7 +2319,7 @@ export class BattleSession {
         if (
           projectileClass === null ||
           (weaponAttachment !== undefined && !this.requiresDedicatedLoaderForAttachment(weaponAttachment)) ||
-          !loaderConfig.supports.includes(projectileClass) ||
+          (weaponAttachment !== undefined && !this.loaderMatchesWeapon(loaderConfig, weaponAttachment)) ||
           (unit.weaponReadyCharges[targetSlot] ?? 0) >= this.getWeaponChargeCapacity(unit, targetSlot)
         ) {
           loaderState.targetWeaponSlot = null;
@@ -2359,8 +2380,7 @@ export class BattleSession {
         if (!this.requiresDedicatedLoaderForAttachment(weaponAttachment)) {
           return false;
         }
-        const projectileClass = this.getAttachmentProjectileClass(weaponAttachment);
-        if (!loaderConfig.supports.includes(projectileClass)) {
+        if (!this.loaderMatchesWeapon(loaderConfig, weaponAttachment)) {
           return false;
         }
         const cap = this.getWeaponChargeCapacity(unit, slot);
@@ -3092,14 +3112,13 @@ export class BattleSession {
       if (!weaponAttachment) continue;
       const weaponStats = COMPONENTS[weaponAttachment.component];
       if (weaponStats.type !== "weapon") continue;
-      const projectileClass = this.getAttachmentProjectileClass(weaponAttachment);
       if (!this.requiresDedicatedLoaderForAttachment(weaponAttachment) || (unit.weaponReadyCharges[slot] ?? 0) > 0) {
         return true;
       }
       const canReload = unit.loaderStates.some((loaderState) => {
         const loaderAttachment = unit.attachments.find((attachment) => attachment.id === loaderState.attachmentId && attachment.alive);
         const loaderConfig = loaderAttachment ? this.getLoaderConfig(loaderAttachment) : null;
-        return loaderConfig?.supports.includes(projectileClass) === true;
+        return loaderConfig !== null && this.loaderMatchesWeapon(loaderConfig, weaponAttachment);
       });
       if (canReload) return true;
     }

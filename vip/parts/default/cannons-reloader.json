@@ -79,6 +79,7 @@
     "loaderMinBurstInterval": 0.5
   },
   "partProperties": {
+    "bulletName": "cannon shell",
     "supportedWeaponTags": [
       "bullet"
     ],

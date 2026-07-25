@@ -236,6 +236,16 @@ export function validatePartDefinitionDetailed(part: PartDefinition): PartValida
     && (!Number.isInteger(part.partProperties.maxCapacity) || part.partProperties.maxCapacity < 1)) {
     errors.push("weapon maxCapacity must be an integer >= 1.");
   }
+  if (
+    part.partType === "weapon"
+    && part.partProperties?.needLoader === true
+    && !part.partProperties.bulletName?.trim()
+  ) {
+    errors.push("weapons that need a loader require a non-empty bulletName.");
+  }
+  if (part.partType === "loader" && !part.partProperties?.bulletName?.trim()) {
+    errors.push("loaders require a non-empty bulletName.");
+  }
   if (part.partType === "weapon" && (part.partProperties?.maxCapacity ?? 1) !== 1
     && (!Number.isFinite(part.partProperties?.minFireInterval)
       || (part.partProperties?.minFireInterval ?? -1) < 0)) {

@@ -9,7 +9,7 @@ import {
   resolvePartDefinitionForAttachment,
 } from "../parts/part-schema.ts";
 import { validateTemplateDetailed } from "./template-validation.ts";
-import type { ComponentId, DisplayAttachmentTemplate, PartDefinition, UnitTemplate, UnitType } from "../types.ts";
+import type { ComponentId, DisplayAttachmentTemplate, PartDefinition, ProjectileClass, UnitTemplate, UnitType } from "../types.ts";
 
 export { validateTemplateDetailed } from "./template-validation.ts";
 
@@ -247,19 +247,20 @@ function ensureLoaderCoverage(
   const catalog = resolveCatalog(partCatalog);
   const next = template.attachments.map((attachment) => ({ ...attachment }));
   const occupiedAnchorKeys = new Set<string>();
-  const loaderRequiredClasses = new Set(
-    next
-      .filter((attachment) => {
-        const part = resolvePartDefinitionForAttachment({ partId: attachment.partId, component: attachment.component }, catalog);
-        return part?.partProperties?.needLoader
-          ?? (attachment.component === "heavyCannon" || attachment.component === "explosiveShell" || attachment.component === "trackingMissile");
-      })
-      .map((attachment) => {
-        const part = resolvePartDefinitionForAttachment({ partId: attachment.partId, component: attachment.component }, catalog);
-        return part?.partProperties?.projectileClass ?? COMPONENTS[attachment.component].projectileClass ?? "bullet";
-      }),
-  );
-  const supportedClasses = new Set<string>();
+  const normalizeBulletName = (value: string | undefined): string => value?.trim().toLocaleLowerCase() ?? "";
+  const loaderRequirements = next.flatMap((attachment) => {
+    const part = resolvePartDefinitionForAttachment({ partId: attachment.partId, component: attachment.component }, catalog);
+    const needsLoader = part?.partProperties?.needLoader
+      ?? (attachment.component === "heavyCannon" || attachment.component === "explosiveShell" || attachment.component === "trackingMissile");
+    if (!needsLoader) {
+      return [];
+    }
+    return [{
+      projectileClass: part?.partProperties?.projectileClass ?? COMPONENTS[attachment.component].projectileClass ?? "bullet",
+      bulletName: normalizeBulletName(part?.partProperties?.bulletName),
+    }];
+  });
+  const supportedLoaderKeys = new Set<string>();
   for (const attachment of next) {
     if (attachment.x !== undefined && attachment.y !== undefined) {
       occupiedAnchorKeys.add(`xy:${attachment.x},${attachment.y}`);
@@ -270,8 +271,13 @@ function ensureLoaderCoverage(
     if (stats.type !== "loader" || !stats.loader) {
       continue;
     }
-    for (const supported of stats.loader.supports) {
-      supportedClasses.add(supported);
+    const part = resolvePartDefinitionForAttachment({ partId: attachment.partId, component: attachment.component }, catalog);
+    const bulletName = normalizeBulletName(part?.partProperties?.bulletName);
+    const supports = part?.partProperties?.supportedWeaponTags ?? stats.loader.supports;
+    for (const supported of supports) {
+      if ((supported === "bullet" || supported === "missile" || supported === "laser") && bulletName) {
+        supportedLoaderKeys.add(`${supported}:${bulletName}`);
+      }
     }
   }
 
@@ -303,12 +309,9 @@ function ensureLoaderCoverage(
     }
   }
 
-  const injectLoader = (component: ComponentId, supportedClass: "bullet" | "missile" | "laser"): void => {
-    if (!loaderRequiredClasses.has(supportedClass) || supportedClasses.has(supportedClass)) {
-      return;
-    }
-    const loaderPart = resolvePartDefinitionForAttachment({ component }, catalog);
-    if (!loaderPart) {
+  const injectLoader = (loaderPart: PartDefinition, supportedClass: ProjectileClass, bulletName: string): void => {
+    const loaderKey = `${supportedClass}:${bulletName}`;
+    if (!bulletName || supportedLoaderKeys.has(loaderKey)) {
       return;
     }
 
@@ -316,7 +319,8 @@ function ensureLoaderCoverage(
       const stats = COMPONENTS[attachment.component];
       const part = resolvePartDefinitionForAttachment({ partId: attachment.partId, component: attachment.component }, catalog);
       return stats.type === "weapon"
-        && (part?.partProperties?.projectileClass ?? stats.projectileClass ?? "bullet") === supportedClass;
+        && (part?.partProperties?.projectileClass ?? stats.projectileClass ?? "bullet") === supportedClass
+        && normalizeBulletName(part?.partProperties?.bulletName) === bulletName;
     });
     if (!anchor) {
       return;
@@ -397,14 +401,25 @@ function ensureLoaderCoverage(
 
     const loaderStats = COMPONENTS[loaderPart.baseComponent];
     if (loaderStats.type === "loader" && loaderStats.loader) {
-      for (const supported of loaderStats.loader.supports) {
-        supportedClasses.add(supported);
-      }
+      supportedLoaderKeys.add(loaderKey);
     }
   };
 
-  injectLoader("missileLoader", "missile");
-  injectLoader("cannonLoader", "bullet");
+  for (const requirement of loaderRequirements) {
+    const loaderPart = catalog.find((part) => {
+      if (part.partType !== "loader" || normalizeBulletName(part.partProperties?.bulletName) !== requirement.bulletName) {
+        return false;
+      }
+      const stats = COMPONENTS[part.baseComponent];
+      const supports = part.partProperties?.supportedWeaponTags
+        ?? (stats.type === "loader" ? stats.loader?.supports : undefined)
+        ?? [];
+      return supports.includes(requirement.projectileClass);
+    });
+    if (loaderPart) {
+      injectLoader(loaderPart, requirement.projectileClass, requirement.bulletName);
+    }
+  }
 
   return next;
 }

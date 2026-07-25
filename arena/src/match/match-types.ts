@@ -33,6 +33,10 @@ export type MatchSpec = {
   scenario?: {
     withBase: boolean;
     initialUnitsPerSide: number;
+    initialLineup?: {
+      player: { templateId: number; count: number };
+      enemy: { templateId: number; count: number };
+    };
   };
   templateNames?: string[];
   battlefield?: {
@@ -74,6 +78,10 @@ export type MatchResult = {
     enemyOperationalUnits: number;
     playerUnitIntegrity: number;
     enemyUnitIntegrity: number;
+  };
+  losses: {
+    player: { destroyedObjects: number; gasWasted: number };
+    enemy: { destroyedObjects: number; gasWasted: number };
   };
   replay: {
     seed: number;

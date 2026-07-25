@@ -166,6 +166,7 @@
     "explodeOnHit": false,
     "projectileSpeed": 800,
     "needLoader": true,
+    "bulletName": "anti-tank shell",
     "maxCapacity": 1
   },
   "properties": {

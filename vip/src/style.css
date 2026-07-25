@@ -627,6 +627,23 @@ button.active {
 .button-primary { color:#071713; border-color:rgba(107,228,193,.8); background:linear-gradient(180deg,#72e8c7,#4fcaa8); text-shadow:none; }.button-primary:hover { color:#06110f; background:linear-gradient(180deg,#8af2d5,#60d8b6); }
 
 .management-center { height: 100%; min-height: 0; overflow: auto; padding: 8px 12px 22px; scrollbar-width: thin; scrollbar-color: rgba(111,145,180,.4) transparent; }
+.craft-arena-center { height:100%; min-height:0; overflow:auto; padding:14px 18px 28px; scrollbar-width:thin; scrollbar-color:rgba(111,145,180,.4) transparent; }
+.craft-arena-list { display:grid; gap:14px; }
+.craft-arena-card { display:grid; min-width:0; gap:12px; padding:16px; border:1px solid rgba(111,145,180,.28); border-radius:10px; background:linear-gradient(145deg,rgba(22,31,42,.96),rgba(11,17,24,.96)); box-shadow:0 12px 30px rgba(0,0,0,.2); }
+.craft-arena-card-header,.craft-arena-run-row,.craft-arena-result-summary { display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; }
+.craft-arena-card-header > label { flex:1; min-width:220px; }
+.craft-arena-card-header input { width:100%; }
+.craft-arena-config-grid { display:grid; grid-template-columns:minmax(150px,1fr) 90px minmax(150px,1fr) 90px; gap:10px; align-items:end; }
+.craft-arena-config-grid label:nth-child(5) { grid-column:1 / 4; }
+.craft-arena-config-grid label:nth-child(6) { grid-column:4; }
+.craft-arena-config-grid label { display:grid; gap:5px; font-size:12px; color:var(--muted); }
+.craft-arena-config-grid select,.craft-arena-config-grid input { width:100%; min-width:0; }
+.craft-arena-result { display:grid; gap:8px; padding-top:10px; border-top:1px solid rgba(111,145,180,.2); }
+.craft-arena-result-summary span { padding:6px 9px; border-radius:6px; background:rgba(7,12,18,.55); font-size:12px; }
+.craft-arena-table-wrap { width:100%; max-width:100%; overflow:auto; }
+.craft-arena-table { width:100%; border-collapse:collapse; font-size:12px; }
+.craft-arena-table th,.craft-arena-table td { padding:7px 9px; border-bottom:1px solid rgba(111,145,180,.18); text-align:right; white-space:nowrap; }
+.craft-arena-table th:first-child,.craft-arena-table td:first-child { text-align:left; }
 .workspace-header { display: flex; align-items: flex-end; justify-content: space-between; gap: 20px; padding: 14px 4px 19px; border-bottom: 1px solid var(--stroke); }.workspace-header h1 { margin: 4px 0 4px; font-size: clamp(26px, 3vw, 38px); line-height: 1; letter-spacing: -1.4px; }.workspace-header p { max-width: 650px; margin: 0; color: var(--muted); font-size: 11px; }.workspace-actions { display: flex; align-items: center; gap: 8px; }.button-quiet { background: rgba(107,228,193,.08); border-color: rgba(107,228,193,.38); color: #bdf9e8; }.map-readout { padding: 8px 11px; border: 1px solid var(--stroke); border-radius: 9px; color: #b7c9db; font-size: 10px; }
 .metric-grid { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 9px; padding: 14px 0; }.metric-card { position: relative; min-width: 0; padding: 13px; overflow: hidden; border: 1px solid var(--stroke); border-radius: 12px; background: linear-gradient(145deg, rgba(28,43,61,.9), rgba(15,24,35,.88)); }.metric-card::after { content:""; position:absolute; inset:auto -20px -30px auto; width:70px; height:70px; border-radius:50%; background:rgba(98,169,255,.05); }.metric-card.accent { border-color: rgba(107,228,193,.35); background: linear-gradient(145deg, rgba(24,58,59,.78), rgba(15,30,38,.9)); }.metric-card span,.metric-card small { display:block; color:var(--muted); font-size:9px; }.metric-card strong { display:block; margin:6px 0 4px; font-size:24px; letter-spacing:-.8px; }.metric-card.accent strong { color:var(--accent); }
 .workspace-section { margin-top: 10px; padding-top: 10px; }.section-heading { display:flex; justify-content:space-between; align-items:end; gap:12px; margin-bottom:10px; }.section-heading h2 { margin:3px 0 0; font-size:17px; }.section-note { color:var(--muted); font-size:9px; }
@@ -1122,6 +1139,8 @@ button.active {
   .tabs button { min-width:58px; grid-template-columns:1fr; justify-items:center; padding:6px; text-align:center; }
   .nav-primary button span:nth-child(2) { display:none; }
   .center-panel { min-height:620px; }
+  .craft-arena-config-grid { grid-template-columns:minmax(0,1fr) 90px; }
+  .craft-arena-config-grid label:nth-child(5),.craft-arena-config-grid label:nth-child(6) { grid-column:span 1; }
   .metric-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
   .tech-grid { grid-template-columns:1fr; }
   .campaign-map { min-height:650px; overflow:auto; }

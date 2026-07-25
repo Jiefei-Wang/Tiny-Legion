@@ -53,7 +53,10 @@ Lose condition chain:
 - Test Arena starts with no extra starter units; units only appear through enabled auto-spawn behavior (or explicit deploy actions).
 - Battle Ops pane includes a spawn-side switch (`Player Spawn` / `Enemy Spawn`, default `Player Spawn`); enemy-side deploy from this pane is allowed only during active Test Arena.
 - Test Arena options panel is organized as collapsible tabs to save space: battle start/stop actions are always in the first row, `Unit` is expanded by default, and `Manual Spawn`, `AI Selection`, and `UI Configuration` are collapsed by default. `Manual Spawn` deploys exactly one chosen craft immediately for either Player or Enemy during an active Test Arena.
-- Developer-only destinations (`Test Arena`, `Leaderboard`, `Craft Designer`, `Part Designer`, and `Global Settings`) live in the top-bar `Developer Tools` dropdown. The campaign sidebar is reserved for Base/Map/Battle, and its navigation/panel split can be dragged vertically and is persisted locally.
+- Developer-only destinations (`Test Arena`, `Craft Arena`, `Leaderboard`, `Craft Designer`, `Part Designer`, and `Global Settings`) live in the top-bar `Developer Tools` dropdown. The campaign sidebar is reserved for Base/Map/Battle, and its navigation/panel split can be dragged vertically and is persisted locally.
+- Craft Arena is a renderer-free balance laboratory for saved craft-vs-craft scenarios. Each scenario selects one craft and independent initial count per side, one shared composed AI, and a simulation count. One simulation is a same-seed mirrored pair that swaps the crafts between Player and Enemy, uses no bases or reinforcements, and ends on elimination or a 120-second deadline.
+- Craft Arena scenario definitions and their latest aggregate results auto-save locally. Each scenario runs independently and reports mirrored-pair wins/losses/ties plus total and per-battle destroyed-craft counts and authored gas value wasted; it does not draw a battle or graph and does not modify leaderboard ratings.
+- A locally generated Craft Arena seed under Arena data can be imported once per browser revision, allowing completed developer-run matchup batches to appear in the normal scenario list while preserving subsequent local edits and deletions.
 - Runtime debug controls live in a compact top-bar dropdown that matches the `Developer Tools` trigger and popover presentation.
 - The development-only Global Settings authoring panel exposes every game-core YAML setting through top-level category tabs (`Balance`, `AI`, `Display`, `Editor`, and `Sound`), file-level sections, and recursively nested subcategories. The modal occupies a stable 90% of the viewport height and scrolls its settings content internally instead of resizing as groups expand. File sections and nested subcategories are collapsed by default so opening the panel shows only its navigational headers, except that a category containing exactly one file section expands that section automatically. Type-aware controls edit numbers, booleans, text, and arrays; hovering a field or focusing its help marker shows the explanation authored in that YAML document's `_descriptions` map. Sound sample paths and fire-sample pools each include a preview button that uses the current unsaved form values, with pool previews choosing a member at the authored weapon-class playback rate. Saving validates and transactionally rewrites the fixed YAML set under `game-core/src/config/` while retaining the descriptions; movement speed and master battle volume apply immediately through explicit live hooks, while other settings take effect after restarting the affected VIP/Arena runtime. The settings endpoint invalidates Vite's generated-config module cache so a browser refresh loads the newly saved values. These values are not browser-local preferences.
 - Test Arena AI presets are local JS/TS-only and run without external Python bridge/service dependencies.
@@ -196,6 +199,7 @@ Part-level properties:
 - `cw angle`: clockwise limit angle relative to part direction.
 - `ccw angle`: anti-clockwise limit angle relative to part direction.
 - `projectile class`: one of `bullet|missile|laser`; bullet and missile are physical shots, while laser resolves as instant hitscan.
+- `bullet name`: free-text ammunition identity. It is required when a weapon needs a reloader and on every reloader; a reloader can service only a weapon whose normalized bullet name matches its own.
 - `projectile shape`: class-filtered SVG asset (`round|slug|tracer`, `missile|heavy rocket|energy orb`, or `thin|pulse|wide`).
 - `projectile size ratio`: uniform `0.1x..10x` scale applied to both the rendered solid projectile and its generated collider.
 - `damage`: base hit damage.
@@ -319,7 +323,8 @@ Cell-level properties:
 - `gas cost`: `10`
 - `mass`: `5`
 - `tag`: `loader`
-- `supported weapon tags`: `cannon`
+- `bullet name`: `bullet`
+- `supported projectile classes`: `bullet`
 - `load multiplier`: `1.0`
 - `min load time`: `0.5`
 - `min burst interval`: `0.2`
@@ -359,13 +364,13 @@ Part-level property visibility (left pane):
   - `part type`
   - `tags`
   - part-type default/common fields (`gas cost`, and other per-type defaults)
-- `Category` is catalog-driven and uses the canonical gameplay names rather than technical runtime families:
+- `Category` is catalog-driven and uses the canonical gameplay families rather than technical runtime names or descriptive variants:
   - structure: `light steel`, `normal steel`, `heavy steel`;
   - control: `small control unit`, `medium control unit`, `large control unit`;
-  - engine: `light tank engine`, `heavy tank engine`, `light aircraft engine`, `heavy aircraft engine`;
+  - engine: `tank engine`, `aircraft engine`; `light` and `heavy` describe engine variants and are not categories;
   - weapon: `firearm`, `cannon`, `laser`; the cannon category contains explosive and anti-tank variants;
   - loader: `cannons reloader`, `anti-tank gun reloader`.
-- Selecting a canonical category opens that existing part; for a new unsaved draft it applies the selected part as a preset while retaining a new identity.
+- Selecting a canonical category opens that existing part; for a new unsaved draft it applies the selected part as a preset while retaining a new identity. Switching an engine between tank and aircraft categories preserves its current light/heavy description when that counterpart exists.
 - `structure` selected:
   - Show structure-only fields: `mass`, `HP`, `armor`, `recover`, `color`.
   - Hide engine/weapon/loader-only fields.
@@ -923,7 +928,7 @@ The current playable implementation already includes:
   - Loaders process one supported weapon at a time.
   - Player-controlled selected weapon is prioritized for loading.
   - Loader `loadMultiplier` + `fastOperation` modify load time, bounded by `minLoadTime`.
-  - Every weapon starts with its authored `max capacity` loaded. Multi-round weapons release those rounds at `min fire interval`; each self-reload cooldown or compatible-loader operation restores exactly one round, repeating until the weapon reaches capacity.
+  - Every weapon starts with its authored `max capacity` loaded. Multi-round weapons release those rounds at `min fire interval`; each self-reload cooldown or compatible-loader operation restores exactly one round, repeating until the weapon reaches capacity. A dedicated loader is compatible only when both projectile class support and the trimmed, case-insensitive free-text `bullet name` match the weapon.
   - Fire commands sent to a cooling/reloading weapon slot are ignored (no projectile and no recoil/knockback side effects).
 - Weapon availability includes future reload capability: a surviving loaded round remains usable after loader loss. Spending the last loaded round without a reload path starts the ground wreck countdown or, for aircraft, escape mode; destroying every weapon triggers the same platform-specific result immediately.
 - Part-level functional overrides now drive runtime behavior for all current functional families:

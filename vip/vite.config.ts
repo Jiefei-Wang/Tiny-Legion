@@ -1058,6 +1058,7 @@ function arenaModelPlugin() {
   const runsDir = resolve(arenaDataDir, "runs");
   const leaderboardDir = resolve(arenaDataDir, "leaderboard");
   const leaderboardFile = resolve(leaderboardDir, "composite-elo.json");
+  const craftArenaSeedFile = resolve(arenaDataDir, "craft-arena", "scenario-seed.json");
   const phaseConfigFile = resolve(process.cwd(), "..", "arena", "composite-training.phases.json");
   let leaderboardCompeteBusy = false;
   const leaderboardParallelWorkers = Math.max(
@@ -1616,6 +1617,209 @@ function arenaModelPlugin() {
         });
         res.setHeader("content-type", "application/json");
         res.end(JSON.stringify({ ok: true, entries }));
+      });
+
+      server.middlewares.use("/__arena/craft-arena/seed", (req, res) => {
+        if (req.method !== "GET") {
+          res.statusCode = 405;
+          res.end("method not allowed");
+          return;
+        }
+        if (!existsSync(craftArenaSeedFile)) {
+          json(res, 200, { ok: true, found: false });
+          return;
+        }
+        try {
+          const parsed = JSON.parse(readFileSync(craftArenaSeedFile, "utf8")) as {
+            revision?: unknown;
+            scenarios?: unknown;
+          };
+          if (typeof parsed.revision !== "string" || !Array.isArray(parsed.scenarios)) {
+            throw new Error("invalid craft arena seed");
+          }
+          json(res, 200, {
+            ok: true,
+            found: true,
+            revision: parsed.revision,
+            scenarios: parsed.scenarios,
+          });
+        } catch (error) {
+          json(res, 500, {
+            ok: false,
+            reason: "seed_read_failed",
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      });
+
+      server.middlewares.use("/__arena/craft-arena/simulate", (req, res) => {
+        if (req.method !== "POST") {
+          res.statusCode = 405;
+          res.end("method not allowed");
+          return;
+        }
+        let body = "";
+        req.on("data", (chunk) => {
+          body += chunk;
+          if (body.length > 1_000_000) {
+            req.destroy();
+          }
+        });
+        req.on("end", async () => {
+          type CraftArenaPayload = {
+            craftAId?: unknown;
+            craftACount?: unknown;
+            craftBId?: unknown;
+            craftBCount?: unknown;
+            simulations?: unknown;
+            aiSpec?: unknown;
+          };
+          let payload: CraftArenaPayload;
+          try {
+            payload = JSON.parse(body || "{}") as CraftArenaPayload;
+          } catch {
+            json(res, 400, { ok: false, reason: "bad_json" });
+            return;
+          }
+          const readInteger = (value: unknown, min: number, max: number): number | null => (
+            typeof value === "number"
+            && Number.isInteger(value)
+            && value >= min
+            && value <= max
+              ? value
+              : null
+          );
+          const craftAId = readInteger(payload.craftAId, 1, Number.MAX_SAFE_INTEGER);
+          const craftBId = readInteger(payload.craftBId, 1, Number.MAX_SAFE_INTEGER);
+          const craftACount = readInteger(payload.craftACount, 1, 40);
+          const craftBCount = readInteger(payload.craftBCount, 1, 40);
+          const simulations = readInteger(payload.simulations, 1, 1_000);
+          if (craftAId === null || craftBId === null || craftACount === null || craftBCount === null || simulations === null) {
+            json(res, 400, { ok: false, reason: "invalid_scenario" });
+            return;
+          }
+          if (!isCompositeSpec(payload.aiSpec)) {
+            json(res, 400, { ok: false, reason: "invalid_ai_spec" });
+            return;
+          }
+
+          const baseSeed = (Date.now() ^ Math.floor(Math.random() * 0x7fffffff)) >>> 0;
+          const makeSpec = (
+            seed: number,
+            player: { templateId: number; count: number },
+            enemy: { templateId: number; count: number },
+          ): MatchSpec => ({
+            seed,
+            maxSimSeconds: 120,
+            nodeDefense: 0,
+            playerGas: 0,
+            enemyGas: 0,
+            aiPlayer: payload.aiSpec as MatchAiSpec,
+            aiEnemy: payload.aiSpec as MatchAiSpec,
+            scenario: {
+              withBase: false,
+              initialUnitsPerSide: 1,
+              initialLineup: { player, enemy },
+            },
+            templateNames: [String(craftAId), String(craftBId)],
+          });
+          const jobs = Array.from({ length: simulations }, (_, index) => {
+            const seed = (baseSeed + Math.imul(index + 1, 9973)) >>> 0;
+            return {
+              aAsPlayer: makeSpec(
+                seed,
+                { templateId: craftAId, count: craftACount },
+                { templateId: craftBId, count: craftBCount },
+              ),
+              aAsEnemy: makeSpec(
+                seed,
+                { templateId: craftBId, count: craftBCount },
+                { templateId: craftAId, count: craftACount },
+              ),
+            };
+          });
+
+          try {
+            const pool = await getWorkerPool();
+            const run = (spec: MatchSpec): Promise<MatchResult> => pool
+              ? pool.run(spec).then((result) => result as MatchResult)
+              : runMatch(spec);
+            const results: Array<{ aAsPlayer: MatchResult; aAsEnemy: MatchResult }> = [];
+            const firstJob = jobs[0];
+            if (!firstJob) {
+              throw new Error("No craft arena simulation jobs were created.");
+            }
+            results.push({
+              aAsPlayer: await run(firstJob.aAsPlayer),
+              aAsEnemy: await run(firstJob.aAsEnemy),
+            });
+            if (pool) {
+              const completed = await Promise.all(jobs.slice(1).map(async (job) => ({
+                aAsPlayer: await run(job.aAsPlayer),
+                aAsEnemy: await run(job.aAsEnemy),
+              })));
+              results.push(...completed);
+            } else {
+              for (const job of jobs.slice(1)) {
+                results.push({
+                  aAsPlayer: await run(job.aAsPlayer),
+                  aAsEnemy: await run(job.aAsEnemy),
+                });
+              }
+            }
+
+            let craftAWins = 0;
+            let craftBWins = 0;
+            let ties = 0;
+            let craftADestroyed = 0;
+            let craftBDestroyed = 0;
+            let craftAGasWasted = 0;
+            let craftBGasWasted = 0;
+            for (const result of results) {
+              const comparison = compareMirroredSeries(result.aAsPlayer, result.aAsEnemy);
+              if (comparison.outcomeA > 0) craftAWins += 1;
+              else if (comparison.outcomeA < 0) craftBWins += 1;
+              else ties += 1;
+              craftADestroyed += result.aAsPlayer.losses.player.destroyedObjects
+                + result.aAsEnemy.losses.enemy.destroyedObjects;
+              craftBDestroyed += result.aAsPlayer.losses.enemy.destroyedObjects
+                + result.aAsEnemy.losses.player.destroyedObjects;
+              craftAGasWasted += result.aAsPlayer.losses.player.gasWasted
+                + result.aAsEnemy.losses.enemy.gasWasted;
+              craftBGasWasted += result.aAsPlayer.losses.enemy.gasWasted
+                + result.aAsEnemy.losses.player.gasWasted;
+            }
+            const battlesCompleted = results.length * 2;
+            const average = (value: number): number => battlesCompleted > 0 ? round2(value / battlesCompleted) : 0;
+            json(res, 200, {
+              ok: true,
+              simulationsRequested: simulations,
+              simulationsCompleted: results.length,
+              battlesCompleted,
+              parallelWorkers: pool ? leaderboardParallelWorkers : 1,
+              parallelMode: pool ? "worker-threads" : "single-thread-fallback",
+              pairOutcomes: { craftAWins, craftBWins, ties },
+              craftA: {
+                destroyedTotal: craftADestroyed,
+                destroyedAverage: average(craftADestroyed),
+                gasWastedTotal: round2(craftAGasWasted),
+                gasWastedAverage: average(craftAGasWasted),
+              },
+              craftB: {
+                destroyedTotal: craftBDestroyed,
+                destroyedAverage: average(craftBDestroyed),
+                gasWastedTotal: round2(craftBGasWasted),
+                gasWastedAverage: average(craftBGasWasted),
+              },
+            });
+          } catch (error) {
+            json(res, 400, {
+              ok: false,
+              reason: "simulation_failed",
+              error: error instanceof Error ? error.message : String(error),
+            });
+          }
+        });
       });
 
       server.middlewares.use("/__arena/composite/leaderboard/compete", (req, res) => {

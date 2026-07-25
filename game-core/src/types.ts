@@ -1,4 +1,4 @@
-export type ScreenMode = "base" | "map" | "battle" | "testArena" | "leaderboard" | "templateEditor" | "partEditor";
+export type ScreenMode = "base" | "map" | "battle" | "testArena" | "craftArena" | "leaderboard" | "templateEditor" | "partEditor";
 
 export type MaterialId = "basic" | "reinforced" | "ceramic" | "reactive" | "combined";
 
@@ -209,6 +209,8 @@ export interface PartPropertySet {
   tracking?: boolean;
   trackingTurnRate?: number;
   needLoader?: boolean;
+  /** Free-text ammunition identity used to match loader-managed weapons with loaders. */
+  bulletName?: string;
   supportedWeaponTags?: string[];
   loadMultiplier?: number;
   minLoadTime?: number;

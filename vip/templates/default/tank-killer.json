@@ -66,14 +66,6 @@
   ],
   "attachments": [
     {
-      "component": "cannonLoader",
-      "partId": 15,
-      "cell": 1,
-      "x": -2,
-      "y": -1,
-      "rotateQuarter": 0
-    },
-    {
       "component": "control",
       "partId": 4,
       "cell": 2,
@@ -103,6 +95,14 @@
       "cell": 8,
       "x": 0,
       "y": 0,
+      "rotateQuarter": 0
+    },
+    {
+      "component": "cannonLoader",
+      "partId": 15,
+      "cell": 1,
+      "x": -2,
+      "y": -1,
       "rotateQuarter": 0
     }
   ],

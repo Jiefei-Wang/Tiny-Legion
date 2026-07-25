@@ -1012,16 +1012,34 @@ function runSmoke(): Failure[] {
 
   const loaderTemplateSource = templates.find((template) => template.id === 5);
   const loaderWeaponPart = partCatalog.find((part) => part.name === "cannons");
-  const loaderTemplate = loaderTemplateSource && loaderWeaponPart
+  const matchingLoaderPart = partCatalog.find((part) => part.name === "cannons reloader");
+  const loaderTemplate = loaderTemplateSource && loaderWeaponPart && matchingLoaderPart
     ? {
         ...loaderTemplateSource,
         id: 999_014,
         name: "Headless Loader Escape Craft",
-        attachments: loaderTemplateSource.attachments.map((attachment) => (
-          COMPONENTS[attachment.component].type === "weapon"
-            ? { ...attachment, component: loaderWeaponPart.baseComponent, partId: loaderWeaponPart.id }
-            : { ...attachment }
-        )),
+        // Keep this loader-specific fixture independent from later edits to the
+        // compact default attack-aircraft footprint.
+        structure: [
+          { partId: 10, x: -1, y: -1 },
+          { partId: 10, x: 0, y: -1 },
+          { partId: 10, x: -2, y: 0 },
+          { partId: 10, x: -1, y: 0 },
+          { partId: 10, x: 0, y: 0 },
+          { partId: 10, x: 1, y: 0 },
+          { partId: 10, x: 2, y: 0 },
+          { partId: 10, x: -2, y: 1 },
+          { partId: 10, x: -1, y: 1 },
+          { partId: 10, x: 0, y: 1 },
+          { partId: 10, x: 1, y: 1 },
+          { partId: 10, x: 2, y: 1 },
+        ],
+        attachments: [
+          { component: "jetEngine", partId: 14, cell: 2, x: -2, y: 0, rotateQuarter: 0 },
+          { component: "control", partId: 3, cell: 4, x: 0, y: 0, rotateQuarter: 0 },
+          { component: matchingLoaderPart.baseComponent, partId: matchingLoaderPart.id, cell: 1, x: 0, y: -1, rotateQuarter: 0 },
+          { component: loaderWeaponPart.baseComponent, partId: loaderWeaponPart.id, cell: 10, x: 1, y: 1, rotateQuarter: 0 },
+        ],
       } satisfies UnitTemplate
     : undefined;
   const airTemplate = templates.find((template) => template.id === 4);
@@ -1039,11 +1057,20 @@ function runSmoke(): Failure[] {
       failures.push({ templateId: loaderTemplate.id, templateName: loaderTemplate.name, check: "escape-mode", detail: "failed to deploy loader-loss fixture" });
     } else {
       escapeBattle.setControlByClick(loaderUnit.x, loaderUnit.y);
-      for (const loader of loaderUnit.attachments.filter((attachment) => COMPONENTS[attachment.component].type === "loader")) loader.alive = false;
       loaderUnit.weaponReadyCharges.fill(0);
       escapeBattle.update(dt, idleKeys);
+      if (!loaderUnit.loaderStates.some((loader) => loader.targetWeaponSlot !== null)) {
+        failures.push({ templateId: loaderTemplate.id, templateName: loaderTemplate.name, check: "weapon-capacity", detail: "matching weapon and loader bulletName did not start loading" });
+      }
+      const mismatchedLoaderPart = partCatalog.find((part) => part.name === "anti-tank gun reloader");
+      for (const loader of loaderUnit.attachments.filter((attachment) => COMPONENTS[attachment.component].type === "loader")) {
+        if (mismatchedLoaderPart) {
+          loader.partId = mismatchedLoaderPart.id;
+        }
+      }
+      escapeBattle.update(dt, idleKeys);
       if (!loaderUnit.escapeActive || escapeBattle.getSelection().playerControlledId === loaderUnit.id) {
-        failures.push({ templateId: loaderTemplate.id, templateName: loaderTemplate.name, check: "escape-mode", detail: "exhausted weapon with destroyed loader did not enter uncontrollable escape mode" });
+        failures.push({ templateId: loaderTemplate.id, templateName: loaderTemplate.name, check: "escape-mode", detail: "exhausted weapon with a mismatched loader bulletName did not enter uncontrollable escape mode" });
       }
     }
 

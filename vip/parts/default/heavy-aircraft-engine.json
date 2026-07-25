@@ -115,12 +115,13 @@
     "requireEmptyFunctionalOffsets": []
   },
   "stats": {
-    "gasCost": 20,
+    "gasCost": 30,
     "mass": 45,
     "power": 700,
     "maxSpeed": 190
   },
   "partProperties": {
+    "gasCost": 30,
     "power": 700,
     "maxSpeed": 190,
     "powerGround": false,

@@ -127,6 +127,7 @@
     "projectileSpeed": 700,
     "projectileGravity": 20,
     "needLoader": true,
+    "bulletName": "cannon shell",
     "maxCapacity": 1,
     "explosionDamage": 40
   },

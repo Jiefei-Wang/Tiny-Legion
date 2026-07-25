@@ -126,15 +126,16 @@ export function getPartPropertiesDefaultsByType(partType: PartType, partCategory
       cwAngle: 15,
       ccwAngle: 15,
       needLoader: false,
+      bulletName: undefined,
       maxCapacity: 2,
       minFireInterval: 0.2,
       computingConsumption: 0,
     };
   }
   if (partType === "loader") {
-    return { gasCost: 10, mass: 5, tag: "loader", supportedWeaponTags: ["cannon"], loadMultiplier: 1, minLoadTime: 0.5, minBurstInterval: 0.2 };
+    return { gasCost: 10, mass: 5, tag: "loader", bulletName: "bullet", supportedWeaponTags: ["bullet"], loadMultiplier: 1, minLoadTime: 0.5, minBurstInterval: 0.2 };
   }
-  return { gasCost: 10, mass: 5, tag: "loader", supportedWeaponTags: ["cannon"], loadMultiplier: 1, minLoadTime: 0.5, minBurstInterval: 0.2 };
+  return { gasCost: 10, mass: 5, tag: "loader", bulletName: "bullet", supportedWeaponTags: ["bullet"], loadMultiplier: 1, minLoadTime: 0.5, minBurstInterval: 0.2 };
 }
 
 export function getPartMetadataDefaultsForLayer(

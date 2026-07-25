@@ -196,6 +196,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
           <summary>Developer Tools</summary>
           <div class="developer-menu-popover">
             <button id="tabTestArena"><span>T</span><strong>Test Arena</strong><small>Scenario lab</small></button>
+            <button id="tabCraftArena"><span>C</span><strong>Craft Arena</strong><small>Headless matchups</small></button>
             <button id="tabLeaderboard"><span>L</span><strong>Leaderboard</strong><small>AI evaluation</small></button>
             <button id="tabTemplateEditor"><span>O</span><strong>Craft Designer</strong><small>Assemble objects</small></button>
             <button id="tabPartEditor"><span>P</span><strong>Part Designer</strong><small>Author components</small></button>
@@ -231,6 +232,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
           <div id="mapPanel" class="card panel hidden"></div>
           <div id="battlePanel" class="card panel hidden"></div>
           <div id="testArenaPanel" class="card panel hidden"></div>
+          <div id="craftArenaPanel" class="card panel hidden"></div>
           <div id="leaderboardPanel" class="card panel hidden"></div>
           <div id="editorPanel" class="card panel hidden"></div>
         </section>
@@ -243,6 +245,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
             <canvas id="partEditorCanvas" class="hidden"></canvas>
             <div id="testArenaLossStats" class="test-arena-loss-stats hidden" aria-live="polite"></div>
           </div>
+          <div id="craftArenaCenter" class="craft-arena-center hidden"></div>
           <div id="leaderboardCenter" class="panel hidden"></div>
           <div id="weaponHud" class="weapon-hud small"></div>
         </section>
@@ -308,6 +311,8 @@ export function bootstrap(options: BootstrapOptions = {}): void {
   const mapPanel = getElement<HTMLDivElement>("#mapPanel");
   const battlePanel = getElement<HTMLDivElement>("#battlePanel");
   const testArenaPanel = getElement<HTMLDivElement>("#testArenaPanel");
+  const craftArenaPanel = getElement<HTMLDivElement>("#craftArenaPanel");
+  const craftArenaCenter = getElement<HTMLDivElement>("#craftArenaCenter");
   const leaderboardPanel = getElement<HTMLDivElement>("#leaderboardPanel");
   const leaderboardCenter = getElement<HTMLDivElement>("#leaderboardCenter");
   const managementCenter = getElement<HTMLDivElement>("#managementCenter");
@@ -444,6 +449,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     map: getElement<HTMLButtonElement>("#tabMap"),
     battle: getElement<HTMLButtonElement>("#tabBattle"),
     testArena: getElement<HTMLButtonElement>("#tabTestArena"),
+    craftArena: getElement<HTMLButtonElement>("#tabCraftArena"),
     leaderboard: getElement<HTMLButtonElement>("#tabLeaderboard"),
     templateEditor: getElement<HTMLButtonElement>("#tabTemplateEditor"),
     partEditor: getElement<HTMLButtonElement>("#tabPartEditor"),
@@ -630,6 +636,137 @@ export function bootstrap(options: BootstrapOptions = {}): void {
   let testArenaHasStoredPlayerCraftSelection = false;
   let testArenaHasStoredEnemyCraftSelection = false;
   let testArenaTemplateStoreReady = false;
+  type CraftArenaSideResult = {
+    destroyedTotal: number;
+    destroyedAverage: number;
+    gasWastedTotal: number;
+    gasWastedAverage: number;
+  };
+  type CraftArenaResult = {
+    simulationsRequested: number;
+    simulationsCompleted: number;
+    battlesCompleted: number;
+    parallelWorkers: number;
+    parallelMode: string;
+    pairOutcomes: { craftAWins: number; craftBWins: number; ties: number };
+    craftA: CraftArenaSideResult;
+    craftB: CraftArenaSideResult;
+    completedAt: string;
+  };
+  type CraftArenaScenario = {
+    id: string;
+    name: string;
+    craftAId: number;
+    craftACount: number;
+    craftBId: number;
+    craftBCount: number;
+    aiModelId: string;
+    simulations: number;
+    result?: CraftArenaResult;
+    error?: string;
+    busy?: boolean;
+  };
+  const newCraftArenaScenario = (copy?: CraftArenaScenario): CraftArenaScenario => ({
+    id: typeof crypto?.randomUUID === "function"
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    name: copy ? `${copy.name} copy` : `Scenario ${craftArenaScenarios.length + 1}`,
+    craftAId: copy?.craftAId ?? templates[0]?.id ?? 0,
+    craftACount: copy?.craftACount ?? 1,
+    craftBId: copy?.craftBId ?? templates[1]?.id ?? templates[0]?.id ?? 0,
+    craftBCount: copy?.craftBCount ?? 1,
+    aiModelId: copy?.aiModelId ?? "builtin-level-5-composite",
+    simulations: copy?.simulations ?? 100,
+  });
+  let craftArenaScenarios: CraftArenaScenario[] = [];
+  const parseCraftArenaScenario = (value: unknown): CraftArenaScenario | null => {
+    if (!value || typeof value !== "object") return null;
+    const scenario = value as Partial<CraftArenaScenario>;
+    if (
+      typeof scenario.id !== "string"
+      || typeof scenario.name !== "string"
+      || typeof scenario.craftAId !== "number"
+      || !Number.isInteger(scenario.craftAId)
+      || typeof scenario.craftBId !== "number"
+      || !Number.isInteger(scenario.craftBId)
+      || typeof scenario.craftACount !== "number"
+      || !Number.isInteger(scenario.craftACount)
+      || typeof scenario.craftBCount !== "number"
+      || !Number.isInteger(scenario.craftBCount)
+      || typeof scenario.aiModelId !== "string"
+      || typeof scenario.simulations !== "number"
+      || !Number.isInteger(scenario.simulations)
+    ) return null;
+    return {
+      id: scenario.id,
+      name: scenario.name,
+      craftAId: scenario.craftAId,
+      craftACount: Math.max(1, Math.min(40, scenario.craftACount)),
+      craftBId: scenario.craftBId,
+      craftBCount: Math.max(1, Math.min(40, scenario.craftBCount)),
+      aiModelId: scenario.aiModelId,
+      simulations: Math.max(1, Math.min(1_000, scenario.simulations)),
+      ...(scenario.result && typeof scenario.result === "object" ? { result: scenario.result } : {}),
+      ...(typeof scenario.error === "string" ? { error: scenario.error } : {}),
+    };
+  };
+  const loadCraftArenaScenarios = (): void => {
+    try {
+      const parsed = JSON.parse(localStorage.getItem("forge-command.craft-arena-scenarios.v1") ?? "null") as {
+        version?: unknown;
+        scenarios?: unknown;
+      } | null;
+      if (parsed?.version !== 1 || !Array.isArray(parsed.scenarios)) return;
+      craftArenaScenarios = parsed.scenarios.flatMap((value): CraftArenaScenario[] => {
+        const scenario = parseCraftArenaScenario(value);
+        return scenario ? [scenario] : [];
+      });
+    } catch {
+      // Retain an empty scenario list when local storage is malformed or unavailable.
+    }
+  };
+  const saveCraftArenaScenarios = (): void => {
+    try {
+      localStorage.setItem("forge-command.craft-arena-scenarios.v1", JSON.stringify({
+        version: 1,
+        scenarios: craftArenaScenarios.map(({ busy: _busy, ...scenario }) => scenario),
+      }));
+    } catch {
+      // Scenarios remain usable for the current session when storage is unavailable.
+    }
+  };
+  const importCraftArenaSeed = async (): Promise<boolean> => {
+    try {
+      const response = await fetch("/__arena/craft-arena/seed", { method: "GET" });
+      if (!response.ok) return false;
+      const payload = await response.json().catch(() => null) as {
+        found?: boolean;
+        revision?: unknown;
+        scenarios?: unknown;
+      } | null;
+      if (!payload?.found || typeof payload.revision !== "string" || !Array.isArray(payload.scenarios)) return false;
+      const markerKey = "forge-command.craft-arena-imported-seeds.v1";
+      const imported = JSON.parse(localStorage.getItem(markerKey) ?? "[]") as unknown;
+      const revisions = Array.isArray(imported) ? imported.filter((value): value is string => typeof value === "string") : [];
+      if (revisions.includes(payload.revision)) return false;
+      const seeded = payload.scenarios.flatMap((value): CraftArenaScenario[] => {
+        const scenario = parseCraftArenaScenario(value);
+        return scenario ? [scenario] : [];
+      });
+      if (seeded.length <= 0) return false;
+      const seedIds = new Set(seeded.map((scenario) => scenario.id));
+      craftArenaScenarios = [
+        ...craftArenaScenarios.filter((scenario) => !seedIds.has(scenario.id)),
+        ...seeded,
+      ];
+      saveCraftArenaScenarios();
+      localStorage.setItem(markerKey, JSON.stringify([...revisions, payload.revision]));
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  loadCraftArenaScenarios();
 
   interface StoredTestArenaSettings {
     playerCount?: unknown;
@@ -1529,6 +1666,70 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       if (!isValid) {
         testArenaCompositeModelSelections[side] = "custom-components";
       }
+    }
+  };
+
+  const runCraftArenaScenario = async (scenarioId: string): Promise<void> => {
+    const scenario = craftArenaScenarios.find((entry) => entry.id === scenarioId);
+    if (!scenario || scenario.busy) return;
+    const aiOption = findCompositeModelOptionById(scenario.aiModelId);
+    const craftAExists = templates.some((template) => template.id === scenario.craftAId);
+    const craftBExists = templates.some((template) => template.id === scenario.craftBId);
+    if (!craftAExists || !craftBExists || !aiOption?.spec || aiOption.compatible === false) {
+      scenario.error = "Select two available crafts and a compatible composed AI model.";
+      saveCraftArenaScenarios();
+      renderPanels();
+      return;
+    }
+    scenario.busy = true;
+    scenario.error = undefined;
+    renderPanels();
+    try {
+      const response = await fetch("/__arena/craft-arena/simulate", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          craftAId: scenario.craftAId,
+          craftACount: scenario.craftACount,
+          craftBId: scenario.craftBId,
+          craftBCount: scenario.craftBCount,
+          simulations: scenario.simulations,
+          aiSpec: aiOption.spec,
+        }),
+      });
+      const parsed = await response.json().catch(() => null) as (Partial<CraftArenaResult> & {
+        ok?: boolean;
+        reason?: string;
+        error?: string;
+      }) | null;
+      if (
+        !response.ok
+        || !parsed?.ok
+        || typeof parsed.simulationsCompleted !== "number"
+        || typeof parsed.battlesCompleted !== "number"
+        || !parsed.pairOutcomes
+        || !parsed.craftA
+        || !parsed.craftB
+      ) {
+        throw new Error(parsed?.error || parsed?.reason || `Simulation request failed (${response.status}).`);
+      }
+      scenario.result = {
+        simulationsRequested: Number(parsed.simulationsRequested ?? scenario.simulations),
+        simulationsCompleted: parsed.simulationsCompleted,
+        battlesCompleted: parsed.battlesCompleted,
+        parallelWorkers: Number(parsed.parallelWorkers ?? 1),
+        parallelMode: String(parsed.parallelMode ?? "unknown"),
+        pairOutcomes: parsed.pairOutcomes,
+        craftA: parsed.craftA,
+        craftB: parsed.craftB,
+        completedAt: new Date().toISOString(),
+      };
+    } catch (error) {
+      scenario.error = error instanceof Error ? error.message : String(error);
+    } finally {
+      scenario.busy = false;
+      saveCraftArenaScenarios();
+      renderPanels();
     }
   };
 
@@ -2538,7 +2739,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     developerMenu.open = false;
     appShell.classList.toggle("editor-mode", next === "templateEditor" || next === "partEditor");
     appShell.classList.toggle("craft-editor-mode", next === "templateEditor");
-    appShell.classList.toggle("scenario-mode", next === "testArena");
+    appShell.classList.toggle("scenario-mode", next === "testArena" || next === "craftArena");
     contextInspectorTitle.textContent = next === "templateEditor"
       ? "Craft Inspector"
       : next === "partEditor"
@@ -2547,6 +2748,8 @@ export function bootstrap(options: BootstrapOptions = {}): void {
           ? "Command Status"
           : next === "map"
             ? "Sector Intel"
+            : next === "craftArena"
+              ? "Batch Results"
             : "Unit Inspector";
     if (isEditorScreenMode(next)) {
       if (next === "templateEditor" && !templateEditorViewVisited) {
@@ -2562,6 +2765,8 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     mapPanel.classList.toggle("hidden", next !== "map");
     battlePanel.classList.toggle("hidden", next !== "battle");
     testArenaPanel.classList.toggle("hidden", next !== "testArena");
+    craftArenaPanel.classList.toggle("hidden", next !== "craftArena");
+    craftArenaCenter.classList.toggle("hidden", next !== "craftArena");
     leaderboardPanel.classList.toggle("hidden", next !== "leaderboard");
     leaderboardCenter.classList.toggle("hidden", next !== "leaderboard");
     editorPanel.classList.toggle("hidden", !isEditorScreen());
@@ -2569,6 +2774,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     tabs.map.classList.toggle("active", next === "map");
     tabs.battle.classList.toggle("active", next === "battle");
     tabs.testArena.classList.toggle("active", next === "testArena");
+    tabs.craftArena.classList.toggle("active", next === "craftArena");
     tabs.leaderboard.classList.toggle("active", next === "leaderboard");
     tabs.templateEditor.classList.toggle("active", next === "templateEditor");
     tabs.partEditor.classList.toggle("active", next === "partEditor");
@@ -2577,11 +2783,11 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     }
     const isManagementScreen = next === "base" || next === "map";
     managementCenter.classList.toggle("hidden", !isManagementScreen);
-    canvasViewport.classList.toggle("hidden", next === "leaderboard" || isManagementScreen);
+    canvasViewport.classList.toggle("hidden", next === "leaderboard" || next === "craftArena" || isManagementScreen);
     if (!battleViewDragActive) {
       canvasViewport.style.cursor = isBattleScreen() ? "grab" : "default";
     }
-    weaponHud.classList.toggle("hidden", next === "leaderboard" || isManagementScreen);
+    weaponHud.classList.toggle("hidden", next === "leaderboard" || next === "craftArena" || isManagementScreen);
     applyBattleViewTransform();
   };
 
@@ -5139,6 +5345,85 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       </details>
     `;
 
+    craftArenaPanel.innerHTML = `
+      <div class="panel-heading"><div><span class="eyebrow">Balance laboratory</span><h2>Craft Arena</h2></div></div>
+      <div class="developer-intro">Run mirrored, headless craft matchups without rendering a battle or changing leaderboard scores.</div>
+      <div class="sidebar-metric"><span>Saved scenarios</span><strong>${craftArenaScenarios.length}</strong></div>
+      <div class="sidebar-metric"><span>Per simulation</span><strong>2 battles</strong></div>
+      <div class="small">Every pair swaps Player and Enemy sides with the same seed. Battles end on elimination or after 120 simulated seconds.</div>
+      <div class="row"><button id="btnAddCraftArenaScenario" class="button-primary">Add scenario</button></div>
+    `;
+    const craftTemplateOptions = (selectedId: number): string => {
+      const selectedExists = templates.some((template) => template.id === selectedId);
+      return `${selectedExists ? "" : `<option value="${selectedId}" selected>Missing craft (${selectedId})</option>`}${templates
+        .map((template) => `<option value="${template.id}" ${template.id === selectedId ? "selected" : ""}>${escapeHtml(template.name)} (${template.gasCost} gas)</option>`)
+        .join("")}`;
+    };
+    const craftAiOptions = (selectedId: string): string => {
+      const available = testArenaCompositeModelOptions.filter((option) => option.id !== "custom-components" && option.spec);
+      const selectedExists = available.some((option) => option.id === selectedId && option.compatible !== false);
+      return `${selectedExists ? "" : `<option value="${escapeHtml(selectedId)}" selected>Missing or incompatible AI (${escapeHtml(selectedId)})</option>`}${available
+        .map((option) => `<option value="${escapeHtml(option.id)}" ${option.id === selectedId ? "selected" : ""} ${option.compatible === false ? "disabled" : ""}>${escapeHtml(option.label)}</option>`)
+        .join("")}`;
+    };
+    const craftScenarioCards = craftArenaScenarios.map((scenario) => {
+      const craftA = templates.find((template) => template.id === scenario.craftAId);
+      const craftB = templates.find((template) => template.id === scenario.craftBId);
+      const ai = findCompositeModelOptionById(scenario.aiModelId);
+      const valid = Boolean(craftA && craftB && ai?.spec && ai.compatible !== false);
+      const result = scenario.result;
+      const resultMarkup = result ? `
+        <div class="craft-arena-result">
+          <div class="craft-arena-result-summary">
+            <span><b>${escapeHtml(craftA?.name ?? `Craft ${scenario.craftAId}`)}</b> ${result.pairOutcomes.craftAWins} wins</span>
+            <span><b>${escapeHtml(craftB?.name ?? `Craft ${scenario.craftBId}`)}</b> ${result.pairOutcomes.craftBWins} wins</span>
+            <span><b>Ties</b> ${result.pairOutcomes.ties}</span>
+            <span><b>Completed</b> ${result.simulationsCompleted} pairs / ${result.battlesCompleted} battles</span>
+          </div>
+          <div class="craft-arena-table-wrap">
+            <table class="craft-arena-table">
+              <thead><tr><th>Craft</th><th>Destroyed total</th><th>Destroyed / battle</th><th>Gas wasted total</th><th>Gas wasted / battle</th></tr></thead>
+              <tbody>
+                <tr><td>${escapeHtml(craftA?.name ?? `Missing craft ${scenario.craftAId}`)}</td><td>${result.craftA.destroyedTotal}</td><td>${result.craftA.destroyedAverage.toFixed(2)}</td><td>${result.craftA.gasWastedTotal.toFixed(2)}</td><td>${result.craftA.gasWastedAverage.toFixed(2)}</td></tr>
+                <tr><td>${escapeHtml(craftB?.name ?? `Missing craft ${scenario.craftBId}`)}</td><td>${result.craftB.destroyedTotal}</td><td>${result.craftB.destroyedAverage.toFixed(2)}</td><td>${result.craftB.gasWastedTotal.toFixed(2)}</td><td>${result.craftB.gasWastedAverage.toFixed(2)}</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="small">Finished ${escapeHtml(new Date(result.completedAt).toLocaleString())} using ${result.parallelWorkers} worker(s) (${escapeHtml(result.parallelMode)}).</div>
+        </div>
+      ` : `<div class="small">No result yet.</div>`;
+      return `
+        <article class="craft-arena-card" data-craft-arena-id="${escapeHtml(scenario.id)}">
+          <div class="craft-arena-card-header">
+            <label>Name <input data-craft-arena-field="name" value="${escapeHtml(scenario.name)}" /></label>
+            <div class="row">
+              <button data-craft-arena-action="duplicate">Duplicate</button>
+              <button data-craft-arena-action="delete" class="warn">Delete</button>
+            </div>
+          </div>
+          <div class="craft-arena-config-grid">
+            <label>Craft A<select data-craft-arena-field="craftAId">${craftTemplateOptions(scenario.craftAId)}</select></label>
+            <label>Count A<input data-craft-arena-field="craftACount" type="number" min="1" max="40" step="1" value="${scenario.craftACount}" /></label>
+            <label>Craft B<select data-craft-arena-field="craftBId">${craftTemplateOptions(scenario.craftBId)}</select></label>
+            <label>Count B<input data-craft-arena-field="craftBCount" type="number" min="1" max="40" step="1" value="${scenario.craftBCount}" /></label>
+            <label>Shared AI<select data-craft-arena-field="aiModelId">${craftAiOptions(scenario.aiModelId)}</select></label>
+            <label>Simulations<input data-craft-arena-field="simulations" type="number" min="1" max="1000" step="1" value="${scenario.simulations}" /></label>
+          </div>
+          <div class="craft-arena-run-row">
+            <button data-craft-arena-action="run" class="button-primary" ${scenario.busy || !valid ? "disabled" : ""}>${scenario.busy ? "Running..." : "Run scenario"}</button>
+            <span class="small">${scenario.simulations} simulations = ${scenario.simulations * 2} headless battles</span>
+            ${!valid ? `<span class="small warn">Select available crafts and AI.</span>` : ""}
+          </div>
+          ${scenario.error ? `<div class="notice warn"><strong>Simulation failed</strong><span>${escapeHtml(scenario.error)}</span></div>` : ""}
+          ${resultMarkup}
+        </article>
+      `;
+    }).join("");
+    craftArenaCenter.innerHTML = `
+      <div class="workspace-header"><div><span class="eyebrow">Developer Tools / Craft Arena</span><h1>Craft Matchups</h1><p>Compare craft design with identical AI in mirrored, renderer-free battles.</p></div><div class="workspace-actions"><button id="btnAddCraftArenaScenarioCenter" class="button-primary">Add scenario</button></div></div>
+      <div class="craft-arena-list">${craftScenarioCards || `<div class="empty-state"><span class="empty-state-icon">+</span><div><strong>No craft scenarios</strong><small>Add a scenario to configure the first matchup.</small></div><button id="btnAddCraftArenaScenarioEmpty" class="button-primary">Add scenario</button></div>`}</div>
+    `;
+
     const leaderboardRows = testArenaLeaderboardEntries
       .map((entry, index) => {
         const winRate = Number.isFinite(entry.winRate) ? `${(Number(entry.winRate) * 100).toFixed(1)}%` : "-";
@@ -5408,17 +5693,26 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       const canonicalCategoryParts = CANONICAL_PART_CATEGORIES[resolvedPartType]
         .map((name) => ({
           name,
-          label: resolvedPartType === "weapon" && name === "cannons"
-            ? "cannon"
-            : name,
+          label: resolvedPartType === "engine"
+            ? (name.includes("aircraft") ? "aircraft engine" : "tank engine")
+            : resolvedPartType === "weapon" && name === "cannons"
+              ? "cannon"
+              : name,
           part: parts.find((part) => part.name.trim().toLowerCase() === name),
         }))
+        .filter((entry) => resolvedPartType !== "engine" || entry.name.startsWith("light "))
         .filter((entry): entry is { name: string; label: string; part: PartDefinition } => entry.part !== undefined);
-      const selectedCanonicalPartId = resolvedPartType === "weapon" && partDesignerDraft.properties?.subcategory === "cannon"
-        ? (canonicalCategoryParts.find((entry) => entry.name === "cannons")?.part.id ?? null)
-        : canonicalCategoryParts.some((entry) => entry.part.id === partDesignerDraft.id)
-          ? partDesignerDraft.id
-          : null;
+      const selectedCanonicalPartId = resolvedPartType === "engine"
+        ? (canonicalCategoryParts.find((entry) => (
+            resolvedPartCategory === "jet"
+              ? entry.name.includes("aircraft")
+              : entry.name.includes("tank")
+          ))?.part.id ?? null)
+        : resolvedPartType === "weapon" && partDesignerDraft.properties?.subcategory === "cannon"
+          ? (canonicalCategoryParts.find((entry) => entry.name === "cannons")?.part.id ?? null)
+          : canonicalCategoryParts.some((entry) => entry.part.id === partDesignerDraft.id)
+            ? partDesignerDraft.id
+            : null;
       const propIsEngine = resolvedPartType === "engine";
       const propIsWeapon = resolvedPartType === "weapon";
       const propIsLoader = resolvedPartType === "loader";
@@ -5569,6 +5863,10 @@ export function bootstrap(options: BootstrapOptions = {}): void {
           ${projectileClass === "missile" ? `<label class="small"><input id="partTracking" type="checkbox" ${partRuntimeProps.tracking === true ? "checked" : ""} /> Homing</label>` : ""}
           ${weaponSupportsTracking ? `<label class="small">Tracking Turn Rate <input id="partTrackingTurnRate" type="number" step="1" value="${partRuntimeProps.trackingTurnRate ?? ""}" placeholder="${runtimePlaceholders.trackingTurnRateDegPerSec}" /></label>` : ""}
         </div>
+        <div class="row">
+          <label class="small"><input id="partWeaponNeedLoader" type="checkbox" ${partRuntimeProps.needLoader === true ? "checked" : ""} /> Need Reloader</label>
+          ${partRuntimeProps.needLoader === true ? `<label class="small">Bullet Name <input id="partBulletName" value="${escapeHtml(partRuntimeProps.bulletName ?? "")}" placeholder="Exact ammunition name" /></label>` : ""}
+        </div>
         ${projectileClass !== "laser" ? `<div class="row">
           <label class="small"><input id="partExplodeOnHit" type="checkbox" ${weaponSupportsExplosive ? "checked" : ""} /> Explosive (explode on hit)</label>
         </div>` : ""}
@@ -5578,6 +5876,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
           <label class="small">Falloff Power <input id="partExplosiveFalloffPower" type="number" step="0.1" value="${partDesignerDraft.stats?.explosiveFalloffPower ?? ""}" placeholder="${runtimePlaceholders.explosiveFalloffPower}" /></label>
         </div>` : ""}` : ""}
         ${propIsLoader ? `<div class="row">
+          <label class="small">Bullet Name <input id="partBulletName" value="${escapeHtml(partRuntimeProps.bulletName ?? "")}" placeholder="Exact ammunition name" /></label>
           <label class="small" style="flex:1;">Loader supports (bullet, missile, laser) <input id="partLoaderSupports" value="${(partRuntimeProps.supportedWeaponTags ?? []).join(", ")}" placeholder="${loaderSupportsPlaceholder}" /></label>
           <label class="small">Load Multiplier <input id="partLoaderLoadMultiplier" type="number" step="0.01" value="${partRuntimeProps.loadMultiplier ?? ""}" placeholder="${runtimePlaceholders.loaderLoadMultiplier}" /></label>
           <label class="small"><input id="partLoaderFastOperation" type="checkbox" ${(partDesignerDraft.stats?.loaderFastOperation ?? baseStats.loader?.fastOperation ?? false) ? "checked" : ""} /> Fast Operation</label>
@@ -5852,6 +6151,53 @@ export function bootstrap(options: BootstrapOptions = {}): void {
 
     getOptionalElement<HTMLButtonElement>("#btnStartTestArena")?.addEventListener("click", () => {
       void startTestArena();
+    });
+
+    const addCraftArenaScenario = (): void => {
+      craftArenaScenarios.push(newCraftArenaScenario());
+      saveCraftArenaScenarios();
+      renderPanels();
+    };
+    getOptionalElement<HTMLButtonElement>("#btnAddCraftArenaScenario")?.addEventListener("click", addCraftArenaScenario);
+    getOptionalElement<HTMLButtonElement>("#btnAddCraftArenaScenarioCenter")?.addEventListener("click", addCraftArenaScenario);
+    getOptionalElement<HTMLButtonElement>("#btnAddCraftArenaScenarioEmpty")?.addEventListener("click", addCraftArenaScenario);
+    craftArenaCenter.querySelectorAll<HTMLElement>("[data-craft-arena-id]").forEach((card) => {
+      const scenario = craftArenaScenarios.find((entry) => entry.id === card.dataset.craftArenaId);
+      if (!scenario) return;
+      card.querySelector<HTMLInputElement>('[data-craft-arena-field="name"]')?.addEventListener("input", (event) => {
+        scenario.name = (event.currentTarget as HTMLInputElement).value;
+        saveCraftArenaScenarios();
+      });
+      card.querySelectorAll<HTMLInputElement | HTMLSelectElement>("[data-craft-arena-field]:not([data-craft-arena-field=\"name\"])").forEach((control) => {
+        control.addEventListener("change", () => {
+          const field = control.dataset.craftArenaField;
+          if (field === "craftAId") scenario.craftAId = Number.parseInt(control.value, 10);
+          if (field === "craftBId") scenario.craftBId = Number.parseInt(control.value, 10);
+          if (field === "craftACount") scenario.craftACount = Math.max(1, Math.min(40, Number.parseInt(control.value, 10) || 1));
+          if (field === "craftBCount") scenario.craftBCount = Math.max(1, Math.min(40, Number.parseInt(control.value, 10) || 1));
+          if (field === "simulations") scenario.simulations = Math.max(1, Math.min(1_000, Number.parseInt(control.value, 10) || 1));
+          if (field === "aiModelId") scenario.aiModelId = control.value;
+          scenario.result = undefined;
+          scenario.error = undefined;
+          saveCraftArenaScenarios();
+          renderPanels();
+        });
+      });
+      card.querySelector<HTMLButtonElement>('[data-craft-arena-action="run"]')?.addEventListener("click", () => {
+        void runCraftArenaScenario(scenario.id);
+      });
+      card.querySelector<HTMLButtonElement>('[data-craft-arena-action="duplicate"]')?.addEventListener("click", () => {
+        const index = craftArenaScenarios.findIndex((entry) => entry.id === scenario.id);
+        craftArenaScenarios.splice(index + 1, 0, newCraftArenaScenario(scenario));
+        saveCraftArenaScenarios();
+        renderPanels();
+      });
+      card.querySelector<HTMLButtonElement>('[data-craft-arena-action="delete"]')?.addEventListener("click", () => {
+        if (!window.confirm(`Delete craft scenario "${scenario.name}"?`)) return;
+        craftArenaScenarios = craftArenaScenarios.filter((entry) => entry.id !== scenario.id);
+        saveCraftArenaScenarios();
+        renderPanels();
+      });
     });
 
     getOptionalElement<HTMLButtonElement>("#btnRefreshLeaderboard")?.addEventListener("click", async () => {
@@ -6979,9 +7325,22 @@ export function bootstrap(options: BootstrapOptions = {}): void {
 
     getOptionalElement<HTMLSelectElement>("#partCanonicalCategorySelect")?.addEventListener("change", (event) => {
       const selectedPartId = Number.parseInt((event.currentTarget as HTMLSelectElement).value, 10);
-      const preset = parts.find((part) => part.id === selectedPartId);
+      let preset = parts.find((part) => part.id === selectedPartId);
       if (!preset) {
         return;
+      }
+      if (getResolvedPartType(partDesignerDraft) === "engine") {
+        const selectedPlatform = getResolvedPartCategory(preset);
+        const currentDescription = (partDesignerDraft.tags ?? []).find((tag) => tag === "light" || tag === "heavy")
+          ?? (partDesignerDraft.name.trim().toLowerCase().startsWith("heavy ") ? "heavy" : "light");
+        preset = parts.find((part) => (
+          getResolvedPartType(part) === "engine"
+          && getResolvedPartCategory(part) === selectedPlatform
+          && (
+            (part.tags ?? []).includes(currentDescription)
+            || part.name.trim().toLowerCase().startsWith(`${currentDescription} `)
+          )
+        )) ?? preset;
       }
       if (partDesignerOpenedPartId === null) {
         const draftId = partDesignerDraft.id;
@@ -7538,6 +7897,24 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     bindRuntimeInput("#partLoaderMinLoadTime", "loaderMinLoadTime", "minLoadTime");
     bindRuntimeInput("#partLoaderMinBurstInterval", "loaderMinBurstInterval", "minBurstInterval");
     bindRuntimeInput("#partGasCost", "gasCost", "gasCost");
+    getOptionalElement<HTMLInputElement>("#partWeaponNeedLoader")?.addEventListener("change", (event) => {
+      const needLoader = (event.currentTarget as HTMLInputElement).checked;
+      partDesignerDraft.partProperties = {
+        ...(partDesignerDraft.partProperties ?? {}),
+        needLoader,
+        bulletName: needLoader
+          ? (partDesignerDraft.partProperties?.bulletName ?? "bullet")
+          : undefined,
+      };
+      renderPanels();
+    });
+    getOptionalElement<HTMLInputElement>("#partBulletName")?.addEventListener("input", (event) => {
+      const bulletName = (event.currentTarget as HTMLInputElement).value;
+      partDesignerDraft.partProperties = {
+        ...(partDesignerDraft.partProperties ?? {}),
+        bulletName,
+      };
+    });
     getOptionalElement<HTMLInputElement>("#partWeaponMaxLoadedAmmo")?.addEventListener("input", (event) => {
       const raw = (event.currentTarget as HTMLInputElement).value.trim();
       const numeric = raw.length > 0 ? Number(raw) : Number.NaN;
@@ -7660,6 +8037,13 @@ export function bootstrap(options: BootstrapOptions = {}): void {
   tabs.testArena.addEventListener("click", () => {
     setScreen("testArena");
     renderPanels();
+  });
+  tabs.craftArena.addEventListener("click", () => {
+    setScreen("craftArena");
+    renderPanels();
+    void Promise.all([refreshTestArenaCompositeModelOptions(), importCraftArenaSeed()]).then(() => {
+      renderPanels();
+    });
   });
   tabs.leaderboard.addEventListener("click", () => {
     setScreen("leaderboard");
@@ -8483,6 +8867,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         loadPartIntoDesignerSlots(selectedPart);
       }
       await refreshTemplatesFromStore();
+      await importCraftArenaSeed();
       addLog("Loaded part catalog and object templates", "good");
       renderPanels();
     })

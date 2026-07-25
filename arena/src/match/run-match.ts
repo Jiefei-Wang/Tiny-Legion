@@ -182,7 +182,28 @@ export async function runMatch(spec: MatchSpec): Promise<MatchResult> {
 
   const spawnRng = mulberry32((spec.seed ^ 0x2f7a1d) >>> 0);
 
-  if (scenario.withBase) {
+  if (scenario.initialLineup) {
+    for (const side of ["player", "enemy"] as const) {
+      const lineup = scenario.initialLineup[side];
+      const template = templateById.get(lineup.templateId);
+      if (!template) {
+        throw new Error(`runMatch: initial lineup template ${lineup.templateId} is unavailable for ${side}`);
+      }
+      const count = Math.max(1, Math.floor(lineup.count));
+      for (let index = 0; index < count; index += 1) {
+        const y = 220 + spawnRng() * 260;
+        const deployed = battle.arenaDeploy(side, template.id, {
+          chargeGas: false,
+          ignoreCap: true,
+          ignoreLowGasThreshold: true,
+          y,
+        });
+        if (!deployed) {
+          throw new Error(`runMatch: could not deploy ${side} lineup unit ${index + 1}/${count}`);
+        }
+      }
+    }
+  } else if (scenario.withBase) {
     // Symmetric starters (free and non-refundable, like headless smoke test semantics).
     const unitsPerSide = Math.max(1, Math.floor(scenario.initialUnitsPerSide));
     const starterRoster = [...roster];
@@ -378,6 +399,7 @@ export async function runMatch(spec: MatchSpec): Promise<MatchResult> {
 
   const finalState = battle.getState();
   const outcome = finalState.outcome ?? { victory: false, reason: "unknown" };
+  const losses = battle.getLossStats();
   const playerGasEnd = playerGas;
   const enemyGasEnd = finalState.enemyGas;
   const onFieldPlayerEnd = computeOnFieldGasValue(finalState.units, "player", refundFactor);
@@ -433,6 +455,7 @@ export async function runMatch(spec: MatchSpec): Promise<MatchResult> {
       playerUnitIntegrity: playerOperationalUnits.reduce((total, unit) => total + structureIntegrity(unit), 0),
       enemyUnitIntegrity: enemyOperationalUnits.reduce((total, unit) => total + structureIntegrity(unit), 0),
     },
+    losses,
     replay: {
       seed: spec.seed,
       maxSimSeconds: spec.maxSimSeconds,

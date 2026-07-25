@@ -48,11 +48,12 @@
   "stats": {
     "gasCost": 10,
     "mass": 14,
-    "power": 150,
+    "power": 200,
     "maxSpeed": 320
   },
   "partProperties": {
-    "power": 150,
+    "gasCost": 10,
+    "power": 200,
     "maxSpeed": 320,
     "powerGround": false,
     "powerAir": true

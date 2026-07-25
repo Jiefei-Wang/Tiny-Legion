@@ -510,6 +510,11 @@ export function createImplicitPartDefinition(component: ComponentId): PartDefini
       tracking: component === "trackingMissile",
       trackingTurnRate: stats.tracking?.turnRateDegPerSec,
       needLoader: component === "trackingMissile" || component === "heavyCannon" || component === "explosiveShell",
+      bulletName: component === "trackingMissile" || component === "missileLoader"
+        ? "missile"
+        : component === "heavyCannon" || component === "explosiveShell" || component === "cannonLoader"
+          ? "bullet"
+          : undefined,
       supportedWeaponTags: stats.type === "loader" ? (stats.loader?.supports ?? []).map((entry) => String(entry)) : undefined,
       loadMultiplier: stats.loader?.loadMultiplier,
       minLoadTime: stats.loader?.minLoadTime,
@@ -710,6 +715,7 @@ export function clonePartDefinition(part: PartDefinition): PartDefinition {
           tracking: part.partProperties.tracking,
           trackingTurnRate: part.partProperties.trackingTurnRate,
           needLoader: part.partProperties.needLoader,
+          bulletName: part.partProperties.bulletName,
           supportedWeaponTags: part.partProperties.supportedWeaponTags ? [...part.partProperties.supportedWeaponTags] : undefined,
           loadMultiplier: part.partProperties.loadMultiplier,
           minLoadTime: part.partProperties.minLoadTime,
@@ -973,6 +979,7 @@ export function parsePartDefinition(input: unknown): PartDefinition | null {
     tracking: readOptionalBoolean(partPropertiesRecord.tracking),
     trackingTurnRate: readOptionalNumber(partPropertiesRecord.trackingTurnRate),
     needLoader: readOptionalBoolean(partPropertiesRecord.needLoader),
+    bulletName: readOptionalString(partPropertiesRecord.bulletName),
     supportedWeaponTags: normalizeStringList(partPropertiesRecord.supportedWeaponTags),
     loadMultiplier: readOptionalNumber(partPropertiesRecord.loadMultiplier),
     minLoadTime: readOptionalNumber(partPropertiesRecord.minLoadTime),
