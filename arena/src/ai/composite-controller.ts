@@ -554,7 +554,7 @@ export function levelCompositeConfig(level: number): CompositeConfig {
     return {
       target: { familyId: "level-47-target", params: {} },
       movement: { familyId: "level-99-movement", params: {} },
-      shoot: { familyId: "level-57-shoot", params: {} },
+      shoot: { familyId: "level-93-shoot", params: {} },
     };
   }
   return {

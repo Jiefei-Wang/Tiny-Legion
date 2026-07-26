@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { loadLeaderboardScenario } from "../config/leaderboard-scenario.ts";
 import { compareMirroredSeries } from "../match/mirrored-series.ts";
+import { levelCompositeConfig } from "../ai/composite-controller.ts";
 import {
   BATTLEFIELD_HEIGHT,
   BATTLEFIELD_WIDTH,
@@ -52,6 +53,12 @@ assert.equal(
   hasEnemyWithinAwareness(0, 0, 600, [{ x: 601, y: 0 }]),
   false,
   "the base may be considered when every enemy is outside awareness",
+);
+
+assert.equal(
+  levelCompositeConfig(5).shoot.familyId,
+  "level-93-shoot",
+  "built-in Level 5 must use per-weapon strategic-target intercept fallback",
 );
 
 const baseRusherAsPlayer = result({
