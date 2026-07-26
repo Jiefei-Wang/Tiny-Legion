@@ -811,7 +811,14 @@ export class BattleSession {
           unit.aiStateTimer += dt;
           unit.aiDodgeCooldown = Math.max(0, unit.aiDodgeCooldown - dt);
           const decision = this.getCombatDecision(unit, dt);
-          command = this.aiDecisionToCommand(unit, decision);
+          if (decision.movement.withdraw === true) {
+            unit.escapeActive = true;
+            unit.escapeFacingDelayS = 1;
+            unit.aiDebugDecisionPath = decision.debug.decisionPath;
+            command = this.retreatToCommand(unit);
+          } else {
+            command = this.aiDecisionToCommand(unit, decision);
+          }
         }
       } else {
         command = this.retreatToCommand(unit);
@@ -2796,6 +2803,8 @@ export class BattleSession {
   ): void {
     unit.aiState = decision.state;
     unit.aiDebugShouldEvade = decision.movement.shouldEvade;
+    unit.aiLastThreatDirX = decision.movement.ax;
+    unit.aiLastThreatDirY = decision.movement.ay;
     unit.aiDebugTargetId = decision.debug.targetId;
     unit.aiDebugDecisionPath = decision.debug.decisionPath;
     unit.aiDebugFireBlockReason = decision.debug.fireBlockedReason;

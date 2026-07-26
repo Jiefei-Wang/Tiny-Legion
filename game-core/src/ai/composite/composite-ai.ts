@@ -64,6 +64,8 @@ export interface MovementDecision {
   ax: number;
   ay: number;
   shouldEvade: boolean;
+  /** Requests a committed return to base for property-derived preservation tactics. */
+  withdraw?: boolean;
   state: "engage" | "evade";
   debugTag: string;
 }
@@ -88,7 +90,7 @@ export interface ShootDecision {
 export interface CombatDecision {
   facing: 1 | -1;
   state: "engage" | "evade";
-  movement: { ax: number; ay: number; shouldEvade: boolean };
+  movement: { ax: number; ay: number; shouldEvade: boolean; withdraw?: boolean };
   firePlan: FirePlan | null;
   firePlans: FirePlan[];
   debug: {
@@ -136,6 +138,7 @@ export function createCompositeAiController(modules: CompositeAiModules): Battle
           ax: movement.ax,
           ay: movement.ay,
           shouldEvade: movement.shouldEvade,
+          ...(movement.withdraw === true ? { withdraw: true } : {}),
         },
         firePlan: firePlans[0] ?? null,
         firePlans,

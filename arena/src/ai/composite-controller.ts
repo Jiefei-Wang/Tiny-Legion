@@ -522,39 +522,39 @@ export function skillTierCompositeConfig(tier: AiSkillTier): CompositeConfig {
 
 export function levelCompositeConfig(level: number): CompositeConfig {
   const normalized = Math.max(1, Math.min(MAX_CERTIFIED_AI_LEVEL, Math.floor(level)));
-  if (normalized === 2) {
+  if (normalized === 1) {
     return {
       target: { familyId: "level-2-target", params: {} },
       movement: { familyId: "level-6-movement", params: {} },
-      shoot: { familyId: "level-5-shoot", params: {} },
+      shoot: { familyId: "level-1-shoot", params: {} },
+    };
+  }
+  if (normalized === 2) {
+    return {
+      target: { familyId: "level-47-target", params: {} },
+      movement: { familyId: "level-95-movement", params: {} },
+      shoot: { familyId: "level-42-shoot", params: {} },
     };
   }
   if (normalized === 3) {
     return {
-      target: { familyId: "level-3-target", params: {} },
-      movement: { familyId: "level-4-movement", params: {} },
-      shoot: { familyId: "level-1-shoot", params: {} },
+      target: { familyId: "level-47-target", params: {} },
+      movement: { familyId: "level-95-movement", params: {} },
+      shoot: { familyId: "level-49-shoot", params: {} },
     };
   }
   if (normalized === 4) {
     return {
-      target: { familyId: "level-2-target", params: {} },
-      movement: { familyId: "level-6-movement", params: {} },
-      shoot: { familyId: "level-1-shoot", params: {} },
+      target: { familyId: "level-47-target", params: {} },
+      movement: { familyId: "level-97-movement", params: {} },
+      shoot: { familyId: "level-54-shoot", params: {} },
     };
   }
   if (normalized === 5) {
     return {
-      target: { familyId: "level-3-target", params: {} },
-      movement: { familyId: "level-6-movement", params: {} },
-      shoot: { familyId: "level-4-shoot", params: {} },
-    };
-  }
-  if (normalized === 6) {
-    return {
-      target: { familyId: "level-3-target", params: {} },
-      movement: { familyId: "level-6-movement", params: {} },
-      shoot: { familyId: "level-7-shoot", params: {} },
+      target: { familyId: "level-47-target", params: {} },
+      movement: { familyId: "level-99-movement", params: {} },
+      shoot: { familyId: "level-57-shoot", params: {} },
     };
   }
   return {
