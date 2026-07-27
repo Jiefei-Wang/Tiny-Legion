@@ -23,6 +23,7 @@ function matchSpec(seed: number, player: TierName, enemy: TierName): MatchSpec {
     scenario: {
       withBase: scenario.withBase,
       initialUnitsPerSide: scenario.initialUnitsPerSide,
+      maintainUnitsPerSide: scenario.maintainUnitsPerSide,
     },
     templateNames: scenario.templateNames,
     battlefield: scenario.battlefield,

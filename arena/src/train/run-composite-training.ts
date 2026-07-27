@@ -46,6 +46,7 @@ type PhaseDef = {
   enemyGas?: number;
   spawnBurst?: number;
   spawnMaxActive?: number;
+  maintainUnitsPerSide?: number;
   opponentMode?: "best" | "leaderboard-nearby";
   leaderboard?: {
     opponentCount: number;
@@ -124,6 +125,7 @@ function makePhase(
     ...(typeof config?.enemyGas === "number" ? { enemyGas: config.enemyGas } : {}),
     ...(typeof config?.spawnBurst === "number" ? { spawnBurst: config.spawnBurst } : {}),
     ...(typeof config?.spawnMaxActive === "number" ? { spawnMaxActive: config.spawnMaxActive } : {}),
+    ...(typeof config?.maintainUnitsPerSide === "number" ? { maintainUnitsPerSide: config.maintainUnitsPerSide } : {}),
     opponentMode: config?.opponentMode ?? "best",
     ...(config?.leaderboard ? { leaderboard: { opponentCount: Math.max(1, Math.floor(config.leaderboard.opponentCount)) } } : {}),
   };
@@ -480,6 +482,9 @@ export async function runCompositeTraining(opts: {
           scenario: {
             withBase: phase.withBase,
             initialUnitsPerSide: phase.initialUnitsPerSide,
+            ...(typeof phase.maintainUnitsPerSide === "number"
+              ? { maintainUnitsPerSide: phase.maintainUnitsPerSide }
+              : {}),
           },
           templateNames: phase.templateNames,
           battlefield: phase.battlefield,

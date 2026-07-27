@@ -24,6 +24,7 @@ export const CONFIG_FILES = {
   ai: {
     shooting: "ai/shooting.yaml",
     levels: "ai/levels.yaml",
+    arenaComparison: "ai/arena-comparison.yaml",
   },
   display: {
     battle: "display/battle.yaml",
@@ -98,7 +99,7 @@ function validateScalarObject(value, keys, path) {
 export function validateGameConfig(config) {
   exactKeys(config, ["balance", "ai", "display", "editor", "sound"], "config");
   exactKeys(config.balance, ["battlefield", "range", "commander", "economy", "materials", "units", "weapons", "campaign"], "config.balance");
-  exactKeys(config.ai, ["shooting", "levels"], "config.ai");
+  exactKeys(config.ai, ["shooting", "levels", "arenaComparison"], "config.ai");
   exactKeys(config.display, ["battle"], "config.display");
   exactKeys(config.editor, ["editor"], "config.editor");
   exactKeys(config.sound, ["battle"], "config.sound");
@@ -250,6 +251,13 @@ export function validateGameConfig(config) {
   validateScalarObject(shooting.baseline, ["velocityFilterRatePerSecond", "leadGainNear", "leadGainFar", "accelerationSoftCap", "accelerationHardCap", "accelerationMinGain", "aimSlewDegreesPerSecond", "aimDeadbandDegrees"], "ai/shooting.yaml.baseline");
   validateScalarObject(shooting.ballisticSolver, ["minTimeSeconds", "horizonRangeScale", "minHorizonSeconds", "maxHorizonSeconds", "bracketSteps", "bisectionSteps", "speedErrorTolerance", "directRangeTolerance", "travelRangeTolerance", "minimumDivisor"], "ai/shooting.yaml.ballisticSolver");
   validateScalarObject(config.ai.levels, ["maxCertifiedLevel"], "ai/levels.yaml");
+  const arenaComparison = exactKeys(config.ai.arenaComparison, ["testArena", "comparison"], "ai/arena-comparison.yaml");
+  validateScalarObject(arenaComparison.testArena, ["nodeDefense", "baseHp"], "ai/arena-comparison.yaml.testArena");
+  validateScalarObject(
+    arenaComparison.comparison,
+    ["spawnCountPerSide", "spawnIntervalSeconds", "maxSimSeconds", "baseWorthUnits"],
+    "ai/arena-comparison.yaml.comparison",
+  );
 
   const display = exactKeys(config.display.battle, ["canvas", "view"], "display/battle.yaml");
   const displayCanvas = validateScalarObject(display.canvas, ["resolutionScale"], "display/battle.yaml.canvas");

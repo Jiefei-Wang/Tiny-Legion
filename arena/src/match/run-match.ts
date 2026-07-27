@@ -13,6 +13,7 @@ import { makeCompositeAiController } from "../ai/composite-controller.ts";
 import { structureIntegrity } from "../../../game-core/src/simulation/units/structure-grid.ts";
 import { canOperate } from "../../../game-core/src/simulation/units/control-unit-rules.ts";
 import { validateTemplateDetailed } from "../../../game-core/src/templates/template-validation.ts";
+import { isDeployableTemplate } from "../../../game-core/src/templates/template-schema.ts";
 import type { UnitTemplate } from "../../../game-core/src/types.ts";
 import type { SpawnRosterEntry } from "../spawn/spawn-schema.ts";
 import { resetUidCounter } from "../../../game-core/src/core/ids/uid.ts";
@@ -38,7 +39,7 @@ function createMockCanvas(width: number, height: number): any {
 function computeOnFieldGasValue(units: any[], side: "player" | "enemy", refundFactor: number): number {
   let sum = 0;
   for (const unit of units) {
-    if (!unit || !unit.alive || !canOperate(unit) || unit.side !== side) {
+    if (!unit || unit.type === "base" || !unit.alive || !canOperate(unit) || unit.side !== side) {
       continue;
     }
     const cost = typeof unit.deploymentGasCost === "number" ? unit.deploymentGasCost : 0;
@@ -72,11 +73,11 @@ function matchesTemplatePattern(templateId: string, pattern: string): boolean {
 }
 
 function aliveCount(units: any[], side: "player" | "enemy"): number {
-  return units.filter((unit: any) => unit.alive && canOperate(unit) && unit.side === side).length;
+  return units.filter((unit: any) => unit.type !== "base" && unit.alive && canOperate(unit) && unit.side === side).length;
 }
 
 function livingCraftCount(units: any[], side: "player" | "enemy"): number {
-  return units.filter((unit: any) => unit.alive && unit.side === side).length;
+  return units.filter((unit: any) => unit.type !== "base" && unit.alive && unit.side === side).length;
 }
 
 export async function runMatch(spec: MatchSpec): Promise<MatchResult> {
@@ -84,10 +85,14 @@ export async function runMatch(spec: MatchSpec): Promise<MatchResult> {
   resetUidCounter();
   const partCatalog = loadRuntimeMergedParts();
   const allTemplates = await loadRuntimeMergedTemplates(partCatalog);
+  const scenario = spec.scenario ?? { withBase: true, initialUnitsPerSide: 2 };
   const templatePatterns = Array.isArray(spec.templateNames) && spec.templateNames.length > 0
     ? spec.templateNames
     : ["*"];
   const templates = allTemplates.filter((template) => {
+    if (!isDeployableTemplate(template)) {
+      return false;
+    }
     const id = String(template?.id ?? "");
     const name = String(template?.name ?? "");
     if (!id && !name) {
@@ -103,6 +108,10 @@ export async function runMatch(spec: MatchSpec): Promise<MatchResult> {
     throw new Error(`runMatch: no templates matched pattern(s): ${templatePatterns.join(", ")}`);
   }
   const templateById = new Map<number, UnitTemplate>(validTemplates.map((template) => [template.id, template] as const));
+  const battleTemplates = [
+    ...validTemplates,
+    ...allTemplates.filter((template) => template.type === "base" && validateTemplateDetailed(template, { partCatalog }).errors.length === 0),
+  ].filter((template, index, entries) => entries.findIndex((candidate) => candidate.id === template.id) === index);
   const refundFactor = BATTLE_SALVAGE_REFUND_FACTOR;
 
   let playerGas = spec.playerGas;
@@ -140,7 +149,7 @@ export async function runMatch(spec: MatchSpec): Promise<MatchResult> {
   const battlefieldWidth = Math.max(640, Math.floor(spec.battlefield?.width ?? BATTLEFIELD_WIDTH));
   const battlefieldHeight = Math.max(360, Math.floor(spec.battlefield?.height ?? BATTLEFIELD_HEIGHT));
   const canvas = createMockCanvas(battlefieldWidth, battlefieldHeight);
-  const battle = new BattleSession(canvas, hooks, validTemplates, {
+  const battle = new BattleSession(canvas, hooks, battleTemplates, {
     aiControllers: {
       player: aiForSide("player"),
       enemy: aiForSide("enemy"),
@@ -149,10 +158,10 @@ export async function runMatch(spec: MatchSpec): Promise<MatchResult> {
     disableAutoEnemySpawns: true,
     disableEnemyMinimumPresence: true,
     disableDefaultStarters: true,
+    spawnBattleBases: scenario.withBase,
     partCatalog,
   });
 
-  const scenario = spec.scenario ?? { withBase: true, initialUnitsPerSide: 2 };
   const node: Parameters<BattleSession["start"]>[0] = {
     id: "arena",
     name: "Arena",
@@ -176,7 +185,7 @@ export async function runMatch(spec: MatchSpec): Promise<MatchResult> {
   const spawnRoster: SpawnRosterEntry[] = validTemplates.map((template) => ({
     templateId: String(template.id),
     gasCost: Math.max(0, template.gasCost),
-    unitType: template.type,
+    unitType: template.type === "air" ? "air" : "ground",
     structureCells: template.structure.length,
     weaponCount: template.attachments.filter((attachment) => {
       const part = partCatalog.find((candidate) => candidate.id === attachment.partId);
@@ -210,6 +219,7 @@ export async function runMatch(spec: MatchSpec): Promise<MatchResult> {
   } else if (scenario.withBase) {
     // Symmetric starters (free and non-refundable, like headless smoke test semantics).
     const unitsPerSide = Math.max(1, Math.floor(scenario.initialUnitsPerSide));
+    const useTestArenaPlacement = Math.max(0, Math.floor(scenario.maintainUnitsPerSide ?? 0)) > 0;
     const starterRoster = [...roster];
     for (let index = starterRoster.length - 1; index > 0; index -= 1) {
       const swapIndex = Math.floor(spawnRng() * (index + 1));
@@ -218,9 +228,14 @@ export async function runMatch(spec: MatchSpec): Promise<MatchResult> {
     for (let index = 0; index < unitsPerSide; index += 1) {
       const templateId = starterRoster[index % starterRoster.length] ?? null;
       if (!templateId) continue;
-      const y = 220 + spawnRng() * 260;
-      battle.arenaDeploy("player", templateId, { chargeGas: false, deploymentGasCost: 0, y });
-      battle.arenaDeploy("enemy", templateId, { chargeGas: false, deploymentGasCost: 0, y });
+      const spawnOptions = useTestArenaPlacement
+        ? { chargeGas: false, deploymentGasCost: 0, ignoreCap: true, ignoreLowGasThreshold: true }
+        : { chargeGas: false, deploymentGasCost: 0, y: 220 + spawnRng() * 260 };
+      const playerDeployed = battle.arenaDeploy("player", templateId, spawnOptions);
+      const enemyDeployed = battle.arenaDeploy("enemy", templateId, spawnOptions);
+      if (!playerDeployed || !enemyDeployed) {
+        throw new Error(`runMatch: could not deploy mirrored starter ${index + 1}/${unitsPerSide}`);
+      }
     }
   } else {
     const unitsPerSide = Math.max(1, Math.floor(scenario.initialUnitsPerSide));
@@ -258,7 +273,8 @@ export async function runMatch(spec: MatchSpec): Promise<MatchResult> {
   const spawnMode = spec.spawnMode ?? "mirrored-random";
   const spawnBurst = Math.max(1, Math.floor(spec.spawnBurst ?? 1));
   const spawnMaxActive = Math.max(1, Math.floor(spec.spawnMaxActive ?? 5));
-  const allowSpawns = scenario.withBase;
+  const maintainUnitsPerSide = Math.max(0, Math.floor(scenario.maintainUnitsPerSide ?? 0));
+  const allowSpawns = scenario.withBase && maintainUnitsPerSide <= 0;
   let spawnTimer = 0;
   let spawnIntervalS = 1.8;
 
@@ -280,8 +296,8 @@ export async function runMatch(spec: MatchSpec): Promise<MatchResult> {
       return;
     }
     const s = battle.getState();
-    const alivePlayer = s.units.filter((u: any) => u.alive && canOperate(u) && u.side === "player").length;
-    const aliveEnemy = s.units.filter((u: any) => u.alive && canOperate(u) && u.side === "enemy").length;
+    const alivePlayer = s.units.filter((u: any) => u.type !== "base" && u.alive && canOperate(u) && u.side === "player").length;
+    const aliveEnemy = s.units.filter((u: any) => u.type !== "base" && u.alive && canOperate(u) && u.side === "enemy").length;
     let playerCapRemaining = Math.max(0, spawnMaxActive - alivePlayer);
     let enemyCapRemaining = Math.max(0, Math.min(s.enemyCap, spawnMaxActive) - aliveEnemy);
 
@@ -368,6 +384,29 @@ export async function runMatch(spec: MatchSpec): Promise<MatchResult> {
     }
   };
 
+  const maintainTestArenaPopulation = (): void => {
+    if (maintainUnitsPerSide <= 0 || roster.length <= 0) {
+      return;
+    }
+    const state = battle.getState();
+    for (const side of ["player", "enemy"] as const) {
+      const missing = Math.max(0, maintainUnitsPerSide - aliveCount(state.units, side));
+      for (let index = 0; index < missing; index += 1) {
+        const templateId = roster[Math.floor(spawnRng() * roster.length)] ?? null;
+        if (!templateId) continue;
+        const deployed = battle.arenaDeploy(side, templateId, {
+          chargeGas: false,
+          deploymentGasCost: 0,
+          ignoreCap: true,
+          ignoreLowGasThreshold: true,
+        });
+        if (!deployed) {
+          throw new Error(`runMatch: could not maintain ${side} population ${index + 1}/${missing}`);
+        }
+      }
+    }
+  };
+
   while (battle.getState().active && !battle.getState().outcome && t < spec.maxSimSeconds) {
     if (allowSpawns) {
       spawnTimer += dt;
@@ -379,6 +418,7 @@ export async function runMatch(spec: MatchSpec): Promise<MatchResult> {
     battle.update(dt, noKeys);
     t += dt;
     replenishInitialLineup();
+    maintainTestArenaPopulation();
     if (!scenario.withBase) {
       const s = battle.getState();
       const alivePlayer = aliveCount(s.units, "player");
@@ -395,7 +435,7 @@ export async function runMatch(spec: MatchSpec): Promise<MatchResult> {
     if (scenario.withBase) {
       const deadlineLosses = battle.getLossStats();
       const integrityFor = (side: "player" | "enemy"): number => state1.units
-        .filter((unit) => unit.alive && canOperate(unit) && unit.side === side)
+        .filter((unit) => unit.type !== "base" && unit.alive && canOperate(unit) && unit.side === side)
         .reduce((total, unit) => total + structureIntegrity(unit), 0);
       const gasDestroyedDelta = deadlineLosses.enemy.gasWasted - deadlineLosses.player.gasWasted;
       const destroyedCraftDelta = deadlineLosses.enemy.destroyedObjects - deadlineLosses.player.destroyedObjects;
@@ -422,7 +462,7 @@ export async function runMatch(spec: MatchSpec): Promise<MatchResult> {
         battle.forceEnd(alivePlayer > aliveEnemy, "Arena deadline reached (no-base)");
       } else {
         const integrityFor = (side: "player" | "enemy"): number => state1.units
-          .filter((unit) => unit.alive && canOperate(unit) && unit.side === side)
+          .filter((unit) => unit.type !== "base" && unit.alive && canOperate(unit) && unit.side === side)
           .reduce((total, unit) => total + structureIntegrity(unit), 0);
         const playerIntegrity = integrityFor("player");
         const enemyIntegrity = integrityFor("enemy");
@@ -455,7 +495,7 @@ export async function runMatch(spec: MatchSpec): Promise<MatchResult> {
   const playerOutcome: "win" | "tie" | "loss" = tie ? "tie" : Boolean(outcome.victory) ? "win" : "loss";
   const enemyOutcome: "win" | "tie" | "loss" = tie ? "tie" : Boolean(outcome.victory) ? "loss" : "win";
   const operationalUnits = (side: "player" | "enemy") => finalState.units
-    .filter((unit) => unit.alive && canOperate(unit) && unit.side === side);
+    .filter((unit) => unit.type !== "base" && unit.alive && canOperate(unit) && unit.side === side);
   const playerOperationalUnits = operationalUnits("player");
   const enemyOperationalUnits = operationalUnits("enemy");
 

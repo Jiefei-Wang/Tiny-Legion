@@ -52,7 +52,7 @@ export interface ProjectileAssetDefinition {
 export type PartType = "structure" | "control" | "engine" | "weapon" | "loader";
 export type PartCategory = "vehicle" | "jet" | "bullet" | "missile" | "beam";
 
-export type UnitType = "ground" | "air";
+export type UnitType = "ground" | "air" | "base";
 export type Side = "player" | "enemy";
 
 export interface MaterialStats {
@@ -361,6 +361,9 @@ export interface UnitInstance {
   facing: 1 | -1;
   x: number;
   y: number;
+  /** Immutable battlefield anchor used by stationary base templates. */
+  fixedX: number | null;
+  fixedY: number | null;
   vx: number;
   vy: number;
   accel: number;

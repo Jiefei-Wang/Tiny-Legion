@@ -16,8 +16,8 @@ import { orientedBeamAabbEntryTime, segmentRoundedAabbEntryTime } from "../../ga
 import { PROJECTILE_ASSETS } from "../../game-core/src/projectiles/generated/projectile-assets.generated.ts";
 import { destroyCell } from "../src/simulation/units/structure-grid.ts";
 import { canOperate } from "../src/simulation/units/control-unit-rules.ts";
-import { mergeTemplates, parseTemplate, validateTemplateDetailed } from "../src/app/template-store.ts";
-import { mergePartCatalogs, parsePartDefinition } from "../src/app/part-store.ts";
+import { isDeployableTemplate, mergeTemplates, parseTemplate, validateTemplateDetailed } from "../src/app/template-store.ts";
+import { isPartCompatibleWithUnitType, mergePartCatalogs, parsePartDefinition } from "../src/app/part-store.ts";
 import {
   calculateDestroyTimeSeconds,
   calculateHitsToDestroy,
@@ -32,7 +32,7 @@ declare const process: { exit: (code?: number) => void; cwd: () => string };
 type Failure = {
   templateId: number;
   templateName: string;
-  check: "validation" | "movement" | "firing" | "overlap" | "functional-support" | "weapon-capacity" | "air-isotropic" | "air-inertia" | "escape-mode" | "control-loss-crash" | "structure-origin" | "penetration-scaling" | "wreck-damage" | "wreck-lifecycle" | "projectile-collision" | "part-comparison";
+  check: "validation" | "movement" | "firing" | "base-rules" | "overlap" | "functional-support" | "weapon-capacity" | "air-isotropic" | "air-inertia" | "escape-mode" | "control-loss-crash" | "structure-origin" | "penetration-scaling" | "wreck-damage" | "wreck-lifecycle" | "projectile-collision" | "part-comparison";
   detail: string;
 };
 
@@ -645,6 +645,104 @@ function runSmoke(): Failure[] {
     defense: 1,
   };
   battle.start(node);
+
+  const standardBaseTemplate = templates.find((template) => template.id === 6 && template.type === "base");
+  const spawnedPlayerBase = battle.getState().units.find((unit) => unit.templateId === 6 && unit.side === "player");
+  const baseControl = spawnedPlayerBase?.attachments.find((attachment) => COMPONENTS[attachment.component].type === "control");
+  const baseStructureCoords = new Set(standardBaseTemplate?.structure.map((cell) => `${cell.x},${cell.y}`) ?? []);
+  const baseStructureIsCanonical = standardBaseTemplate?.structure.length === 16
+    && standardBaseTemplate.structure.every((cell) => cell.partId === 12)
+    && Array.from({ length: 16 }, (_, index) => `${index % 4},${Math.floor(index / 4)}`).every((key) => baseStructureCoords.has(key));
+  const firearmForBase = partCatalog.find((part) => part.name === "firearm");
+  const engineForBase = partCatalog.find((part) => part.partType === "engine");
+  const engineBaseErrors = standardBaseTemplate && engineForBase
+    ? validateTemplateDetailed({
+        ...standardBaseTemplate,
+        attachments: [
+          ...standardBaseTemplate.attachments,
+          { component: engineForBase.baseComponent, partId: engineForBase.id, cell: 0, x: 0, y: 0 },
+        ],
+      }, { partCatalog }).errors
+    : [];
+  if (
+    !standardBaseTemplate
+    || isDeployableTemplate(standardBaseTemplate)
+    || !baseStructureIsCanonical
+    || standardBaseTemplate.attachments.length !== 1
+    || standardBaseTemplate.attachments[0]?.partId !== 3
+    || standardBaseTemplate.attachments[0]?.x !== 1
+    || standardBaseTemplate.attachments[0]?.y !== 2
+    || !spawnedPlayerBase
+    || !baseControl
+    || !firearmForBase
+    || !isPartCompatibleWithUnitType(firearmForBase, "base")
+    || !engineForBase
+    || isPartCompatibleWithUnitType(engineForBase, "base")
+    || !engineBaseErrors.includes("base templates cannot install engine components")
+    || battle.arenaDeploy("player", 6, { chargeGas: false, ignoreCap: true })
+  ) {
+    failures.push({ templateId: 6, templateName: "standard base", check: "base-rules", detail: "canonical shape, automatic spawn, control placement, or deploy exclusion failed" });
+  } else {
+    const fixedX = spawnedPlayerBase.x;
+    const fixedY = spawnedPlayerBase.y;
+    const fullKeepOutRadius = battle.getUnitKeepOutRadius(spawnedPlayerBase);
+    const perimeterCells = spawnedPlayerBase.structure.filter((cell) => cell.x === 0 || cell.x === 3 || cell.y === 0 || cell.y === 3);
+    for (const cell of perimeterCells) cell.destroyed = true;
+    const reducedKeepOutRadius = battle.getUnitKeepOutRadius(spawnedPlayerBase);
+    for (const cell of perimeterCells) cell.destroyed = false;
+    const intruderTemplate = templates.find((template) => template.type === "ground");
+    const intruder = intruderTemplate
+      ? instantiateUnit(templates, intruderTemplate.id, "player", fixedX, fixedY, { partCatalog })
+      : null;
+    if (intruder) {
+      battle.getState().units.push(intruder);
+    }
+    spawnedPlayerBase.vx = 500;
+    spawnedPlayerBase.vy = 500;
+    battle.update(dt, moveUpRightKeys);
+    const intruderDistance = intruder ? Math.hypot(intruder.x - fixedX, intruder.y - fixedY) : 0;
+    const requiredIntruderDistance = intruder ? fullKeepOutRadius + battle.getUnitKeepOutRadius(intruder) : Number.POSITIVE_INFINITY;
+    if (
+      spawnedPlayerBase.x !== fixedX
+      || spawnedPlayerBase.y !== fixedY
+      || spawnedPlayerBase.groundWreckTimerS !== null
+      || reducedKeepOutRadius >= fullKeepOutRadius
+      || !intruder
+      || intruderDistance + 1e-6 < requiredIntruderDistance
+    ) {
+      failures.push({ templateId: 6, templateName: "standard base", check: "base-rules", detail: "weaponless base moved, entered the wreck rule, or failed its dynamic circular keep-out boundary" });
+    }
+    if (intruder) intruder.alive = false;
+    baseControl.alive = false;
+    battle.update(dt, idleKeys);
+    const remainingHpAfterControlLoss = spawnedPlayerBase.structure.reduce(
+      (sum, cell) => sum + Math.max(0, cell.breakThreshold - cell.strain),
+      0,
+    );
+    battle.update(dt, idleKeys);
+    const remainingHpAfterDecay = spawnedPlayerBase.structure.reduce(
+      (sum, cell) => sum + Math.max(0, cell.breakThreshold - cell.strain),
+      0,
+    );
+    if (
+      !spawnedPlayerBase.alive
+      || spawnedPlayerBase.groundWreckTimerS === null
+      || spawnedPlayerBase.airDropActive
+      || spawnedPlayerBase.x !== fixedX
+      || spawnedPlayerBase.y !== fixedY
+      || remainingHpAfterDecay >= remainingHpAfterControlLoss
+      || battle.getState().outcome !== null
+    ) {
+      failures.push({ templateId: 6, templateName: "standard base", check: "base-rules", detail: "control loss did not start fixed ground-style structure decay without aircraft drop or battle outcome" });
+    }
+    const decayFrames = Math.ceil(GROUND_WRECK_LIFETIME_SECONDS / dt) + 2;
+    for (let frame = 0; frame < decayFrames; frame += 1) {
+      battle.update(dt, idleKeys);
+    }
+    if (spawnedPlayerBase.alive || battle.getState().units.includes(spawnedPlayerBase) || battle.getState().outcome !== null) {
+      failures.push({ templateId: 6, templateName: "standard base", check: "base-rules", detail: "base wreck did not finish normal decay without changing battle outcome" });
+    }
+  }
 
   const groundWreckTemplate = testTemplates.find((template) => template.type === "ground") ?? null;
   if (groundWreckTemplate) {

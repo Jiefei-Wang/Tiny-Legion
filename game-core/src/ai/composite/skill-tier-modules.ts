@@ -16,11 +16,11 @@ import type {
   ShootAiModule,
   TargetAiModule,
 } from "./composite-ai.ts";
-import type { StructureCell, UnitInstance } from "../../types.ts";
+import type { StructureCell, UnitInstance, UnitType } from "../../types.ts";
 
 export type AiSkillTier = "baseline" | "low" | "medium" | "high";
 
-function canHitByAxis(unitY: number, unitType: "ground" | "air", targetY: number, targetType: "ground" | "air"): boolean {
+function canHitByAxis(unitY: number, unitType: UnitType, targetY: number, targetType: UnitType): boolean {
   return unitType === "air" || targetType === "air" || Math.abs(targetY - unitY) <= GROUND_FIRE_Y_TOLERANCE;
 }
 

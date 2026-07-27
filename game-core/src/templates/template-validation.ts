@@ -28,7 +28,7 @@ function resolveCatalog(partCatalog?: ReadonlyArray<PartDefinition>): PartDefini
 }
 
 function isUnitType(value: unknown): value is UnitType {
-  return value === "ground" || value === "air";
+  return value === "ground" || value === "air" || value === "base";
 }
 
 function isDisplayKind(value: unknown): value is DisplayAttachmentTemplate["kind"] {
@@ -288,11 +288,15 @@ export function validateTemplateDetailed(
   } else if (computingUse > controlCapacity) {
     errors.push(`control unit capacity exceeded (${computingUse} computing used, ${controlCapacity} supported)`);
   }
-  if (weaponCount < 1) {
+  if (weaponCount < 1 && template.type !== "base") {
     warnings.push("at least one weapon component is recommended");
   }
 
-  if (template.type === "air") {
+  if (template.type === "base") {
+    if (totalEngineCount > 0) {
+      errors.push("base templates cannot install engine components");
+    }
+  } else if (template.type === "air") {
     if (airEngineCount < 1) {
       errors.push("air unit requires at least one jet engine");
     } else {

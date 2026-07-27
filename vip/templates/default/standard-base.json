@@ -1,0 +1,98 @@
+{
+  "id": 6,
+  "name": "standard base",
+  "type": "base",
+  "structure": [
+    {
+      "partId": 12,
+      "x": 0,
+      "y": 0
+    },
+    {
+      "partId": 12,
+      "x": 1,
+      "y": 0
+    },
+    {
+      "partId": 12,
+      "x": 2,
+      "y": 0
+    },
+    {
+      "partId": 12,
+      "x": 3,
+      "y": 0
+    },
+    {
+      "partId": 12,
+      "x": 0,
+      "y": 1
+    },
+    {
+      "partId": 12,
+      "x": 1,
+      "y": 1
+    },
+    {
+      "partId": 12,
+      "x": 2,
+      "y": 1
+    },
+    {
+      "partId": 12,
+      "x": 3,
+      "y": 1
+    },
+    {
+      "partId": 12,
+      "x": 0,
+      "y": 2
+    },
+    {
+      "partId": 12,
+      "x": 1,
+      "y": 2
+    },
+    {
+      "partId": 12,
+      "x": 2,
+      "y": 2
+    },
+    {
+      "partId": 12,
+      "x": 3,
+      "y": 2
+    },
+    {
+      "partId": 12,
+      "x": 0,
+      "y": 3
+    },
+    {
+      "partId": 12,
+      "x": 1,
+      "y": 3
+    },
+    {
+      "partId": 12,
+      "x": 2,
+      "y": 3
+    },
+    {
+      "partId": 12,
+      "x": 3,
+      "y": 3
+    }
+  ],
+  "attachments": [
+    {
+      "component": "control",
+      "partId": 3,
+      "cell": 9,
+      "x": 1,
+      "y": 2,
+      "rotateQuarter": 0
+    }
+  ],
+  "display": []
+}

@@ -4,6 +4,7 @@ export {
   cloneTemplate,
   computeTemplateGasCost,
   getTemplateValidationIssues,
+  isDeployableTemplate,
   mergeTemplates,
   parseTemplate,
   validateTemplateDetailed,

@@ -117,7 +117,7 @@ If shell does not support inline env assignment, set env var in shell first, the
 
 - The AI leaderboard competition (`/__arena/composite/leaderboard/compete`) reads settings from `arena/composite-training.phases.json` `p4-leaderboard` phase.
 - If you modify training pipeline settings (maxSimSeconds, baseHp, spawnMaxActive, etc.), you MUST also update the same values in the `p4-leaderboard` phase config so leaderboard competitions use identical conditions.
-- The leaderboard code reads: `withBase`, `initialUnitsPerSide`, `templateNames`, `battlefield`, `maxSimSeconds`, `nodeDefense`, `baseHp`, `playerGas`, `enemyGas`, `spawnBurst`, `spawnMaxActive`.
+- The leaderboard code reads: `withBase`, `initialUnitsPerSide`, `maintainUnitsPerSide`, `templateNames`, `battlefield`, `maxSimSeconds`, `nodeDefense`, `baseHp`, `playerGas`, `enemyGas`, `spawnBurst`, `spawnMaxActive`.
 - Training pipeline and leaderboard MUST use matching settings for Elo scores to be meaningful and comparable.
 
 ## Mandatory Headless Verification

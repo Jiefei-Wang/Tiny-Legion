@@ -28,11 +28,17 @@ export type MatchSpec = {
   enemyGas: number;
   spawnBurst?: number;
   spawnMaxActive?: number;
+  spawnIntervalSeconds?: number;
+  baseWorthUnits?: number;
   aiPlayer: MatchAiSpec;
   aiEnemy: MatchAiSpec;
   scenario?: {
     withBase: boolean;
     initialUnitsPerSide: number;
+    /** Free, immediate Test-Arena-style replenishment target for each side. */
+    maintainUnitsPerSide?: number;
+    /** Spawn free mirrored waves from one random non-base craft selection. */
+    scheduledMirroredWaves?: boolean;
     initialLineup?: {
       player: { templateId: number; count: number };
       enemy: { templateId: number; count: number };
@@ -83,6 +89,13 @@ export type MatchResult = {
   losses: {
     player: { destroyedObjects: number; gasWasted: number };
     enemy: { destroyedObjects: number; gasWasted: number };
+  };
+  performance: {
+    /** Weighted opposing objects destroyed by each side; a base uses baseWorthUnits. */
+    destroyedByPlayer: number;
+    destroyedByEnemy: number;
+    playerDestroyedRatio: number;
+    enemyDestroyedRatio: number;
   };
   replay: {
     seed: number;

@@ -1679,6 +1679,7 @@ function canWeaponInterceptTarget(
   const ry = candidate.y - weapon.firepointY;
   const distance = Math.hypot(rx, ry);
   if (distance > weapon.effectiveRange * 1.04) return false;
+  if (!input.canShootAtAngle(weapon.componentId, rx, ry, weapon.angleLimit)) return false;
   if (weapon.projectileClass === "laser") return true;
   const projectileSpeed = Math.max(1, weapon.projectileSpeed);
   const vx = candidate.vx - input.unit.vx;
@@ -1706,11 +1707,30 @@ function canWeaponInterceptTarget(
     && interceptTime * projectileSpeed <= weapon.effectiveRange * 1.04;
 }
 
+export function isImmediateLoadedKillOpportunity(
+  distance: number,
+  immediateRange: number,
+  shotsToDisable: number,
+  loadedAmmo: number,
+): boolean {
+  return distance <= immediateRange
+    && shotsToDisable <= Math.max(1, loadedAmmo);
+}
+
+export function shouldPreferImmediateKillTarget(
+  primaryReachable: boolean,
+  primaryDistance: number,
+  immediateDistance: number,
+): boolean {
+  return !primaryReachable || immediateDistance * 1.35 < primaryDistance;
+}
+
 function selectReachableLocalTarget(
   input: BattleAiInput,
   rankedTargets: ReadonlyArray<RankedTarget>,
   weapon: WeaponFireAiInput,
   assignedDamageByTarget: ReadonlyMap<string, number>,
+  immediateKillOnly = false,
 ): RankedTarget | null {
   return rankedTargets
     .filter((candidate) => canWeaponInterceptTarget(input, candidate, weapon))
@@ -1733,6 +1753,21 @@ function selectReachableLocalTarget(
         * (weapon.projectileClass === "bullet" || weapon.projectileClass === "laser" ? 4 : 1);
       const assignedDamage = assignedDamageByTarget.get(enemy.id) ?? 0;
       const assignmentRatio = assignedDamage / decisiveHp;
+      const remainingDecisiveHp = Math.max(0, decisiveHp - assignedDamage);
+      const shotsToDisable = Math.ceil(remainingDecisiveHp / effectiveDamage);
+      const immediateRange = Math.max(
+        input.unit.radius + enemy.radius + 120,
+        Math.min(650, weapon.effectiveRange * 0.5),
+      );
+      const loadedKillOpportunity = isImmediateLoadedKillOpportunity(
+        distance,
+        immediateRange,
+        shotsToDisable,
+        weapon.loadedAmmo,
+      );
+      if (immediateKillOnly && !loadedKillOpportunity) {
+        return { candidate, score: Number.POSITIVE_INFINITY };
+      }
       const overkillPenalty = assignmentRatio >= 1
         ? 1_600 + (assignmentRatio - 1) * 600
         : assignmentRatio * 90;
@@ -1740,12 +1775,13 @@ function selectReachableLocalTarget(
       return {
         candidate,
         score: distance * 0.6
-          + decisiveHp / effectiveDamage * 28
+          + shotsToDisable * 28
           + armorMismatch
           + overkillPenalty
           - localDefenseReward,
       };
     })
+    .filter((entry) => Number.isFinite(entry.score))
     .sort((a, b) => a.score - b.score || a.candidate.targetId.localeCompare(b.candidate.targetId))[0]?.candidate
     ?? null;
 }
@@ -1789,16 +1825,32 @@ function createCapabilityAwareShootAi(level: AiLevel): ShootAiModule {
         const weapon = input.getWeaponFireInput(slot);
         if (!weapon) continue;
         let selectedTarget = primary;
-        if (level >= 93 && !canWeaponInterceptTarget(input, primary, weapon)) {
-          // Keep pursuing the strategic target. A weapon may opportunistically
-          // defend against a reachable local enemy only while that weapon cannot
-          // kinematically intercept the strategic target.
-          selectedTarget = selectReachableLocalTarget(
+        if (level === 93) {
+          const alternativeTargets = target.rankedTargets.filter((candidate) => candidate.targetId !== primary.targetId);
+          const primaryReachable = canWeaponInterceptTarget(input, primary, weapon);
+          const immediateKill = selectReachableLocalTarget(
             input,
-            target.rankedTargets.filter((candidate) => candidate.targetId !== primary.targetId),
+            alternativeTargets,
             weapon,
             assignedDamageByTarget,
-          ) ?? primary;
+            true,
+          );
+          const primaryDistance = Math.hypot(primary.x - weapon.firepointX, primary.y - weapon.firepointY);
+          const immediateDistance = immediateKill
+            ? Math.hypot(immediateKill.x - weapon.firepointX, immediateKill.y - weapon.firepointY)
+            : Number.POSITIVE_INFINITY;
+          if (immediateKill && shouldPreferImmediateKillTarget(primaryReachable, primaryDistance, immediateDistance)) {
+            // Movement retains the strategic target, but this weapon takes a
+            // clearly closer magazine-feasible disable opportunity.
+            selectedTarget = immediateKill;
+          } else if (!primaryReachable) {
+            selectedTarget = selectReachableLocalTarget(
+              input,
+              alternativeTargets,
+              weapon,
+              assignedDamageByTarget,
+            ) ?? primary;
+          }
         } else if (level >= 21 && level < 25) {
           selectedTarget = target.rankedTargets
             .filter((candidate) => (

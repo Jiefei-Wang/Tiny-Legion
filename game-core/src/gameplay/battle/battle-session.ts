@@ -38,10 +38,11 @@ import { applyRecoilForAttachment, getAliveWeaponAttachments } from "../../simul
 import { clamp } from "../../simulation/physics/impulse-model.ts";
 import { canOperate } from "../../simulation/units/control-unit-rules.ts";
 import { destroyCell } from "../../simulation/units/structure-grid.ts";
-import { instantiateUnit } from "../../simulation/units/unit-builder.ts";
+import { instantiateUnit, STANDARD_BASE_TEMPLATE_ID } from "../../simulation/units/unit-builder.ts";
 import { selectBestTarget } from "../../ai/targeting/target-selector.ts";
 import { createBaselineCompositeAiController } from "../../ai/composite/baseline-modules.ts";
 import { validateTemplateDetailed } from "../../templates/template-validation.ts";
+import { isDeployableTemplate } from "../../templates/template-schema.ts";
 import { createDefaultPartDefinitions, mergePartCatalogs, normalizePartAttachmentRotate } from "../../parts/part-schema.ts";
 import { PROJECTILE_ASSETS } from "../../projectiles/generated/projectile-assets.generated.ts";
 import type { BattleAiController, CombatDecision, WeaponFireAiInput } from "../../ai/composite/composite-ai.ts";
@@ -81,6 +82,8 @@ export interface BattleSessionOptions {
   disableAutoEnemySpawns?: boolean;
   disableEnemyMinimumPresence?: boolean;
   disableDefaultStarters?: boolean;
+  /** Spawn the standard fixed base craft for each side when a battle begins. */
+  spawnBattleBases?: boolean;
   externalAiSides?: Partial<Record<Side, boolean>>;
   partCatalog?: ReadonlyArray<PartDefinition>;
   movementSpeedMultiplier?: number;
@@ -133,6 +136,7 @@ export class BattleSession {
   private readonly disableAutoEnemySpawns: boolean;
   private readonly disableEnemyMinimumPresence: boolean;
   private readonly disableDefaultStarters: boolean;
+  private readonly spawnBattleBases: boolean;
   private externalAiSides: Partial<Record<Side, boolean>>;
   private externalCommandsByUnitId: Map<string, UnitCommand>;
   private partCatalog: PartDefinition[];
@@ -178,6 +182,7 @@ export class BattleSession {
     this.disableAutoEnemySpawns = options.disableAutoEnemySpawns ?? false;
     this.disableEnemyMinimumPresence = options.disableEnemyMinimumPresence ?? false;
     this.disableDefaultStarters = options.disableDefaultStarters ?? false;
+    this.spawnBattleBases = options.spawnBattleBases ?? true;
     this.externalAiSides = {
       player: options.externalAiSides?.player === true,
       enemy: options.externalAiSides?.enemy === true,
@@ -361,11 +366,11 @@ export class BattleSession {
   }
 
   public getAliveEnemyCount(): number {
-    return this.state.units.filter((unit) => unit.side === "enemy" && unit.alive && canOperate(unit)).length;
+    return this.state.units.filter((unit) => unit.type !== "base" && unit.side === "enemy" && unit.alive && canOperate(unit)).length;
   }
 
   public getAlivePlayerCount(): number {
-    return this.state.units.filter((unit) => unit.side === "player" && unit.alive && canOperate(unit)).length;
+    return this.state.units.filter((unit) => unit.type !== "base" && unit.side === "player" && unit.alive && canOperate(unit)).length;
   }
 
   public setEnemyActiveCount(targetCount: number): number {
@@ -376,7 +381,7 @@ export class BattleSession {
       return this.getAliveEnemyCount();
     }
 
-    const aliveEnemies = this.state.units.filter((unit) => unit.side === "enemy" && unit.alive && canOperate(unit));
+    const aliveEnemies = this.state.units.filter((unit) => unit.type !== "base" && unit.side === "enemy" && unit.alive && canOperate(unit));
     if (aliveEnemies.length > normalizedTarget) {
       const removeCount = aliveEnemies.length - normalizedTarget;
       for (let i = 0; i < removeCount; i += 1) {
@@ -404,11 +409,11 @@ export class BattleSession {
   }
 
   public clearAllUnits(): number {
-    const removed = this.state.units.length;
+    const removed = this.state.units.filter((unit) => unit.type !== "base").length;
     if (removed <= 0) {
       return 0;
     }
-    this.state.units = [];
+    this.state.units = this.state.units.filter((unit) => unit.type === "base");
     this.clearControlSelection();
     return removed;
   }
@@ -422,7 +427,7 @@ export class BattleSession {
       this.enemySpawnTemplateAllowList = null;
       return [];
     }
-    const validIds = new Set<number>(this.templates.map((template) => template.id));
+    const validIds = new Set<number>(this.templates.filter(isDeployableTemplate).map((template) => template.id));
     const normalized: number[] = [];
     for (const id of templateIds) {
       if (!validIds.has(id)) {
@@ -455,7 +460,7 @@ export class BattleSession {
       this.playerSpawnTemplateAllowList = null;
       return [];
     }
-    const validIds = new Set<number>(this.templates.map((template) => template.id));
+    const validIds = new Set<number>(this.templates.filter(isDeployableTemplate).map((template) => template.id));
     const normalized: number[] = [];
     for (const id of templateIds) {
       if (!validIds.has(id)) {
@@ -655,6 +660,10 @@ export class BattleSession {
       this.state.enemyBase.hp = node.testBaseHpOverride;
     }
 
+    if (this.spawnBattleBases) {
+      this.spawnStandardBattleBases();
+    }
+
     if (!this.disableDefaultStarters) {
       const starterA = this.instantiateSpawnWithSpacing(1, "player", 140, this.getLaneBounds(), {
         deploymentGasCost: 0,
@@ -693,16 +702,47 @@ export class BattleSession {
     this.controllerAimAngleRad = null;
   }
 
+  private spawnStandardBattleBases(): void {
+    const template = this.templates.find((entry) => entry.id === STANDARD_BASE_TEMPLATE_ID && entry.type === "base");
+    if (!template || validateTemplateDetailed(template, { partCatalog: this.partCatalog }).errors.length > 0) {
+      return;
+    }
+    for (const side of ["player", "enemy"] as const) {
+      const objective = side === "player" ? this.state.playerBase : this.state.enemyBase;
+      const x = objective.x + objective.w * 0.5;
+      const y = objective.y + objective.h * 0.5;
+      const unit = instantiateUnit(this.templates, template.id, side, x, y, {
+        deploymentGasCost: 0,
+        partCatalog: this.partCatalog,
+      });
+      if (unit) {
+        this.state.units.push(unit);
+      }
+    }
+  }
+
+  private restoreFixedBasePositions(): void {
+    for (const unit of this.state.units) {
+      if (unit.type !== "base") {
+        continue;
+      }
+      unit.vx = 0;
+      unit.vy = 0;
+      unit.x = unit.fixedX ?? unit.x;
+      unit.y = unit.fixedY ?? unit.y;
+    }
+  }
+
   public deployUnit(templateId: number): void {
     if (!this.state.active || this.state.outcome) {
       return;
     }
     const template = this.templates.find((entry) => entry.id === templateId);
-    if (!template) {
+    if (!template || !isDeployableTemplate(template)) {
       return;
     }
 
-    const friendlyActive = this.state.units.filter((unit) => unit.side === "player" && unit.alive && canOperate(unit)).length;
+    const friendlyActive = this.state.units.filter((unit) => unit.type !== "base" && unit.side === "player" && unit.alive && canOperate(unit)).length;
     if (friendlyActive >= armyCap(this.hooks.getCommanderSkill())) {
       this.hooks.addLog("Commander cap reached", "warn");
       return;
@@ -847,6 +887,13 @@ export class BattleSession {
       unit.x += unit.vx * dt;
       unit.y += unit.vy * dt;
 
+      if (unit.type === "base") {
+        unit.vx = 0;
+        unit.vy = 0;
+        unit.x = unit.fixedX ?? unit.x;
+        unit.y = unit.fixedY ?? unit.y;
+      }
+
       if (!unit.airDropActive) {
         if (unit.type === "air") {
           unit.vx *= 1;
@@ -881,6 +928,7 @@ export class BattleSession {
       }
     }
     this.resolveUnitSeparation();
+    this.restoreFixedBasePositions();
 
     for (const projectile of this.state.projectiles) {
       projectile.ttl -= dt;
@@ -1277,6 +1325,13 @@ export class BattleSession {
     unit: UnitInstance,
     bounds: { airMinZ: number; airMaxZ: number; groundMinY: number; groundMaxY: number; airTargetTolerance: number },
   ): void {
+    if (unit.type === "base") {
+      unit.vx = 0;
+      unit.vy = 0;
+      unit.x = unit.fixedX ?? unit.x;
+      unit.y = unit.fixedY ?? unit.y;
+      return;
+    }
     if (unit.type === "ground") {
       unit.y = clamp(unit.y, bounds.groundMinY, bounds.groundMaxY);
     } else if (unit.airDropActive) {
@@ -1289,18 +1344,47 @@ export class BattleSession {
   }
 
   private minAllowedCenterDistance(a: UnitInstance, b: UnitInstance): number {
+    const radiusA = this.getUnitKeepOutRadius(a);
+    const radiusB = this.getUnitKeepOutRadius(b);
+    if (a.type === "base" || b.type === "base") {
+      return Math.max(4, radiusA + radiusB);
+    }
     const overlapAllowance = Math.max(0, Math.min(0.95, UNIT_OVERLAP_ALLOWANCE_RATIO));
-    const penetrationAllowance = Math.min(a.radius, b.radius) * overlapAllowance;
-    return Math.max(4, a.radius + b.radius - penetrationAllowance);
+    const penetrationAllowance = Math.min(radiusA, radiusB) * overlapAllowance;
+    return Math.max(4, radiusA + radiusB - penetrationAllowance);
+  }
+
+  /** Circular keep-out radius; base fixtures derive it from their surviving structure footprint. */
+  public getUnitKeepOutRadius(unit: UnitInstance): number {
+    return this.getUnitKeepOutCircle(unit).radius;
+  }
+
+  public getUnitKeepOutCircle(unit: UnitInstance): { x: number; y: number; radius: number } {
+    if (unit.type !== "base") {
+      return { x: unit.x, y: unit.y, radius: unit.radius };
+    }
+    const rects = this.getLiveCellRects(unit);
+    if (rects.length <= 0) {
+      return { x: unit.x, y: unit.y, radius: 0 };
+    }
+    const left = Math.min(...rects.map((rect) => rect.x));
+    const right = Math.max(...rects.map((rect) => rect.x + rect.w));
+    const top = Math.min(...rects.map((rect) => rect.y));
+    const bottom = Math.max(...rects.map((rect) => rect.y + rect.h));
+    const x = (left + right) * 0.5;
+    const y = (top + bottom) * 0.5;
+    return { x, y, radius: Math.hypot((right - left) * 0.5, (bottom - top) * 0.5) };
   }
 
   private hasBlockingSpawnOverlap(candidate: UnitInstance): boolean {
     for (const other of this.state.units) {
-      if (!other.alive || other.type !== candidate.type) {
+      if (!other.alive || (other.type !== candidate.type && other.type !== "base" && candidate.type !== "base")) {
         continue;
       }
-      const dx = other.x - candidate.x;
-      const dy = other.y - candidate.y;
+      const candidateCircle = this.getUnitKeepOutCircle(candidate);
+      const otherCircle = this.getUnitKeepOutCircle(other);
+      const dx = otherCircle.x - candidateCircle.x;
+      const dy = otherCircle.y - candidateCircle.y;
       const minDist = this.minAllowedCenterDistance(candidate, other);
       if ((dx * dx + dy * dy) < (minDist * minDist)) {
         return true;
@@ -1363,11 +1447,13 @@ export class BattleSession {
     b: UnitInstance,
     laneBounds: { airMinZ: number; airMaxZ: number; groundMinY: number; groundMaxY: number; airTargetTolerance: number },
   ): void {
-    if (!a.alive || !b.alive || a.type !== b.type) {
+    if (!a.alive || !b.alive || (a.type !== b.type && a.type !== "base" && b.type !== "base")) {
       return;
     }
-    const dx = b.x - a.x;
-    const dy = b.y - a.y;
+    const circleA = this.getUnitKeepOutCircle(a);
+    const circleB = this.getUnitKeepOutCircle(b);
+    const dx = circleB.x - circleA.x;
+    const dy = circleB.y - circleA.y;
     const minDist = this.minAllowedCenterDistance(a, b);
     const distSq = dx * dx + dy * dy;
     if (distSq >= minDist * minDist) {
@@ -1377,15 +1463,18 @@ export class BattleSession {
     const nx = distance > 1e-6 ? dx / distance : (a.id < b.id ? 1 : -1);
     const ny = distance > 1e-6 ? dy / distance : 0;
     const penetrationDepth = minDist - distance;
-    const correction = penetrationDepth * Math.max(0, UNIT_SEPARATION_POSITION_FACTOR);
+    const correctionFactor = a.type === "base" || b.type === "base"
+      ? 1
+      : Math.max(0, UNIT_SEPARATION_POSITION_FACTOR);
+    const correction = penetrationDepth * correctionFactor;
     if (correction <= 0) {
       return;
     }
-    const invMassA = 1 / Math.max(1, a.mass);
-    const invMassB = 1 / Math.max(1, b.mass);
+    const invMassA = a.type === "base" ? 0 : 1 / Math.max(1, a.mass);
+    const invMassB = b.type === "base" ? 0 : 1 / Math.max(1, b.mass);
     const invMassSum = invMassA + invMassB;
-    const weightA = invMassA / Math.max(1e-6, invMassSum);
-    const weightB = invMassB / Math.max(1e-6, invMassSum);
+    const weightA = invMassSum > 0 ? invMassA / invMassSum : 0;
+    const weightB = invMassSum > 0 ? invMassB / invMassSum : 0;
 
     a.x -= nx * correction * weightA;
     a.y -= ny * correction * weightA;
@@ -1412,15 +1501,29 @@ export class BattleSession {
     if (!UNIT_SEPARATION_ENABLED) {
       return;
     }
-    const alive = this.state.units.filter((unit) => unit.alive && canOperate(unit));
+    const alive = this.state.units.filter((unit) => unit.alive && (canOperate(unit) || unit.type === "base"));
     if (alive.length <= 1) {
+      return;
+    }
+    const laneBounds = this.getLaneBounds();
+    const bases = alive.filter((unit) => unit.type === "base");
+    for (const base of bases) {
+      for (const other of alive) {
+        if (other === base || (other.type === "base" && other.id < base.id)) {
+          continue;
+        }
+        this.resolveUnitOverlapBetween(base, other, laneBounds);
+      }
+    }
+    const separableCraft = alive.filter((unit) => unit.type !== "base");
+    if (separableCraft.length <= 1) {
       return;
     }
     const cellSize = Math.max(24, UNIT_SEPARATION_GRID_SIZE);
     const grid = new Map<string, number[]>();
     const cellKey = (cellX: number, cellY: number): string => `${cellX}:${cellY}`;
-    for (let i = 0; i < alive.length; i += 1) {
-      const unit = alive[i];
+    for (let i = 0; i < separableCraft.length; i += 1) {
+      const unit = separableCraft[i];
       const cellX = Math.floor(unit.x / cellSize);
       const cellY = Math.floor(unit.y / cellSize);
       const key = cellKey(cellX, cellY);
@@ -1432,7 +1535,6 @@ export class BattleSession {
       }
     }
 
-    const laneBounds = this.getLaneBounds();
     const neighborOffsets = [
       [1, 0],
       [0, 1],
@@ -1445,7 +1547,7 @@ export class BattleSession {
       const cy = Number(cyRaw);
       for (let i = 0; i < bucket.length; i += 1) {
         for (let j = i + 1; j < bucket.length; j += 1) {
-          this.resolveUnitOverlapBetween(alive[bucket[i]], alive[bucket[j]], laneBounds);
+          this.resolveUnitOverlapBetween(separableCraft[bucket[i]], separableCraft[bucket[j]], laneBounds);
         }
       }
       for (const [ox, oy] of neighborOffsets) {
@@ -1455,7 +1557,7 @@ export class BattleSession {
         }
         for (const indexA of bucket) {
           for (const indexB of other) {
-            this.resolveUnitOverlapBetween(alive[indexA], alive[indexB], laneBounds);
+            this.resolveUnitOverlapBetween(separableCraft[indexA], separableCraft[indexB], laneBounds);
           }
         }
       }
@@ -1463,11 +1565,14 @@ export class BattleSession {
   }
 
   private maybeSpawnEnemy(): boolean {
-    const aliveEnemy = this.state.units.filter((unit) => unit.side === "enemy" && unit.alive && canOperate(unit)).length;
+    const aliveEnemy = this.state.units.filter((unit) => unit.type !== "base" && unit.side === "enemy" && unit.alive && canOperate(unit)).length;
     if (aliveEnemy >= this.state.enemyCap) {
       return false;
     }
     const candidates = this.templates.filter((template) => {
+      if (!isDeployableTemplate(template)) {
+        return false;
+      }
       if (this.enemySpawnTemplateAllowList && !this.enemySpawnTemplateAllowList.has(template.id)) {
         return false;
       }
@@ -1519,6 +1624,9 @@ export class BattleSession {
       return;
     }
     const candidates = this.templates.filter((template) => {
+      if (!isDeployableTemplate(template)) {
+        return false;
+      }
       if (this.playerSpawnTemplateAllowList && !this.playerSpawnTemplateAllowList.has(template.id)) {
         return false;
       }
@@ -1558,7 +1666,7 @@ export class BattleSession {
       return false;
     }
     const template = this.templates.find((entry) => entry.id === templateId);
-    if (!template) {
+    if (!template || !isDeployableTemplate(template)) {
       return false;
     }
     const validation = validateTemplateDetailed(template, { partCatalog: this.partCatalog });
@@ -1569,7 +1677,7 @@ export class BattleSession {
     const chargeGas = opts.chargeGas ?? true;
     const ignoreCap = opts.ignoreCap ?? false;
     if (side === "player") {
-      const friendlyActive = this.state.units.filter((unit) => unit.side === "player" && unit.alive && canOperate(unit)).length;
+      const friendlyActive = this.state.units.filter((unit) => unit.type !== "base" && unit.side === "player" && unit.alive && canOperate(unit)).length;
       if (!ignoreCap && friendlyActive >= armyCap(this.hooks.getCommanderSkill())) {
         return false;
       }
@@ -1588,7 +1696,7 @@ export class BattleSession {
       return true;
     }
 
-    const aliveEnemy = this.state.units.filter((unit) => unit.side === "enemy" && unit.alive && canOperate(unit)).length;
+    const aliveEnemy = this.state.units.filter((unit) => unit.type !== "base" && unit.side === "enemy" && unit.alive && canOperate(unit)).length;
     if (!ignoreCap && aliveEnemy >= this.state.enemyCap) {
       return false;
     }
@@ -1616,7 +1724,7 @@ export class BattleSession {
     if (this.state.enemyMinActive <= 0) {
       return;
     }
-    let aliveEnemy = this.state.units.filter((unit) => unit.side === "enemy" && unit.alive && canOperate(unit)).length;
+    let aliveEnemy = this.state.units.filter((unit) => unit.type !== "base" && unit.side === "enemy" && unit.alive && canOperate(unit)).length;
     let attempts = 0;
     const maxAttempts = Math.max(2, this.state.enemyMinActive * 3);
     while (aliveEnemy < this.state.enemyMinActive && attempts < maxAttempts) {
@@ -1948,6 +2056,9 @@ export class BattleSession {
   }
 
   private shouldGroundUnitEnterWreck(unit: UnitInstance): boolean {
+    if (unit.type === "base") {
+      return unit.groundWreckTimerS !== null || !canOperate(unit);
+    }
     if (unit.type !== "ground") {
       return false;
     }
@@ -1998,7 +2109,7 @@ export class BattleSession {
 
   private recordDestroyedUnits(): void {
     for (const unit of this.state.units) {
-      if (unit.alive || unit.returnedToBase) {
+      if (unit.type === "base" || unit.alive || unit.returnedToBase) {
         continue;
       }
       const sideStats = this.lossStats[unit.side];
@@ -2414,6 +2525,14 @@ export class BattleSession {
   }
 
   private refreshUnitMobility(unit: UnitInstance): void {
+    if (unit.type === "base") {
+      unit.maxSpeed = 0;
+      unit.accel = 0;
+      unit.turnDrag = 0.8;
+      unit.vx = 0;
+      unit.vy = 0;
+      return;
+    }
     let totalPower = 0;
     let weightedSpeedCap = 0;
     let capWeight = 0;
@@ -2608,7 +2727,10 @@ export class BattleSession {
     }
 
     // --- Movement ---
-    if (unit.airDropActive) {
+    if (unit.type === "base") {
+      unit.vx = 0;
+      unit.vy = 0;
+    } else if (unit.airDropActive) {
       unit.vx = 0;
       unit.vy = Math.max(0, unit.vy);
       unit.vy += AIR_DROP_GRAVITY * dt;
@@ -3135,7 +3257,7 @@ export class BattleSession {
   }
 
   private activateEscapeIfUnavailable(unit: UnitInstance): void {
-    if (unit.escapeActive || unit.returnedToBase || this.hasAvailableWeapons(unit)) {
+    if (unit.type === "base" || unit.escapeActive || unit.returnedToBase || this.hasAvailableWeapons(unit)) {
       return;
     }
     unit.escapeActive = true;

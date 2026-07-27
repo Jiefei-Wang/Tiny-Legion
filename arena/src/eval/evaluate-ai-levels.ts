@@ -59,6 +59,7 @@ function configMatchSpec(seed: number, aiPlayer: MatchAiSpec, aiEnemy: MatchAiSp
     scenario: {
       withBase: scenario.withBase,
       initialUnitsPerSide: scenario.initialUnitsPerSide,
+      maintainUnitsPerSide: scenario.maintainUnitsPerSide,
     },
     templateNames: scenario.templateNames,
     battlefield: scenario.battlefield,

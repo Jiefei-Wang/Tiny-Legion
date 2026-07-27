@@ -10,7 +10,7 @@
     "build": "tsc && vite build",
     "preview": "vite preview",
     "pretest:headless": "npm --prefix .. run config:generate && npm --prefix .. run projectiles:generate",
-    "test:headless": "tsc -p tsconfig.headless.json && node .headless-dist/vip/scripts/headless-default-template-smoke.js"
+    "test:headless": "tsc -p tsconfig.headless.json && node .headless-dist/vip/scripts/headless-default-template-smoke.js && npm --prefix ../arena run verify:ai-rules"
   },
   "devDependencies": {
     "typescript": "~5.9.3",

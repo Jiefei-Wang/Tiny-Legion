@@ -399,6 +399,16 @@ export const GAME_CONFIG = {
     },
     "levels": {
       "maxCertifiedLevel": 5
+    },
+    "arenaComparison": {
+      "testArena": {
+        "nodeDefense": 1.1,
+        "baseHp": 1000000000
+      },
+      "comparison": {
+        "activeUnitsPerSide": 10,
+        "maxSimSeconds": 120
+      }
     }
   },
   "display": {
@@ -964,6 +974,12 @@ export const GAME_CONFIG_DESCRIPTIONS = {
     },
     "levels": {
       "maxCertifiedLevel": "Highest built-in AI skill level exposed by certified level selectors."
+    },
+    "arenaComparison": {
+      "testArena.nodeDefense": "Default Test Arena node defense multiplier shared by browser and headless AI comparison.",
+      "testArena.baseHp": "Default HP assigned to both Test Arena bases and headless AI comparison bases.",
+      "comparison.activeUnitsPerSide": "Number of operational craft that headless AI comparison keeps active on each side.",
+      "comparison.maxSimSeconds": "Duration of each headless AI comparison game before deadline scoring."
     }
   },
   "display": {

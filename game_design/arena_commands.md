@@ -52,6 +52,9 @@ Phase entries support:
 
 - `templateNames`: wildcard patterns (`"*" = all templates`)
 - `battlefield.width`, `battlefield.height`, optional `battlefield.groundHeight`
+- `initialUnitsPerSide`: free starter population on each side
+- `maintainUnitsPerSide`: optional free, immediate operational-population target; disables paid spawning while active
+- `nodeDefense`, `baseHp`, `maxSimSeconds`, `playerGas`, `enemyGas`, `spawnBurst`, and `spawnMaxActive`
 
 ## Train One Combination (Recommended)
 

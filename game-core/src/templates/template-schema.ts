@@ -36,7 +36,14 @@ function resolveCatalog(partCatalog?: ReadonlyArray<PartDefinition>): PartDefini
 }
 
 function isUnitType(value: unknown): value is UnitType {
-  return value === "ground" || value === "air";
+  return value === "ground" || value === "air" || value === "base";
+}
+
+/** Base templates are battlefield fixtures and never belong in deployment/spawn rosters. */
+export function isDeployableTemplate<T extends Pick<UnitTemplate, "type">>(
+  template: T,
+): template is T & { type: Exclude<UnitType, "base"> } {
+  return template.type !== "base";
 }
 
 function isComponentId(value: unknown): value is ComponentId {

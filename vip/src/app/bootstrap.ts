@@ -40,6 +40,7 @@ import {
   deleteUserTemplateFromStore,
   fetchDefaultTemplatesFromStore,
   fetchUserTemplatesFromStore,
+  isDeployableTemplate,
   mergeTemplates,
   saveDefaultTemplateToStore,
   validateTemplateDetailed,
@@ -79,6 +80,10 @@ import {
 } from "./part-default-config.ts";
 import { levelCompositeConfig, makeCompositeAiController, type CompositeModuleSpec } from "../../../arena/src/ai/composite-controller.ts";
 import { MAX_CERTIFIED_AI_LEVEL } from "../../../game-core/src/ai/composite/level-modules.ts";
+import {
+  TEST_ARENA_BASE_HP,
+  TEST_ARENA_NODE_DEFENSE,
+} from "../../../game-core/src/config/ai/arena-comparison.ts";
 import {
   DEFAULT_BATTLE_VERTICAL_PADDING,
   MAX_BATTLE_VIEW_SCALE,
@@ -456,6 +461,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
   };
 
   const templates: UnitTemplate[] = createInitialTemplates();
+  const getDeployableTemplates = (): UnitTemplate[] => templates.filter(isDeployableTemplate);
   const parts: PartDefinition[] = [];
   const keys: KeyState = { a: false, d: false, w: false, s: false, space: false };
   const base: GameBase = { areaLevel: 1, refineries: 1, workshops: 1, labs: 0 };
@@ -477,20 +483,20 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     owner: "enemy",
     garrison: false,
     reward: 0,
-    defense: 1.1,
+    defense: TEST_ARENA_NODE_DEFENSE,
     testEnemyMinActive: 4,
     testEnemyInfiniteGas: true,
-    testBaseHpOverride: 1000000000,
+    testBaseHpOverride: TEST_ARENA_BASE_HP,
   };
   let testArenaEnemyCount = 4;
   let testArenaPlayerCount = 4;
-  let testArenaBaseHp = 1000000000;
+  let testArenaBaseHp = TEST_ARENA_BASE_HP;
   let testArenaBattlefieldWidth = BATTLEFIELD_WIDTH;
   let testArenaBattlefieldHeight = BATTLEFIELD_HEIGHT;
   let testArenaGroundHeight = Math.floor(BATTLEFIELD_HEIGHT * DEFAULT_GROUND_HEIGHT_RATIO);
   let testArenaBattlefieldUsesGlobalDefaults = true;
-  let testArenaEnemySpawnTemplateIds: number[] = templates.map((template) => template.id);
-  let testArenaPlayerSpawnTemplateIds: number[] = templates.map((template) => template.id);
+  let testArenaEnemySpawnTemplateIds: number[] = getDeployableTemplates().map((template) => template.id);
+  let testArenaPlayerSpawnTemplateIds: number[] = getDeployableTemplates().map((template) => template.id);
   let testArenaSpawnTemplateDropdownOpen = false;
   let testArenaAutoSpawnOnEnemySide = true;
   let testArenaAutoSpawnOnPlayerSide = true;
@@ -632,7 +638,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     ui: false,
   };
   let testArenaManualSpawnSide: TestArenaSide = "player";
-  let testArenaManualSpawnTemplateId = templates[0]?.id ?? 0;
+  let testArenaManualSpawnTemplateId = getDeployableTemplates()[0]?.id ?? 0;
   let testArenaHasStoredPlayerCraftSelection = false;
   let testArenaHasStoredEnemyCraftSelection = false;
   let testArenaTemplateStoreReady = false;
@@ -681,12 +687,18 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     craftAId < craftBId ? `${craftAId}:${craftBId}` : `${craftBId}:${craftAId}`
   );
   const ensureCraftArenaPairScenarios = (): void => {
+    craftArenaScenarios = craftArenaScenarios.filter((scenario) => {
+      const craftA = templates.find((template) => template.id === scenario.craftAId);
+      const craftB = templates.find((template) => template.id === scenario.craftBId);
+      return Boolean(craftA && craftB && isDeployableTemplate(craftA) && isDeployableTemplate(craftB));
+    });
     const existingPairs = new Set(craftArenaScenarios.map((scenario) => craftArenaPairKey(scenario.craftAId, scenario.craftBId)));
-    for (let indexA = 0; indexA < templates.length; indexA += 1) {
-      const craftA = templates[indexA];
+    const deployableTemplates = getDeployableTemplates();
+    for (let indexA = 0; indexA < deployableTemplates.length; indexA += 1) {
+      const craftA = deployableTemplates[indexA];
       if (!craftA) continue;
-      for (let indexB = indexA + 1; indexB < templates.length; indexB += 1) {
-        const craftB = templates[indexB];
+      for (let indexB = indexA + 1; indexB < deployableTemplates.length; indexB += 1) {
+        const craftB = deployableTemplates[indexB];
         if (!craftB) continue;
         const pairKey = craftArenaPairKey(craftA.id, craftB.id);
         if (existingPairs.has(pairKey)) continue;
@@ -1278,7 +1290,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
   const normalizeTestArenaZoomPercent = (value: number): number => Math.max(MIN_BATTLE_VIEW_SCALE * 100, Math.min(MAX_BATTLE_VIEW_SCALE * 100, Math.round(value)));
   const normalizeTestArenaGroundHeight = (value: number): number => Math.max(80, Math.min(Math.max(120, testArenaBattlefieldHeight - 40), Math.floor(value)));
   const normalizeTestArenaSpawnTemplateIds = (candidateIds: ReadonlyArray<number>): number[] => {
-    const validIds = new Set<number>(templates.map((template) => template.id));
+    const validIds = new Set<number>(getDeployableTemplates().map((template) => template.id));
     const normalized: number[] = [];
     for (const id of candidateIds) {
       if (!Number.isInteger(id) || id < 1 || (testArenaTemplateStoreReady && !validIds.has(id))) {
@@ -2402,10 +2414,10 @@ export function bootstrap(options: BootstrapOptions = {}): void {
 
     // Replay macro loop state.
     const rosterPreference = [1, 2, 3, 4, 5];
-    const availableTemplateIds = new Set<number>(templates.map((t) => t.id));
+    const availableTemplateIds = new Set<number>(getDeployableTemplates().map((t) => t.id));
     let roster = rosterPreference.filter((id) => availableTemplateIds.has(id));
     if (roster.length === 0) {
-      roster = templates.slice(0, 6).map((t) => t.id);
+      roster = getDeployableTemplates().slice(0, 6).map((t) => t.id);
     }
 
     const spawnRng = makeSeededRng((spec.seed ^ 0x2f7a1d) >>> 0);
@@ -2433,7 +2445,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
 
     const decide = (side: "player" | "enemy"): { templateId: number | null; intervalS: number; y?: number } => {
       const s = battle.getState();
-      const alive = s.units.filter((u) => u.alive && u.side === side).length;
+      const alive = s.units.filter((u) => u.type !== "base" && u.alive && u.side === side).length;
       const capRemaining = side === "enemy"
         ? Math.max(0, Math.min(s.enemyCap, spawnMaxActive) - alive)
         : Math.max(0, spawnMaxActive - alive);
@@ -2476,8 +2488,8 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         spawnTimer = 0;
         if ((spec.spawnMode ?? "mirrored-random") === "mirrored-random") {
           const s = battle.getState();
-          const alivePlayer = s.units.filter((u) => u.alive && u.side === "player").length;
-          const aliveEnemy = s.units.filter((u) => u.alive && u.side === "enemy").length;
+          const alivePlayer = s.units.filter((u) => u.type !== "base" && u.alive && u.side === "player").length;
+          const aliveEnemy = s.units.filter((u) => u.type !== "base" && u.alive && u.side === "enemy").length;
           let capRemainingPlayer = Math.max(0, spawnMaxActive - alivePlayer);
           let capRemainingEnemy = Math.max(0, Math.min(s.enemyCap, spawnMaxActive) - aliveEnemy);
           for (let i = 0; i < spawnBurst; i += 1) {
@@ -2664,16 +2676,17 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     if (testArenaHasStoredPlayerCraftSelection) {
       setTestArenaPlayerSpawnTemplateIds(testArenaPlayerSpawnTemplateIds);
     } else {
-      testArenaPlayerSpawnTemplateIds = templates.map((template) => template.id);
+      testArenaPlayerSpawnTemplateIds = getDeployableTemplates().map((template) => template.id);
     }
     if (testArenaHasStoredEnemyCraftSelection) {
       setTestArenaEnemySpawnTemplateIds(testArenaEnemySpawnTemplateIds);
     } else {
-      testArenaEnemySpawnTemplateIds = templates.map((template) => template.id);
+      testArenaEnemySpawnTemplateIds = getDeployableTemplates().map((template) => template.id);
     }
-    if (testArenaTemplateStoreReady && !templates.some((template) => template.id === testArenaManualSpawnTemplateId)) {
-      testArenaManualSpawnTemplateId = templates[0]?.id ?? 0;
+    if (testArenaTemplateStoreReady && !getDeployableTemplates().some((template) => template.id === testArenaManualSpawnTemplateId)) {
+      testArenaManualSpawnTemplateId = getDeployableTemplates()[0]?.id ?? 0;
     }
+    ensureCraftArenaPairScenarios();
     saveTestArenaSettings();
   };
 
@@ -2721,7 +2734,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
   };
   const deploymentQueue: DeploymentOrder[] = [];
   let autonomousSpawnCooldown = 0;
-  let defaultAutoTemplateIds: number[] = templates.slice(0, 3).map((template) => template.id);
+  let defaultAutoTemplateIds: number[] = getDeployableTemplates().slice(0, 3).map((template) => template.id);
 
   const getTemplateLogisticsSpeed = (template: UnitTemplate): number => Math.max(
     20,
@@ -2733,7 +2746,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     if (!state.active || state.outcome || state.nodeId === testArenaNode.id) return false;
     const template = templates.find((entry) => entry.id === templateId);
     if (!template || !state.nodeId) return false;
-    const friendlyActive = state.units.filter((unit) => unit.side === "player" && unit.alive).length;
+    const friendlyActive = state.units.filter((unit) => unit.type !== "base" && unit.side === "player" && unit.alive).length;
     if (friendlyActive + deploymentQueue.length >= campaign.getDeliveryCapacity()) {
       if (!autonomous) addLog("Delivery Center capacity reached", "warn");
       return false;
@@ -3363,7 +3376,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     if (!activeInfo) {
       return;
     }
-    const activeFriendly = battle.getState().units.filter((unit) => unit.side === "player" && unit.alive).length;
+    const activeFriendly = battle.getState().units.filter((unit) => unit.type !== "base" && unit.side === "player" && unit.alive).length;
     const capText = isUnlimitedResources() ? "INF" : `${armyCap(getCommanderSkillForCap())}`;
     activeInfo.textContent = `Friendly active: ${activeFriendly} / ${capText}`;
   };
@@ -4337,7 +4350,9 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     let achievableSpeed = 0;
     if (totalPower > 0) {
       const speedCap = Math.max(1, weightedSpeedCap / Math.max(1, capWeight));
-      const rawSpeed = editorDraft.type === "ground"
+      const rawSpeed = editorDraft.type === "base"
+        ? 0
+        : editorDraft.type === "ground"
         ? (totalPower / Math.max(16, totalMass)) * 74
         : Math.max(0, (totalPower / Math.max(16, totalMass)) * AIR_POWER_TO_SPEED_SCALE - AIR_HOLD_GRAVITY);
       achievableSpeed = Math.max(0, Math.min(speedCap, rawSpeed));
@@ -5277,7 +5292,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       <h3>Battle Ops</h3>
       <div class="small">Reinforcements travel in real time. Faster craft and closer controlled bases arrive sooner.</div>
       <div class="small">Delivery capacity: ${campaign.getDeliveryCapacity()} · ${deploymentQueue.length} en route. Off-screen AI uses selected default craft.</div>
-      <div class="deployment-roster">${templates.map((template) => `<label><input class="autoCraftToggle" type="checkbox" data-template-id="${template.id}" ${defaultAutoTemplateIds.includes(template.id) ? "checked" : ""} /> AI</label><button data-deploy="${template.id}">${template.name}</button>`).join("")}</div>
+      <div class="deployment-roster">${getDeployableTemplates().map((template) => `<label><input class="autoCraftToggle" type="checkbox" data-template-id="${template.id}" ${defaultAutoTemplateIds.includes(template.id) ? "checked" : ""} /> AI</label><button data-deploy="${template.id}">${template.name}</button>`).join("")}</div>
       <div class="queue-list">${deploymentQueue.map((order) => { const template = templates.find((entry) => entry.id === order.templateId); const progress = 100 * (1 - order.remainingSeconds / Math.max(1, order.totalSeconds)); return `<div class="queue-item"><div><strong>${escapeHtml(template?.name ?? "Craft")}</strong><span>${Math.ceil(order.remainingSeconds)}s · ${escapeHtml(order.sourceName)}</span></div><div class="progress-track"><i style="width:${progress}%"></i></div></div>`; }).join("") || `<div class="small">No craft en route.</div>`}</div>
       <div class="row">
         <span class="small">Spawn side:</span>
@@ -5292,7 +5307,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     const playerSpawnTemplateIdSet = new Set<number>(playerSpawnTemplateIds);
     const enemySpawnTemplateIds = getTestArenaEnemySpawnTemplateIds();
     const enemySpawnTemplateIdSet = new Set<number>(enemySpawnTemplateIds);
-    const spawnTemplateOptions = templates
+    const spawnTemplateOptions = getDeployableTemplates()
       .map((template) => `
         <span class="small test-arena-craft-name">${escapeHtml(template.name)}</span>
         <label class="small test-arena-spawn-option" title="Auto-spawn ${escapeHtml(template.name)} for Player">
@@ -5309,10 +5324,10 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     const playerSpawnSummary = playerSpawnTemplateIds.length <= 0 ? "None" : `${playerSpawnTemplateIds.length} selected`;
     const spawnDropdownOpenAttr = testArenaSpawnTemplateDropdownOpen ? "open" : "";
     const manualSectionOpenAttr = testArenaPanelSections.manual ? "open" : "";
-    if (testArenaTemplateStoreReady && !templates.some((template) => template.id === testArenaManualSpawnTemplateId)) {
-      testArenaManualSpawnTemplateId = templates[0]?.id ?? 0;
+    if (testArenaTemplateStoreReady && !getDeployableTemplates().some((template) => template.id === testArenaManualSpawnTemplateId)) {
+      testArenaManualSpawnTemplateId = getDeployableTemplates()[0]?.id ?? 0;
     }
-    const manualSpawnTemplateOptions = templates
+    const manualSpawnTemplateOptions = getDeployableTemplates()
       .map((template) => `<option value="${template.id}" ${template.id === testArenaManualSpawnTemplateId ? "selected" : ""}>${escapeHtml(template.name)}</option>`)
       .join("");
     const renderCompositeModelOptions = (side: TestArenaSide): string => {
@@ -5672,11 +5687,14 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         .join("");
       const groundTemplateRows = makeTemplateRows("ground");
       const airTemplateRows = makeTemplateRows("air");
+      const baseTemplateRows = makeTemplateRows("base");
       const templateOpenRows = `
         <div><strong>Ground</strong></div>
         ${groundTemplateRows || `<div class="small">No ground template available.</div>`}
         <div style="margin-top:8px;"><strong>Air</strong></div>
         ${airTemplateRows || `<div class="small">No air template available.</div>`}
+        <div style="margin-top:8px;"><strong>Base</strong></div>
+        ${baseTemplateRows || `<div class="small">No base template available.</div>`}
       `;
       editorPanel.innerHTML = `
         <div class="panel-heading"><div><span class="eyebrow">Object authoring</span><h2>Craft Designer</h2></div><span class="health-pill"><i></i>${editorDraft.type}</span></div>
@@ -5705,6 +5723,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
             <select id="editorType">
               <option value="ground" ${editorDraft.type === "ground" ? "selected" : ""}>Ground</option>
               <option value="air" ${editorDraft.type === "air" ? "selected" : ""}>Air</option>
+              <option value="base" ${editorDraft.type === "base" ? "selected" : ""}>Base</option>
             </select>
           </label>
         </div>
@@ -6961,7 +6980,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     });
     getOptionalElement<HTMLSelectElement>("#editorType")?.addEventListener("change", (event) => {
       const value = (event.currentTarget as HTMLSelectElement).value;
-      editorDraft.type = value === "air" ? "air" : "ground";
+      editorDraft.type = value === "air" ? "air" : value === "base" ? "base" : "ground";
       recomputeEditorDraftGasCost();
       updateSelectedInfo();
     });
@@ -9093,7 +9112,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
 
       autonomousSpawnCooldown = Math.max(0, autonomousSpawnCooldown - dt);
       if (screen !== "battle" && autonomousSpawnCooldown <= 0 && defaultAutoTemplateIds.length > 0) {
-        const activeFriendly = state.units.filter((unit) => unit.side === "player" && unit.alive).length;
+        const activeFriendly = state.units.filter((unit) => unit.type !== "base" && unit.side === "player" && unit.alive).length;
         if (activeFriendly + deploymentQueue.length < campaign.getDeliveryCapacity()) {
           const affordable = defaultAutoTemplateIds.filter((id) => {
             const template = templates.find((entry) => entry.id === id);

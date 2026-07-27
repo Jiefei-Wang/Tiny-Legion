@@ -20,6 +20,12 @@ import {
   BATTLEFIELD_WIDTH,
   DEFAULT_GROUND_HEIGHT,
 } from "../game-core/src/config/balance/battlefield.ts";
+import {
+  AI_COMPARISON_ACTIVE_UNITS_PER_SIDE,
+  AI_COMPARISON_MAX_SIM_SECONDS,
+  TEST_ARENA_BASE_HP,
+  TEST_ARENA_NODE_DEFENSE,
+} from "../game-core/src/config/ai/arena-comparison.ts";
 import type { MatchAiSpec, MatchResult, MatchSpec } from "../arena/src/match/match-types.ts";
 import {
   audioDir as gameCoreAudioDir,
@@ -1096,7 +1102,7 @@ function arenaModelPlugin() {
     updatedAtMs: number;
   };
   type RatingStore = {
-    version: 8;
+    version: 9;
     updatedAt: string;
     ratings: Record<string, RatingEntry>;
     matchupRounds: Record<string, number>;
@@ -1127,6 +1133,7 @@ function arenaModelPlugin() {
   type LeaderboardPhaseScenario = {
     withBase: boolean;
     initialUnitsPerSide: number;
+    maintainUnitsPerSide: number;
     templateNames: string[];
     battlefield?: {
       width?: number;
@@ -1275,16 +1282,17 @@ function arenaModelPlugin() {
   const loadLeaderboardPhaseScenario = (): LeaderboardPhaseScenario => {
     const fallback: LeaderboardPhaseScenario = {
       withBase: true,
-      initialUnitsPerSide: 4,
+      initialUnitsPerSide: AI_COMPARISON_ACTIVE_UNITS_PER_SIDE,
+      maintainUnitsPerSide: AI_COMPARISON_ACTIVE_UNITS_PER_SIDE,
       templateNames: ["*"],
       battlefield: { width: BATTLEFIELD_WIDTH, height: BATTLEFIELD_HEIGHT, groundHeight: DEFAULT_GROUND_HEIGHT },
-      maxSimSeconds: 180,
-      nodeDefense: 1,
-      baseHp: 1200,
-      playerGas: 10000,
-      enemyGas: 10000,
+      maxSimSeconds: AI_COMPARISON_MAX_SIM_SECONDS,
+      nodeDefense: TEST_ARENA_NODE_DEFENSE,
+      baseHp: TEST_ARENA_BASE_HP,
+      playerGas: 0,
+      enemyGas: 0,
       spawnBurst: 1,
-      spawnMaxActive: 5,
+      spawnMaxActive: AI_COMPARISON_ACTIVE_UNITS_PER_SIDE,
     };
     if (!existsSync(phaseConfigFile)) {
       return fallback;
@@ -1309,6 +1317,7 @@ function arenaModelPlugin() {
       }
       const withBase = Boolean(source.withBase);
       const initialUnitsPerSide = Math.max(1, Math.floor(typeof source.initialUnitsPerSide === "number" ? source.initialUnitsPerSide : fallback.initialUnitsPerSide));
+      const maintainUnitsPerSide = Math.max(0, Math.floor(typeof source.maintainUnitsPerSide === "number" ? source.maintainUnitsPerSide : fallback.maintainUnitsPerSide));
       const templateNames = Array.isArray(source.templateNames) && source.templateNames.length > 0
         ? source.templateNames.map((v) => String(v)).filter((v) => v.trim().length > 0)
         : fallback.templateNames;
@@ -1325,7 +1334,7 @@ function arenaModelPlugin() {
         : fallback.battlefield;
       // Parse additional match parameters from config
       const maxSimSeconds = typeof source.maxSimSeconds === "number" ? Math.max(10, Math.floor(source.maxSimSeconds)) : fallback.maxSimSeconds;
-      const nodeDefense = typeof source.nodeDefense === "number" ? Math.max(0, Math.floor(source.nodeDefense)) : fallback.nodeDefense;
+      const nodeDefense = typeof source.nodeDefense === "number" ? Math.max(0, source.nodeDefense) : fallback.nodeDefense;
       const baseHp = typeof source.baseHp === "number" ? Math.max(100, Math.floor(source.baseHp)) : fallback.baseHp;
       const playerGas = typeof source.playerGas === "number" ? Math.max(0, Math.floor(source.playerGas)) : fallback.playerGas;
       const enemyGas = typeof source.enemyGas === "number" ? Math.max(0, Math.floor(source.enemyGas)) : fallback.enemyGas;
@@ -1334,6 +1343,7 @@ function arenaModelPlugin() {
       return {
         withBase,
         initialUnitsPerSide,
+        maintainUnitsPerSide,
         templateNames,
         ...(battlefield ? { battlefield } : {}),
         maxSimSeconds,
@@ -1351,17 +1361,17 @@ function arenaModelPlugin() {
 
   const loadRatingStore = (): RatingStore => {
     if (!existsSync(leaderboardFile)) {
-      return { version: 8, updatedAt: new Date().toISOString(), ratings: {}, matchupRounds: {}, matchupResults: {} };
+      return { version: 9, updatedAt: new Date().toISOString(), ratings: {}, matchupRounds: {}, matchupResults: {} };
     }
     try {
       const raw = readFileSync(leaderboardFile, "utf8");
       const parsed = JSON.parse(raw) as unknown;
       if (!parsed || typeof parsed !== "object") {
-        return { version: 8, updatedAt: new Date().toISOString(), ratings: {}, matchupRounds: {}, matchupResults: {} };
+        return { version: 9, updatedAt: new Date().toISOString(), ratings: {}, matchupRounds: {}, matchupResults: {} };
       }
       const obj = parsed as Record<string, unknown>;
-      if (obj.version !== 8) {
-        return { version: 8, updatedAt: new Date().toISOString(), ratings: {}, matchupRounds: {}, matchupResults: {} };
+      if (obj.version !== 9) {
+        return { version: 9, updatedAt: new Date().toISOString(), ratings: {}, matchupRounds: {}, matchupResults: {} };
       }
       const ratingsRaw = (obj.ratings && typeof obj.ratings === "object") ? obj.ratings as Record<string, unknown> : {};
       const matchupRaw = (obj.matchupRounds && typeof obj.matchupRounds === "object")
@@ -1404,14 +1414,14 @@ function arenaModelPlugin() {
         };
       }
       return {
-        version: 8,
+        version: 9,
         updatedAt: typeof obj.updatedAt === "string" ? obj.updatedAt : new Date().toISOString(),
         ratings,
         matchupRounds,
         matchupResults,
       };
     } catch {
-      return { version: 8, updatedAt: new Date().toISOString(), ratings: {}, matchupRounds: {}, matchupResults: {} };
+      return { version: 9, updatedAt: new Date().toISOString(), ratings: {}, matchupRounds: {}, matchupResults: {} };
     }
   };
 
@@ -1925,6 +1935,7 @@ function arenaModelPlugin() {
                   scenario: {
                     withBase: phaseScenario.withBase,
                     initialUnitsPerSide: phaseScenario.initialUnitsPerSide,
+                    maintainUnitsPerSide: phaseScenario.maintainUnitsPerSide,
                   },
                   templateNames: phaseScenario.templateNames,
                   ...(phaseScenario.battlefield ? { battlefield: phaseScenario.battlefield } : {}),
@@ -2003,7 +2014,7 @@ function arenaModelPlugin() {
           return;
         }
         try {
-          const store: RatingStore = { version: 8, updatedAt: new Date().toISOString(), ratings: {}, matchupRounds: {}, matchupResults: {} };
+          const store: RatingStore = { version: 9, updatedAt: new Date().toISOString(), ratings: {}, matchupRounds: {}, matchupResults: {} };
           saveRatingStore(store);
           res.setHeader("content-type", "application/json");
           res.end(JSON.stringify({ ok: true, message: "Leaderboard scores reset" }));

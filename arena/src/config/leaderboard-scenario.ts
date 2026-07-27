@@ -5,10 +5,19 @@ import {
   BATTLEFIELD_WIDTH,
   DEFAULT_GROUND_HEIGHT,
 } from "../../../game-core/src/config/balance/battlefield.ts";
+import {
+  AI_COMPARISON_BASE_WORTH_UNITS,
+  AI_COMPARISON_MAX_SIM_SECONDS,
+  AI_COMPARISON_SPAWN_COUNT_PER_SIDE,
+  AI_COMPARISON_SPAWN_INTERVAL_SECONDS,
+  TEST_ARENA_BASE_HP,
+  TEST_ARENA_NODE_DEFENSE,
+} from "../../../game-core/src/config/ai/arena-comparison.ts";
 
 export type LeaderboardScenario = {
   withBase: boolean;
   initialUnitsPerSide: number;
+  scheduledMirroredWaves: boolean;
   templateNames: string[];
   battlefield: { width: number; height: number; groundHeight?: number };
   maxSimSeconds: number;
@@ -17,21 +26,24 @@ export type LeaderboardScenario = {
   playerGas: number;
   enemyGas: number;
   spawnBurst: number;
-  spawnMaxActive: number;
+  spawnIntervalSeconds: number;
+  baseWorthUnits: number;
 };
 
 const fallback: LeaderboardScenario = {
   withBase: true,
-  initialUnitsPerSide: 4,
+  initialUnitsPerSide: 0,
+  scheduledMirroredWaves: true,
   templateNames: ["*"],
   battlefield: { width: BATTLEFIELD_WIDTH, height: BATTLEFIELD_HEIGHT, groundHeight: DEFAULT_GROUND_HEIGHT },
-  maxSimSeconds: 120,
-  nodeDefense: 1,
-  baseHp: 1200,
-  playerGas: 3000,
-  enemyGas: 3000,
-  spawnBurst: 1,
-  spawnMaxActive: 4,
+  maxSimSeconds: AI_COMPARISON_MAX_SIM_SECONDS,
+  nodeDefense: TEST_ARENA_NODE_DEFENSE,
+  baseHp: TEST_ARENA_BASE_HP,
+  playerGas: 0,
+  enemyGas: 0,
+  spawnBurst: AI_COMPARISON_SPAWN_COUNT_PER_SIDE,
+  spawnIntervalSeconds: AI_COMPARISON_SPAWN_INTERVAL_SECONDS,
+  baseWorthUnits: AI_COMPARISON_BASE_WORTH_UNITS,
 };
 
 const finite = (value: unknown, defaultValue: number): number => typeof value === "number" && Number.isFinite(value) ? value : defaultValue;
@@ -57,7 +69,9 @@ export function loadLeaderboardScenario(configPath = defaultConfigPath()): Leade
       : fallback.templateNames;
     return {
       withBase: phase.withBase !== false,
-      initialUnitsPerSide: Math.max(1, Math.floor(finite(phase.initialUnitsPerSide, fallback.initialUnitsPerSide))),
+      // Comparison rules are authored in Global Settings (AI), not duplicated in phase JSON.
+      initialUnitsPerSide: 0,
+      scheduledMirroredWaves: true,
       templateNames: templateNames.length > 0 ? templateNames : fallback.templateNames,
       battlefield: {
         width: useGlobalBattlefield
@@ -70,13 +84,14 @@ export function loadLeaderboardScenario(configPath = defaultConfigPath()): Leade
           ? DEFAULT_GROUND_HEIGHT
           : Math.max(80, Math.floor(finite(battlefieldRaw.groundHeight, fallback.battlefield.groundHeight ?? DEFAULT_GROUND_HEIGHT))),
       },
-      maxSimSeconds: Math.max(10, Math.floor(finite(phase.maxSimSeconds, fallback.maxSimSeconds))),
-      nodeDefense: Math.max(0, Math.floor(finite(phase.nodeDefense, fallback.nodeDefense))),
+      maxSimSeconds: AI_COMPARISON_MAX_SIM_SECONDS,
+      nodeDefense: Math.max(0, finite(phase.nodeDefense, fallback.nodeDefense)),
       baseHp: Math.max(100, Math.floor(finite(phase.baseHp, fallback.baseHp))),
       playerGas: Math.max(0, Math.floor(finite(phase.playerGas, fallback.playerGas))),
       enemyGas: Math.max(0, Math.floor(finite(phase.enemyGas, fallback.enemyGas))),
-      spawnBurst: Math.max(1, Math.floor(finite(phase.spawnBurst, fallback.spawnBurst))),
-      spawnMaxActive: Math.max(1, Math.floor(finite(phase.spawnMaxActive, fallback.spawnMaxActive))),
+      spawnBurst: AI_COMPARISON_SPAWN_COUNT_PER_SIDE,
+      spawnIntervalSeconds: AI_COMPARISON_SPAWN_INTERVAL_SECONDS,
+      baseWorthUnits: AI_COMPARISON_BASE_WORTH_UNITS,
     };
   } catch {
     return { ...fallback, battlefield: { ...fallback.battlefield } };

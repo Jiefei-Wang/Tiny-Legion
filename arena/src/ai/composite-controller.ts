@@ -33,6 +33,7 @@ import { clamp } from "../../../game-core/src/simulation/physics/impulse-model.t
 import { canOperate } from "../../../game-core/src/simulation/units/control-unit-rules.ts";
 import type { Params, ParamSchema } from "./ai-schema.ts";
 import type { MatchAiSpec } from "../match/match-types.ts";
+import type { UnitType } from "../../../game-core/src/types.ts";
 
 export type CompositeModuleSpec = {
   familyId: string;
@@ -57,7 +58,7 @@ function pickInt(params: Params, key: string, fallback: number): number {
   return Math.floor(pickNumber(params, key, fallback));
 }
 
-function canHitByAxis(unit: { y: number; type: "ground" | "air" }, targetY: number, targetType: "ground" | "air"): boolean {
+function canHitByAxis(unit: { y: number; type: UnitType }, targetY: number, targetType: UnitType): boolean {
   if (unit.type === "air" || targetType === "air") {
     return true;
   }

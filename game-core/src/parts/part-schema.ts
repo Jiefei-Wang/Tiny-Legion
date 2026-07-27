@@ -76,6 +76,10 @@ function collectPartTags(part: PartDefinition): Set<string> {
 }
 
 export function isPartCompatibleWithUnitType(part: PartDefinition, unitType: UnitType): boolean {
+  const isEngine = part.partType === "engine" || part.properties?.isEngine === true || COMPONENTS[part.baseComponent].type === "engine";
+  if (unitType === "base") {
+    return !isEngine;
+  }
   const tags = collectPartTags(part);
   const hasGroundTag = tags.has("ground");
   const hasAirTag = tags.has("air");
@@ -83,7 +87,6 @@ export function isPartCompatibleWithUnitType(part: PartDefinition, unitType: Uni
     return unitType === "ground" ? hasGroundTag : hasAirTag;
   }
 
-  const isEngine = part.partType === "engine" || part.properties?.isEngine === true || COMPONENTS[part.baseComponent].type === "engine";
   if (!isEngine) {
     return true;
   }

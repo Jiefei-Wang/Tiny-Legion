@@ -11,6 +11,8 @@ import { recalcMass } from "../physics/mass-cache.ts";
 import { getControlUnit, validateSingleControlUnit } from "./control-unit-rules.ts";
 import type { LoaderState, PartDefinition, Side, UnitInstance, UnitTemplate } from "../../types.ts";
 
+export const STANDARD_BASE_TEMPLATE_ID = 6;
+
 function resolveCatalog(partCatalog?: ReadonlyArray<PartDefinition>): PartDefinition[] {
   const defaults = createDefaultPartDefinitions();
   if (!partCatalog || partCatalog.length <= 0) {
@@ -88,6 +90,20 @@ export function createInitialTemplates(): UnitTemplate[] {
         { component: "control", partId: 3, cell: 2, x: 0, y: 0 },
         { component: "explosiveShell", partId: 7, cell: 3, x: 1, y: 0 },
         { component: "cannonLoader", partId: 2, cell: 8, x: 1, y: 1 },
+      ],
+    },
+    {
+      id: STANDARD_BASE_TEMPLATE_ID,
+      name: "standard base",
+      type: "base",
+      gasCost: 0,
+      structure: Array.from({ length: 16 }, (_, index) => ({
+        partId: 12,
+        x: index % 4,
+        y: Math.floor(index / 4),
+      })),
+      attachments: [
+        { component: "control", partId: 3, cell: 9, x: 1, y: 2 },
       ],
     },
   ];
@@ -306,9 +322,11 @@ export function instantiateUnit(
     y,
     vx: 0,
     vy: 0,
-    accel: template.type === "ground" ? 105 : 120,
-    maxSpeed: template.type === "ground" ? 100 : 135,
-    turnDrag: template.type === "ground" ? 0.9 : 0.93,
+    fixedX: template.type === "base" ? x : null,
+    fixedY: template.type === "base" ? y : null,
+    accel: template.type === "base" ? 0 : template.type === "ground" ? 105 : 120,
+    maxSpeed: template.type === "base" ? 0 : template.type === "ground" ? 100 : 135,
+    turnDrag: template.type === "base" ? 0.8 : template.type === "ground" ? 0.9 : 0.93,
     radius: (() => {
       const xs = structure.map((cell) => cell.x);
       const ys = structure.map((cell) => cell.y);
