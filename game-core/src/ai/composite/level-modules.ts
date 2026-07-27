@@ -4,6 +4,7 @@ import { getStructureCellSize } from "../../config/balance/battlefield.ts";
 import { MAX_CERTIFIED_AI_LEVEL } from "../../config/ai/levels.ts";
 import { canOperate } from "../../simulation/units/control-unit-rules.ts";
 import { solveBallisticAim } from "../shooting/ballistic-aim.ts";
+import { createUnifiedLevelShootAi } from "../shooting/unified-level-shoot.ts";
 import {
   assessProjectileThreats,
   assessProjectileThreatsAdvanced,
@@ -2307,24 +2308,11 @@ function createCapabilityAwareShootAi(level: AiLevel): ShootAiModule {
   };
 }
 
+// Retained as internal compatibility/reference implementations for saved AI
+// research artifacts; certified level resolution no longer calls them.
+void createCadencedShootAi;
+void createCapabilityAwareShootAi;
+
 export function createLevelShootAi(level: AiLevel): ShootAiModule {
-  if (level >= 97 && level <= 104) {
-    return createCadencedShootAi(
-      createCapabilityAwareShootAi(57),
-      REACTION_INTERVALS_S[level - 97]!,
-    );
-  }
-  if (level >= 42 && level <= 49) {
-    return createCadencedShootAi(
-      createCapabilityAwareShootAi(12),
-      REACTION_INTERVALS_S[level - 42]!,
-    );
-  }
-  if (level >= 50 && level <= 52) {
-    return createCadencedShootAi(
-      createCapabilityAwareShootAi(12),
-      level === 50 ? 1.5 : level === 51 ? 1.8 : 2.2,
-    );
-  }
-  return createCapabilityAwareShootAi(level);
+  return createUnifiedLevelShootAi(level);
 }

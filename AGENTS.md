@@ -19,6 +19,7 @@ If you are a new coding agent/session, read this file first, then read:
 - Command reference: `game_design/game_command.md`
 - Composite AI arena training command: `npm --prefix arena run train:composite -- --phaseSeeds 16 --nUnits 4`
 - Unified training wrapper script: `./train_ai.sh help` (module-only and full composite compare/optimization with per-module source selection)
+- Unified shooting verification: `npm --prefix arena run verify:shooting-ai` (exact 1,000-shot proof per weapon plus aggregate L1-L5 50/60/70/80/90% calibration). The L1-L5 aggregate result must remain within +/-1.5 percentage points of its target; failure blocks completion of shooting-AI changes.
 
 ## Static Configuration Workflow
 

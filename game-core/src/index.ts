@@ -19,6 +19,8 @@ export * from "./ai/composite/craft-profile.ts";
 export * from "./ai/composite/level-modules.ts";
 export * from "./ai/movement/threat-movement.ts";
 export * from "./ai/shooting/ballistic-aim.ts";
+export * from "./ai/shooting/unified-target-shoot.ts";
+export * from "./ai/shooting/unified-level-shoot.ts";
 export * from "./ai/shooting/weapon-ai-policy.ts";
 export * from "./ai/targeting/target-selector.ts";
 

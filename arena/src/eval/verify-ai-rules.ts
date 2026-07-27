@@ -18,8 +18,6 @@ import {
 } from "../../../game-core/src/config/ai/arena-comparison.ts";
 import {
   hasEnemyWithinAwareness,
-  isImmediateLoadedKillOpportunity,
-  shouldPreferImmediateKillTarget,
 } from "../../../game-core/src/ai/composite/level-modules.ts";
 import type { MatchResult } from "../match/match-types.ts";
 import type { MatchAiSpec } from "../match/match-types.ts";
@@ -77,32 +75,13 @@ assert.equal(
   "the base may be considered when every enemy is outside awareness",
 );
 
-assert.equal(
-  isImmediateLoadedKillOpportunity(180, 400, 2, 3),
-  true,
-  "L5 should recognize a nearby target disableable by the loaded magazine",
-);
-assert.equal(
-  isImmediateLoadedKillOpportunity(180, 400, 4, 3),
-  false,
-  "L5 should not classify a target as an immediate loaded kill when reload is required",
-);
-assert.equal(
-  shouldPreferImmediateKillTarget(true, 900, 180),
-  true,
-  "L5 should fire at a much closer kill opportunity even when the remote target is reachable",
-);
-assert.equal(
-  shouldPreferImmediateKillTarget(true, 220, 180),
-  false,
-  "L5 should preserve a similarly close strategic target",
-);
-
-assert.equal(
-  levelCompositeConfig(5).shoot.familyId,
-  "level-93-shoot",
-  "built-in Level 5 must use per-weapon strategic-target intercept fallback",
-);
+for (let level = 1; level <= 5; level += 1) {
+  assert.equal(
+    levelCompositeConfig(level).shoot.familyId,
+    `unified-level-${level}-shoot`,
+    `built-in Level ${level} must use the calibrated unified shooting core`,
+  );
+}
 
 const destroyedCountResult = compareMatchResult(result({ destroyedByPlayer: 12, destroyedByEnemy: 7 }));
 assert.equal(destroyedCountResult.outcomeA, 1, "the AI that destroys more weighted units must win");

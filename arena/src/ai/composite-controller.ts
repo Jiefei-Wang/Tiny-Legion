@@ -10,6 +10,8 @@ import {
   createBaselineShootAi,
   createBaselineTargetAi,
 } from "../../../game-core/src/ai/composite/baseline-modules.ts";
+import { createUnifiedTargetShootAi } from "../../../game-core/src/ai/shooting/unified-target-shoot.ts";
+import { createUnifiedLevelShootAi } from "../../../game-core/src/ai/shooting/unified-level-shoot.ts";
 import {
   createSkillTierMovementAi,
   createSkillTierShootAi,
@@ -470,6 +472,8 @@ function createMovementModule(spec: CompositeModuleSpec): MovementAiModule {
 
 function createShootModule(spec: CompositeModuleSpec): ShootAiModule {
   const familyId = spec.familyId.trim().toLowerCase();
+  const unifiedLevelMatch = /^unified-level-(\d+)-shoot$/.exec(familyId);
+  if (unifiedLevelMatch) return createUnifiedLevelShootAi(Number.parseInt(unifiedLevelMatch[1] ?? "1", 10));
   const level = parseLevel(familyId, "shoot");
   if (level) return createLevelShootAi(level);
   const tier = parseSkillTier(familyId, "shoot");
@@ -488,6 +492,7 @@ function createShootModule(spec: CompositeModuleSpec): ShootAiModule {
     const alphas = new Array(11).fill(0).map((_, index) => pickNumber(spec.params, `shoot.alpha${index + 1}`, (11 - index) / 66));
     return createWeightedLagShootAi(alphas);
   }
+  if (familyId === "unified-shoot") return createUnifiedTargetShootAi();
   return createBaselineShootAi();
 }
 
@@ -527,41 +532,41 @@ export function levelCompositeConfig(level: number): CompositeConfig {
     return {
       target: { familyId: "level-2-target", params: {} },
       movement: { familyId: "level-6-movement", params: {} },
-      shoot: { familyId: "level-1-shoot", params: {} },
+      shoot: { familyId: "unified-level-1-shoot", params: {} },
     };
   }
   if (normalized === 2) {
     return {
       target: { familyId: "level-47-target", params: {} },
       movement: { familyId: "level-95-movement", params: {} },
-      shoot: { familyId: "level-42-shoot", params: {} },
+      shoot: { familyId: "unified-level-2-shoot", params: {} },
     };
   }
   if (normalized === 3) {
     return {
       target: { familyId: "level-47-target", params: {} },
       movement: { familyId: "level-95-movement", params: {} },
-      shoot: { familyId: "level-49-shoot", params: {} },
+      shoot: { familyId: "unified-level-3-shoot", params: {} },
     };
   }
   if (normalized === 4) {
     return {
       target: { familyId: "level-47-target", params: {} },
       movement: { familyId: "level-97-movement", params: {} },
-      shoot: { familyId: "level-54-shoot", params: {} },
+      shoot: { familyId: "unified-level-4-shoot", params: {} },
     };
   }
   if (normalized === 5) {
     return {
       target: { familyId: "level-47-target", params: {} },
       movement: { familyId: "level-99-movement", params: {} },
-      shoot: { familyId: "level-93-shoot", params: {} },
+      shoot: { familyId: "unified-level-5-shoot", params: {} },
     };
   }
   return {
     target: { familyId: `level-${normalized}-target`, params: {} },
     movement: { familyId: `level-${normalized}-movement`, params: {} },
-    shoot: { familyId: `level-${normalized}-shoot`, params: {} },
+    shoot: { familyId: `unified-level-${normalized}-shoot`, params: {} },
   };
 }
 

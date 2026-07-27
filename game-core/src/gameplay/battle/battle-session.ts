@@ -90,6 +90,13 @@ export interface BattleSessionOptions {
   movementSpeedMultiplier?: number;
   battlefieldWidth?: number;
   battlefieldHeight?: number;
+  /** Headless-only rules used to verify weapon-independent shooting behavior. */
+  weaponVerificationOverrides?: {
+    unlimitedRange?: boolean;
+    disableAngleLimits?: boolean;
+    spreadDeg?: number;
+    disableUnitSeparation?: boolean;
+  };
 }
 
 export type BattleAudioEvent =
@@ -119,6 +126,15 @@ export type BattleAudioEvent =
 export interface BattleLossStats {
   player: { destroyedObjects: number; gasWasted: number };
   enemy: { destroyedObjects: number; gasWasted: number };
+}
+
+export interface BattleProjectileHitEvent {
+  sourceUnitId: string;
+  sourceWeaponAttachmentId: number | null;
+  targetUnitId: string;
+  targetStructureCellId: number | null;
+  direct: boolean;
+  projectileClass: ProjectileClass;
 }
 
 type UnitProjectileHit = {
@@ -164,6 +180,8 @@ export class BattleSession {
   private audioEvents: BattleAudioEvent[];
   private movementSpeedMultiplier: number;
   private lossStats: BattleLossStats;
+  private projectileHitEvents: BattleProjectileHitEvent[];
+  private readonly weaponVerificationOverrides: NonNullable<BattleSessionOptions["weaponVerificationOverrides"]>;
 
   constructor(canvas: HTMLCanvasElement, hooks: BattleHooks, templates: UnitTemplate[], options: BattleSessionOptions = {}) {
     const context = canvas.getContext("2d");
@@ -216,6 +234,8 @@ export class BattleSession {
     this.audioEvents = [];
     this.movementSpeedMultiplier = this.normalizeMovementSpeedMultiplier(options.movementSpeedMultiplier);
     this.lossStats = this.createEmptyLossStats();
+    this.projectileHitEvents = [];
+    this.weaponVerificationOverrides = options.weaponVerificationOverrides ?? {};
   }
 
   public getMovementSpeedMultiplier(): number {
@@ -236,6 +256,13 @@ export class BattleSession {
       player: { ...this.lossStats.player },
       enemy: { ...this.lossStats.enemy },
     };
+  }
+
+  /** Structured combat telemetry for renderers, tests, and headless evaluators. */
+  public consumeProjectileHitEvents(): BattleProjectileHitEvent[] {
+    const events = this.projectileHitEvents;
+    this.projectileHitEvents = [];
+    return events;
   }
 
   public getSelection(): { selectedUnitId: string | null; playerControlledId: string | null } {
@@ -649,6 +676,7 @@ export class BattleSession {
   public start(node: MapNode): void {
     this.state = this.createEmptyBattle();
     this.lossStats = this.createEmptyLossStats();
+    this.projectileHitEvents = [];
     this.state.active = true;
     this.state.nodeId = node.id;
     this.state.enemyCap = Math.max(3, Math.ceil(node.defense * 3.2 + 1));
@@ -697,6 +725,7 @@ export class BattleSession {
   public resetToMapMode(): void {
     this.state = this.createEmptyBattle();
     this.lossStats = this.createEmptyLossStats();
+    this.projectileHitEvents = [];
     this.selectedUnitId = null;
     this.playerControlledId = null;
     this.manualFireHeld = false;
@@ -930,7 +959,9 @@ export class BattleSession {
         }
       }
     }
-    this.resolveUnitSeparation();
+    if (this.weaponVerificationOverrides.disableUnitSeparation !== true) {
+      this.resolveUnitSeparation();
+    }
     this.restoreFixedBasePositions();
 
     for (const projectile of this.state.projectiles) {
@@ -957,7 +988,9 @@ export class BattleSession {
         }
       }
       const instantBeam = projectile.projectileClass === "laser";
-      const remainingRange = Math.max(0, projectile.maxDistance - projectile.traveledDistance);
+      const remainingRange = projectile.unlimitedRange
+        ? Math.hypot(this.battlefieldWidth, this.battlefieldHeight) * 2
+        : Math.max(0, projectile.maxDistance - projectile.traveledDistance);
       const projectileSpeed = Math.max(1, Math.hypot(projectile.vx, projectile.vy));
       const stepX = instantBeam ? (projectile.vx / projectileSpeed) * remainingRange : projectile.vx * dt;
       if (!instantBeam) {
@@ -967,11 +1000,12 @@ export class BattleSession {
       projectile.x += stepX;
       projectile.y += stepY;
       projectile.traveledDistance += Math.hypot(stepX, stepY);
-      const expireAfterCollision = instantBeam && projectile.traveledDistance >= projectile.maxDistance;
-      if (!instantBeam && projectile.traveledDistance >= projectile.maxDistance) {
+      const expireAfterCollision = instantBeam && (projectile.unlimitedRange || projectile.traveledDistance >= projectile.maxDistance);
+      if (!projectile.unlimitedRange && !instantBeam && projectile.traveledDistance >= projectile.maxDistance) {
         projectile.ttl = -1;
       }
       const exceededGroundDropLimit = projectile.sourceUnitType === "ground" &&
+        !projectile.unlimitedRange &&
         projectile.projectileClass !== "missile" &&
         projectile.initialVy < 0 &&
         projectile.y >= projectile.fireOriginY + GROUND_PROJECTILE_MAX_DROP_BELOW_FIRE_Y;
@@ -1017,6 +1051,7 @@ export class BattleSession {
               deliveredDamage = applyHitToUnit(target, impactDamage, projectile.hitImpulse, impactSide, hitCellId, hit.ignoreArmor).deliveredDamage;
             }
             this.queueImpactAudioEvent(projectile, hitCell, impactDamage, deliveredDamage, hit.ignoreArmor);
+            this.queueProjectileHitEvent(projectile, target.id, hitCellId, true);
             projectile.hitPartKeys.push(hitPartKey);
             this.hooks.addLog(`Hit ${target.name} (air) by projectile from ${projectile.sourceId}`, "warn");
             this.spawnBreakDebris(target, beforeDestroyed, beforeAliveAttachments, wasAlive);
@@ -1067,6 +1102,7 @@ export class BattleSession {
             deliveredDamage = applyHitToUnit(target, impactDamage, projectile.hitImpulse, impactSide, hitCellId, hit.ignoreArmor).deliveredDamage;
           }
           this.queueImpactAudioEvent(projectile, hitCell, impactDamage, deliveredDamage, hit.ignoreArmor);
+          this.queueProjectileHitEvent(projectile, target.id, hitCellId, true);
           projectile.hitPartKeys.push(hitPartKey);
           this.hooks.addLog(`Hit ${target.name} (ground) by projectile from ${projectile.sourceId}`, "warn");
           this.spawnBreakDebris(target, beforeDestroyed, beforeAliveAttachments, wasAlive);
@@ -1823,6 +1859,7 @@ export class BattleSession {
       if (!this.shouldIgnoreDamageForUnit(target)) {
         applyHitToUnit(target, splashDamage, projectile.hitImpulse * 0.45, impactSide, hitCellId, splashHit?.ignoreArmor ?? false);
       }
+      this.queueProjectileHitEvent(projectile, target.id, hitCellId, false);
       this.spawnBreakDebris(target, beforeDestroyed, beforeAliveAttachments, wasAlive);
       if (projectile.controlImpairDuration > 0) {
         this.applyControlImpair(target, projectile.controlImpairFactor, projectile.controlImpairDuration * 0.8);
@@ -1844,6 +1881,7 @@ export class BattleSession {
     requestedAngleRad: number,
     intendedTargetId: string | null,
     intendedTargetY: number | null,
+    disableTracking = false,
   ): boolean {
     if (slot < 0 || slot >= unit.weaponAttachmentIds.length) {
       return false;
@@ -1881,12 +1919,13 @@ export class BattleSession {
     })();
     const finalIntendedTargetY = intendedTargetY ?? adjustedTargetY;
     const finalIntendedTargetX = targetX;
-    const resolvedHomingTargetId = shot.projectileClass === "missile" && shot.trackingTurnRateDegPerSec > 0
+    const resolvedHomingTargetId = !disableTracking && shot.projectileClass === "missile" && shot.trackingTurnRateDegPerSec > 0
       ? (intendedTargetId ?? this.findClosestEnemyToPoint(unit.side, finalIntendedTargetX, finalIntendedTargetY)?.id ?? null)
       : null;
     // Clamp angle directly (no dx/dy round-trip)
     const fireAngle = this.clampAndAdjustAngle(unit, attachment.component, safeAngle, attachment);
-    const spreadRad = (((Math.random() * 2) - 1) * shot.spreadDeg * Math.PI) / 180;
+    const spreadDeg = this.weaponVerificationOverrides.spreadDeg ?? shot.spreadDeg;
+    const spreadRad = (((Math.random() * 2) - 1) * spreadDeg * Math.PI) / 180;
     const finalFireAngle = fireAngle + spreadRad;
     const ux = Math.cos(finalFireAngle);
     const uy = Math.sin(finalFireAngle);
@@ -1935,6 +1974,7 @@ export class BattleSession {
       vy: uy * projectileSpeed,
       traveledDistance: 0,
       maxDistance: effectiveRange,
+      unlimitedRange: this.weaponVerificationOverrides.unlimitedRange === true,
       hitPartKeys: [],
       intendedTargetX: finalIntendedTargetX,
       intendedTargetY: finalIntendedTargetY,
@@ -1957,7 +1997,7 @@ export class BattleSession {
       homingTargetId: resolvedHomingTargetId,
       homingAimX: finalIntendedTargetX,
       homingAimY: finalIntendedTargetY,
-      homingTurnRateDegPerSec: shot.trackingTurnRateDegPerSec,
+      homingTurnRateDegPerSec: disableTracking ? 0 : shot.trackingTurnRateDegPerSec,
       ttl,
       sourceId: unit.id,
       side: unit.side,
@@ -2143,6 +2183,23 @@ export class BattleSession {
   private queueAudioEvent(event: BattleAudioEvent): void {
     if (this.audioEvents.length >= 96) this.audioEvents.shift();
     this.audioEvents.push(event);
+  }
+
+  private queueProjectileHitEvent(
+    projectile: BattleState["projectiles"][number],
+    targetUnitId: string,
+    targetStructureCellId: number | null,
+    direct: boolean,
+  ): void {
+    if (this.projectileHitEvents.length >= 256) this.projectileHitEvents.shift();
+    this.projectileHitEvents.push({
+      sourceUnitId: projectile.sourceId,
+      sourceWeaponAttachmentId: projectile.sourceWeaponAttachmentId,
+      targetUnitId,
+      targetStructureCellId,
+      direct,
+      projectileClass: projectile.projectileClass,
+    });
   }
 
   private queueImpactAudioEvent(projectile: BattleState["projectiles"][number], cell: UnitInstance["structure"][number], incomingDamage: number, deliveredDamage: number, ignoreArmor = false): void {
@@ -2642,6 +2699,9 @@ export class BattleSession {
     stats: ComponentStats,
     part: PartDefinition | null = null,
   ): { enabled: boolean; cwRad: number; ccwRad: number } {
+    if (this.weaponVerificationOverrides.disableAngleLimits === true) {
+      return { enabled: false, cwRad: 0, ccwRad: 0 };
+    }
     const hasAngleLimit = part?.partProperties?.hasAngleLimit;
     if (hasAngleLimit === false) {
       return { enabled: false, cwRad: 0, ccwRad: 0 };
@@ -2759,7 +2819,7 @@ export class BattleSession {
       if (req.slot >= 0 && req.slot < unit.weaponAimAngles.length) {
         unit.weaponAimAngles[req.slot] = req.angleRad;
       }
-      const fired = this.fireWeaponSlot(unit, req.slot, req.manual, req.angleRad, req.intendedTargetId, req.intendedTargetY);
+      const fired = this.fireWeaponSlot(unit, req.slot, req.manual, req.angleRad, req.intendedTargetId, req.intendedTargetY, req.disableTracking === true);
       if (fired) {
         result.firedSlots.push(req.slot);
       } else {
@@ -2973,6 +3033,7 @@ export class BattleSession {
         intendedTargetId: plan.intendedTargetId,
         intendedTargetY: plan.intendedTargetY,
         manual: false,
+        disableTracking: plan.disableTracking,
       });
     }
   }
@@ -3232,6 +3293,9 @@ export class BattleSession {
   }
 
   private getEffectiveWeaponRange(unit: UnitInstance, baseRange: number): number {
+    if (this.weaponVerificationOverrides.unlimitedRange === true) {
+      return Math.hypot(this.battlefieldWidth, this.battlefieldHeight) * 2;
+    }
     const globalBuff = baseRange * GLOBAL_WEAPON_RANGE_MULTIPLIER;
     if (unit.type !== "air") {
       return globalBuff;
@@ -3357,16 +3421,20 @@ export class BattleSession {
     const part = this.getAttachmentPart(attachment);
     const baseRange = attachment.stats?.range ?? stats.range;
     const firepoint = this.getAttachmentFirepointWorld(unit, attachment);
+    const visualCellSize = getStructureCellSize(unit.radius);
+    const projectileOriginBase = this.getCoordOffsetWorld(unit, attachment.x, attachment.y, visualCellSize);
     return {
       componentId: attachment.component,
       projectileClass: attachment.stats?.projectileClass ?? part?.partProperties?.projectileClass ?? stats.projectileClass ?? "bullet",
       damage: attachment.stats?.damage ?? stats.damage,
       penetration: attachment.stats?.penetration ?? stats.penetration ?? 0,
-      spreadDeg: attachment.stats?.spreadDeg ?? stats.spreadDeg ?? 0,
+      spreadDeg: this.weaponVerificationOverrides.spreadDeg ?? attachment.stats?.spreadDeg ?? stats.spreadDeg ?? 0,
       explosiveBlastRadius: attachment.stats?.explosiveBlastRadius ?? stats.explosive?.blastRadius ?? 0,
       trackingTurnRateDegPerSec: attachment.stats?.trackingTurnRateDegPerSec ?? stats.tracking?.turnRateDegPerSec ?? 0,
       angleLimit: {
-        hasAngleLimit: part?.partProperties?.hasAngleLimit ?? stats.hasAngleLimit,
+        hasAngleLimit: this.weaponVerificationOverrides.disableAngleLimits === true
+          ? false
+          : part?.partProperties?.hasAngleLimit ?? stats.hasAngleLimit,
         cwAngle: part?.partProperties?.cwAngle ?? stats.cwAngle,
         ccwAngle: part?.partProperties?.ccwAngle ?? stats.ccwAngle,
         facingAngleRad: this.getAttachmentWeaponFacingAngleRad(unit, attachment),
@@ -3376,6 +3444,9 @@ export class BattleSession {
       projectileGravity: attachment.stats?.projectileGravity ?? stats.projectileGravity ?? PROJECTILE_GRAVITY,
       firepointX: firepoint.x,
       firepointY: firepoint.y,
+      projectileOriginBaseX: unit.x + projectileOriginBase.x,
+      projectileOriginBaseY: unit.y + projectileOriginBase.y,
+      projectileOriginForwardOffset: (visualCellSize / 14) * 10,
       cooldownS: Math.max(0.05, attachment.stats?.cooldown ?? stats.cooldown ?? 1),
       minimumFireIntervalS: this.getWeaponMinFireInterval(unit, slot),
       maximumAmmo: this.getWeaponChargeCapacity(unit, slot),

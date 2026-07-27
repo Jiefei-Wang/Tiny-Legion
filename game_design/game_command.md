@@ -146,3 +146,17 @@ npm run config:check
 - Author settings in `game-core/src/config/**/*.yaml`.
 - Keep recorded audio and attribution under `game-core/assets/audio/`.
 - Do not edit `game-core/src/config/generated/game-config.generated.ts` directly.
+
+## 9) Verify Unified Shooting AI
+
+Run the deterministic one-shot runtime-collision proof for every default weapon (1,000 random trials per weapon plus edge cases), followed by the required aggregate all-weapon L1-L5 accuracy checks at 50%, 60%, 70%, 80%, and 90%. Each level must remain within +/-1.5 percentage points of its target or the command fails:
+
+```bash
+npm --prefix arena run verify:shooting-ai
+```
+
+Optional filters:
+
+```bash
+npm --prefix arena run verify:shooting-ai -- --seed 20260727 --trials 1000 --weapon "anti-tank"
+```

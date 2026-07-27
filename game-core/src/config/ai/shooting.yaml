@@ -30,7 +30,7 @@ ballisticSolver:
   minTimeSeconds: 0.08
   horizonRangeScale: 1.12
   minHorizonSeconds: 0.14
-  maxHorizonSeconds: 6
+  maxHorizonSeconds: 30
   bracketSteps: 28
   bisectionSteps: 26
   speedErrorTolerance: 0.001

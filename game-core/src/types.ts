@@ -433,6 +433,8 @@ export interface Projectile {
   vy: number;
   traveledDistance: number;
   maxDistance: number;
+  /** Verification scenarios may disable authored travel-range expiration. */
+  unlimitedRange?: boolean;
   hitPartKeys: string[];
   intendedTargetX: number;
   intendedTargetY: number;
@@ -611,6 +613,8 @@ export interface FireRequest {
   /** Optional target id used by homing weapons to prefer a specific target. */
   intendedTargetId: string | null;
   intendedTargetY: number | null;
+  /** AI accuracy simulation may deliberately release an unguided shot. */
+  disableTracking?: boolean;
   /** true = player manual click, false = AI / auto-fire. */
   manual: boolean;
 }

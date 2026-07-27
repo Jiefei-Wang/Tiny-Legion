@@ -588,6 +588,15 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     ],
     shoot: [
       { id: "baseline-shoot", label: "builtin: baseline-shoot", spec: { familyId: "baseline-shoot", params: {} } },
+      { id: "unified-shoot", label: "builtin: unified-shoot", spec: { familyId: "unified-shoot", params: {} } },
+      ...Array.from({ length: 5 }, (_, index) => {
+        const level = index + 1;
+        return {
+          id: `unified-level-${level}-shoot`,
+          label: `builtin: unified L${level} shoot (${level * 10 + 40}%)`,
+          spec: { familyId: `unified-level-${level}-shoot`, params: {} },
+        };
+      }),
       { id: "skill-low-shoot", label: "builtin: low shoot", spec: { familyId: "skill-low-shoot", params: {} } },
       { id: "skill-medium-shoot", label: "builtin: medium shoot", spec: { familyId: "skill-medium-shoot", params: {} } },
       { id: "skill-high-shoot", label: "builtin: high shoot", spec: { familyId: "skill-high-shoot", params: {} } },

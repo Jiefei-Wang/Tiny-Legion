@@ -20,6 +20,10 @@ export interface WeaponFireAiInput {
   projectileGravity: number;
   firepointX: number;
   firepointY: number;
+  /** Base and forward offset used by the runtime's angle-dependent muzzle. */
+  projectileOriginBaseX: number;
+  projectileOriginBaseY: number;
+  projectileOriginForwardOffset: number;
   /** Reload/capacity properties exposed to property-derived craft tactics. */
   cooldownS: number;
   minimumFireIntervalS: number;
@@ -77,6 +81,8 @@ export interface FirePlan {
   angleRad: number;
   leadTimeS: number;
   effectiveRange: number;
+  /** Accuracy wrappers may deliberately suppress missile homing for a biased shot. */
+  disableTracking?: boolean;
 }
 
 export interface ShootDecision {
@@ -85,6 +91,8 @@ export interface ShootDecision {
   firePlans?: FirePlan[];
   fireBlockedReason: string | null;
   debugTag: string;
+  /** Keep attachment/firepoint geometry stable for exact one-shot planning. */
+  preserveFacing?: boolean;
 }
 
 export interface CombatDecision {
@@ -129,7 +137,9 @@ export function createCompositeAiController(modules: CompositeAiModules): Battle
       const movement = modules.movement.decideMovement(input, target);
       const shoot = modules.shoot.decideShoot(input, target, movement);
       const firePlans = shoot.firePlans ?? (shoot.firePlan ? [shoot.firePlan] : []);
-      const facing = target.attackPoint.x >= input.unit.x ? 1 : -1;
+      const facing = shoot.preserveFacing === true
+        ? input.unit.facing
+        : target.attackPoint.x >= input.unit.x ? 1 : -1;
       const targetId = target.rankedTargets[0]?.targetId ?? null;
       return {
         facing,

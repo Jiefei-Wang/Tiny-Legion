@@ -13,6 +13,8 @@ This document describes how the Test Arena `2 x 3` AI grid is populated and reso
 Each module dropdown shows:
 
 - Reusable built-in module families (baseline, decision-tree, history, autoregressive, and skill modules)
+- `unified-shoot`, the property-driven exact given-target intercept module
+- `unified-level-1-shoot` through `unified-level-5-shoot`, calibrated wrappers required to stay within +/-1.5 percentage points of 50% through 90% aggregate all-weapon accuracy. Their misses use stable, geometry-scaled near-miss angles (or close-range hesitation), while standalone `unified-shoot` uses the exact core
 - Saved options discovered from arena run artifacts:
   - `arena/.arena-data/runs/*/best-composite.json`
 

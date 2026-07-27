@@ -11,6 +11,7 @@
     "eval:tiers": "npm run build && node .dist/arena/src/cli.js eval-tiers",
     "eval:levels": "npm run build && node .dist/arena/src/cli.js eval-levels",
     "verify:ai-rules": "npm run build && node .dist/arena/src/eval/verify-ai-rules.js",
+    "verify:shooting-ai": "npm run build && node .dist/arena/src/eval/verify-shooting-ai.js",
     "replay": "npm run build && node .dist/arena/src/cli.js replay",
     "serve": "npm run build && node .dist/arena/src/server.js"
   },

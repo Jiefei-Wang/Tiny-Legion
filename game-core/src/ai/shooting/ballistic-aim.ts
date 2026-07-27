@@ -9,6 +9,117 @@ export interface AimSolution {
   leadTimeS: number;
 }
 
+const ROOT_EPSILON = 1e-9;
+
+function evaluatePolynomial(coefficients: ReadonlyArray<number>, t: number): number {
+  let value = 0;
+  for (let index = coefficients.length - 1; index >= 0; index -= 1) {
+    value = value * t + (coefficients[index] ?? 0);
+  }
+  return value;
+}
+
+function trimPolynomial(coefficients: ReadonlyArray<number>): number[] {
+  const result = [...coefficients];
+  while (result.length > 1 && Math.abs(result[result.length - 1] ?? 0) <= ROOT_EPSILON) {
+    result.pop();
+  }
+  return result;
+}
+
+/**
+ * Isolates every real polynomial root in a bounded interval. Derivative roots
+ * partition the polynomial into monotonic spans, so tangential/double roots
+ * are retained instead of being missed by sign-change-only sampling.
+ */
+function rootsInInterval(
+  rawCoefficients: ReadonlyArray<number>,
+  min: number,
+  max: number,
+  valueTolerance: number,
+  iterations = 64,
+): number[] {
+  const coefficients = trimPolynomial(rawCoefficients);
+  const degree = coefficients.length - 1;
+  if (degree <= 0 || max < min) return [];
+  if (degree === 1) {
+    const denominator = coefficients[1] ?? 0;
+    if (Math.abs(denominator) <= ROOT_EPSILON) return [];
+    const root = -(coefficients[0] ?? 0) / denominator;
+    return root >= min - ROOT_EPSILON && root <= max + ROOT_EPSILON
+      ? [clamp(root, min, max)]
+      : [];
+  }
+
+  const derivative = coefficients.slice(1).map((value, index) => value * (index + 1));
+  const criticalPoints = rootsInInterval(derivative, min, max, valueTolerance, iterations)
+    .filter((value, index, values) => index === 0 || Math.abs(value - (values[index - 1] ?? value)) > 1e-7)
+    .sort((a, b) => a - b);
+  const boundaries = [min, ...criticalPoints.filter((value) => value > min && value < max), max];
+  const roots: number[] = [];
+  const appendRoot = (root: number): void => {
+    if (!roots.some((value) => Math.abs(value - root) <= 1e-6)) roots.push(root);
+  };
+
+  for (const point of criticalPoints) {
+    if (Math.abs(evaluatePolynomial(coefficients, point)) <= valueTolerance) appendRoot(point);
+  }
+  for (let index = 0; index < boundaries.length - 1; index += 1) {
+    let a = boundaries[index] ?? min;
+    let b = boundaries[index + 1] ?? max;
+    let fa = evaluatePolynomial(coefficients, a);
+    let fb = evaluatePolynomial(coefficients, b);
+    if (Math.abs(fa) <= valueTolerance) appendRoot(a);
+    if (Math.abs(fb) <= valueTolerance) appendRoot(b);
+    if (fa === 0 || fb === 0 || Math.sign(fa) === Math.sign(fb)) continue;
+    for (let step = 0; step < iterations; step += 1) {
+      const middle = (a + b) * 0.5;
+      const fm = evaluatePolynomial(coefficients, middle);
+      if (Math.abs(fm) <= valueTolerance) {
+        a = middle;
+        b = middle;
+        break;
+      }
+      if (Math.sign(fa) !== Math.sign(fm)) {
+        b = middle;
+        fb = fm;
+      } else {
+        a = middle;
+        fa = fm;
+      }
+    }
+    appendRoot((a + b) * 0.5);
+  }
+  return roots.sort((a, b) => a - b);
+}
+
+function solveZeroGravityInterceptTimes(
+  dx: number,
+  dy: number,
+  targetVx: number,
+  targetVy: number,
+  projectileSpeed: number,
+  minTime: number,
+  maxTime: number,
+): number[] {
+  const a = targetVx * targetVx + targetVy * targetVy - projectileSpeed * projectileSpeed;
+  const b = 2 * (dx * targetVx + dy * targetVy);
+  const c = dx * dx + dy * dy;
+  const candidates: number[] = [];
+  if (Math.abs(a) <= ROOT_EPSILON) {
+    if (Math.abs(b) > ROOT_EPSILON) candidates.push(-c / b);
+  } else {
+    const discriminant = b * b - 4 * a * c;
+    if (discriminant >= 0) {
+      const root = Math.sqrt(discriminant);
+      candidates.push((-b - root) / (2 * a), (-b + root) / (2 * a));
+    }
+  }
+  return candidates
+    .filter((time) => Number.isFinite(time) && time >= minTime && time <= maxTime)
+    .sort((left, right) => left - right);
+}
+
 export function solveBallisticAim(
   shooterX: number,
   shooterY: number,
@@ -22,86 +133,59 @@ export function solveBallisticAim(
   simulationStepS: number = 1 / 60,
 ): AimSolution | null {
   const solverConfig = AI_SHOOTING_CONFIG.ballisticSolver;
-  const MIN_T: number = solverConfig.minTimeSeconds;
   const safeProjectileSpeed = Math.max(1, projectileSpeed);
-  // Allow longer intercept horizons for long-range shots; hard-capping at 2s
-  // underestimates gravity lead and causes far-shot misses.
-  const MAX_T = clamp(
-    (maxRange / safeProjectileSpeed) * solverConfig.horizonRangeScale,
-    solverConfig.minHorizonSeconds,
-    solverConfig.maxHorizonSeconds,
+  const initialDistance = Math.hypot(targetX - shooterX, targetY - shooterY);
+  const minTime = Math.max(
+    1e-6,
+    Math.min(solverConfig.minTimeSeconds, (initialDistance / safeProjectileSpeed) * 0.25),
   );
-  if (MAX_T <= MIN_T) {
-    return null;
-  }
+  const finiteRange = Number.isFinite(maxRange) ? Math.max(0, maxRange) : Number.POSITIVE_INFINITY;
+  const rangeHorizon = Number.isFinite(finiteRange)
+    ? (finiteRange / safeProjectileSpeed) * solverConfig.horizonRangeScale
+    : solverConfig.maxHorizonSeconds;
+  const maxTime = clamp(rangeHorizon, solverConfig.minHorizonSeconds, solverConfig.maxHorizonSeconds);
+  if (maxTime <= minTime) return null;
 
-  const speedErrorAtTime = (t: number): number => {
-    const px = targetX + targetVx * t;
-    const py = targetY + targetVy * t;
-    const dx = px - shooterX;
-    const dy = py - shooterY;
-    const vx = dx / t;
-    // Runtime projectile integration is semi-implicit Euler:
-    // vy += g*dt; y += vy*dt.
-    // Match this in solve to avoid systematic edge-angle miss at long range.
-    const vy = (dy - 0.5 * projectileGravity * (t * t + t * simulationStepS)) / t;
-    return vx * vx + vy * vy - safeProjectileSpeed * safeProjectileSpeed;
-  };
+  const dx = targetX - shooterX;
+  const dy = targetY - shooterY;
+  // Semi-implicit runtime integration: vy += g*dt; y += vy*dt.
+  const adjustedTargetVy = targetVy - 0.5 * projectileGravity * simulationStepS;
+  const gravityTerm = -0.5 * projectileGravity;
+  const coefficients = [
+    dx * dx + dy * dy,
+    2 * (dx * targetVx + dy * adjustedTargetVy),
+    targetVx * targetVx + adjustedTargetVy * adjustedTargetVy + 2 * dy * gravityTerm - safeProjectileSpeed * safeProjectileSpeed,
+    2 * adjustedTargetVy * gravityTerm,
+    gravityTerm * gravityTerm,
+  ];
+  const coefficientScale = Math.max(1, ...coefficients.map((value) => Math.abs(value)));
+  const roots = Math.abs(projectileGravity) <= ROOT_EPSILON
+    ? solveZeroGravityInterceptTimes(dx, dy, targetVx, targetVy, safeProjectileSpeed, minTime, maxTime)
+    : rootsInInterval(
+        coefficients,
+        minTime,
+        maxTime,
+        coefficientScale * Math.max(1e-12, solverConfig.speedErrorTolerance * 1e-8),
+        Math.max(solverConfig.bisectionSteps, solverConfig.bracketSteps * 2),
+      );
 
-  // Find the earliest feasible intercept time within TTL/range.
-  let t0 = MIN_T;
-  let f0 = speedErrorAtTime(t0);
-  const steps = solverConfig.bracketSteps;
-  let bracket: { a: number; b: number; fa: number } | null = null;
-  for (let i = 1; i <= steps; i += 1) {
-    const t1 = MIN_T + ((MAX_T - MIN_T) * i) / steps;
-    const f1 = speedErrorAtTime(t1);
-    if ((f0 > 0 && f1 <= 0) || (f0 <= 0 && f1 > 0)) {
-      bracket = { a: t0, b: t1, fa: f0 };
-      break;
-    }
-    t0 = t1;
-    f0 = f1;
+  for (const t of roots) {
+    const aimX = targetX + targetVx * t;
+    const aimY = targetY + targetVy * t;
+    const directDistance = Math.hypot(aimX - shooterX, aimY - shooterY);
+    if (Number.isFinite(finiteRange) && directDistance > finiteRange * solverConfig.directRangeTolerance) continue;
+    if (Number.isFinite(finiteRange) && safeProjectileSpeed * t > finiteRange * solverConfig.travelRangeTolerance) continue;
+    const divisor = Math.max(solverConfig.minimumDivisor, t);
+    const launchVx = (aimX - shooterX) / divisor;
+    const launchVy = (aimY - shooterY - 0.5 * projectileGravity * (t * t + t * simulationStepS)) / divisor;
+    const speedError = Math.abs(Math.hypot(launchVx, launchVy) - safeProjectileSpeed);
+    if (speedError > Math.max(0.01, solverConfig.speedErrorTolerance * 10)) continue;
+    return {
+      x: aimX,
+      y: aimY,
+      firingAngleRad: Math.atan2(launchVy, launchVx),
+      leadTimeS: t,
+    };
   }
-  if (!bracket) {
-    return null;
-  }
-
-  let a = bracket.a;
-  let b = bracket.b;
-  let fa = bracket.fa;
-  for (let i = 0; i < solverConfig.bisectionSteps; i += 1) {
-    const m = (a + b) * 0.5;
-    const fm = speedErrorAtTime(m);
-    if (Math.abs(fm) < solverConfig.speedErrorTolerance) {
-      a = m;
-      b = m;
-      fa = fm;
-      break;
-    }
-    if ((fa > 0 && fm <= 0) || (fa <= 0 && fm > 0)) {
-      b = m;
-    } else {
-      a = m;
-      fa = fm;
-    }
-  }
-  const t = (a + b) * 0.5;
-
-  const aimX = targetX + targetVx * t;
-  const aimY = targetY + targetVy * t;
-
-  // Coarse range gating: if even the straight-line distance is beyond range, we can't hit.
-  const directDistance = Math.hypot(aimX - shooterX, aimY - shooterY);
-  if (directDistance > maxRange * solverConfig.directRangeTolerance) {
-    return null;
-  }
-  if (safeProjectileSpeed * t > maxRange * solverConfig.travelRangeTolerance) {
-    return null;
-  }
-
-  const vx = (aimX - shooterX) / Math.max(solverConfig.minimumDivisor, t);
-  const vy = (aimY - shooterY - 0.5 * projectileGravity * (t * t + t * simulationStepS)) / Math.max(solverConfig.minimumDivisor, t);
-  const firingAngleRad = Math.atan2(vy, vx);
-  return { x: aimX, y: aimY, firingAngleRad, leadTimeS: t };
+  return null;
 }
