@@ -72,12 +72,20 @@ function matchesTemplatePattern(templateId: string, pattern: string): boolean {
   return wildcardToRegex(pattern).test(templateId);
 }
 
+function isLiveNonBaseCraft(unit: any, side: "player" | "enemy", requireOperational: boolean): boolean {
+  return Boolean(unit)
+    && unit.type !== "base"
+    && unit.alive
+    && unit.side === side
+    && (!requireOperational || canOperate(unit));
+}
+
 function aliveCount(units: any[], side: "player" | "enemy"): number {
-  return units.filter((unit: any) => unit.type !== "base" && unit.alive && canOperate(unit) && unit.side === side).length;
+  return units.filter((unit: any) => isLiveNonBaseCraft(unit, side, true)).length;
 }
 
 function livingCraftCount(units: any[], side: "player" | "enemy"): number {
-  return units.filter((unit: any) => unit.type !== "base" && unit.alive && unit.side === side).length;
+  return units.filter((unit: any) => isLiveNonBaseCraft(unit, side, false)).length;
 }
 
 export type MatchProgress = {
@@ -169,7 +177,7 @@ export async function runMatch(
     disableEnemyMinimumPresence: true,
     disableDefaultStarters: true,
     spawnBattleBases: scenario.withBase,
-    disableBaseBattleEnd: scenario.scheduledMirroredWaves === true,
+    disableBaseBattleEnd: Math.max(0, Math.floor(scenario.maintainUnitsPerSide ?? 0)) > 0,
     partCatalog,
   });
 
@@ -205,6 +213,8 @@ export async function runMatch(
   }));
 
   const spawnRng = mulberry32((spec.seed ^ 0x2f7a1d) >>> 0);
+  const playerPopulationRng = mulberry32((spec.seed ^ 0x6b21f4a7) >>> 0);
+  const enemyPopulationRng = mulberry32((spec.seed ^ 0x6b21f4a7) >>> 0);
 
   if (scenario.initialLineup) {
     for (const side of ["player", "enemy"] as const) {
@@ -306,8 +316,7 @@ export async function runMatch(
   const spawnMaxActive = Math.max(1, Math.floor(spec.spawnMaxActive ?? 5));
   const spawnIntervalSeconds = Math.max(0.1, spec.spawnIntervalSeconds ?? 1.8);
   const maintainUnitsPerSide = Math.max(0, Math.floor(scenario.maintainUnitsPerSide ?? 0));
-  const scheduledMirroredWaves = scenario.scheduledMirroredWaves === true;
-  const allowSpawns = scenario.withBase && maintainUnitsPerSide <= 0 && !scheduledMirroredWaves;
+  const allowSpawns = scenario.withBase && maintainUnitsPerSide <= 0;
   let spawnTimer = 0;
   let spawnIntervalS = spawnIntervalSeconds;
 
@@ -394,31 +403,6 @@ export async function runMatch(
     spawnIntervalS = Math.max(0.5, Math.min(6.0, minInterval));
   };
 
-  const spawnScheduledMirroredWave = (): void => {
-    if (!scheduledMirroredWaves || roster.length <= 0) {
-      return;
-    }
-    const templateId = roster[Math.floor(spawnRng() * roster.length)] ?? null;
-    if (!templateId) {
-      return;
-    }
-    for (let index = 0; index < spawnBurst; index += 1) {
-      const y = 220 + spawnRng() * 260;
-      const options = {
-        chargeGas: false,
-        deploymentGasCost: 0,
-        ignoreCap: true,
-        ignoreLowGasThreshold: true,
-        y,
-      };
-      const playerDeployed = battle.arenaDeploy("player", templateId, options);
-      const enemyDeployed = battle.arenaDeploy("enemy", templateId, options);
-      if (!playerDeployed || !enemyDeployed) {
-        throw new Error(`runMatch: could not deploy mirrored scheduled wave unit ${index + 1}/${spawnBurst}`);
-      }
-    }
-  };
-
   const replenishInitialLineup = (): void => {
     if (!scenario.initialLineup || scenario.replenishInitialLineup !== true) {
       return;
@@ -447,26 +431,29 @@ export async function runMatch(
       return;
     }
     const state = battle.getState();
-    for (const side of ["player", "enemy"] as const) {
-      const missing = Math.max(0, maintainUnitsPerSide - aliveCount(state.units, side));
-      for (let index = 0; index < missing; index += 1) {
-        const templateId = roster[Math.floor(spawnRng() * roster.length)] ?? null;
-        if (!templateId) continue;
-        const deployed = battle.arenaDeploy(side, templateId, {
-          chargeGas: false,
-          deploymentGasCost: 0,
-          ignoreCap: true,
-          ignoreLowGasThreshold: true,
+    const missingPlayer = Math.max(0, maintainUnitsPerSide - aliveCount(state.units, "player"));
+    const missingEnemy = Math.max(0, maintainUnitsPerSide - aliveCount(state.units, "enemy"));
+    const missing = Math.max(missingPlayer, missingEnemy);
+    for (let index = 0; index < missing; index += 1) {
+      const playerTemplateId = roster[Math.floor(playerPopulationRng() * roster.length)] ?? null;
+      const enemyTemplateId = roster[Math.floor(enemyPopulationRng() * roster.length)] ?? null;
+      if (index < missingPlayer && playerTemplateId) {
+        const deployed = battle.arenaDeploy("player", playerTemplateId, {
+          chargeGas: false, deploymentGasCost: 0, ignoreCap: true, ignoreLowGasThreshold: true,
         });
-        if (!deployed) {
-          throw new Error(`runMatch: could not maintain ${side} population ${index + 1}/${missing}`);
-        }
+        if (!deployed) throw new Error(`runMatch: could not maintain player population ${index + 1}/${missingPlayer}`);
+      }
+      if (index < missingEnemy && enemyTemplateId) {
+        const deployed = battle.arenaDeploy("enemy", enemyTemplateId, {
+          chargeGas: false, deploymentGasCost: 0, ignoreCap: true, ignoreLowGasThreshold: true,
+        });
+        if (!deployed) throw new Error(`runMatch: could not maintain enemy population ${index + 1}/${missingEnemy}`);
       }
     }
   };
 
-  // The first wave appears at game-time zero, followed by one wave per interval.
-  spawnScheduledMirroredWave();
+  // Fill the target before the first simulation step, then refill after each update.
+  maintainTestArenaPopulation();
   reportProgress();
   nextProgressAt = 5;
   while (battle.getState().active && !battle.getState().outcome && t < spec.maxSimSeconds) {
@@ -475,14 +462,6 @@ export async function runMatch(
       if (spawnTimer >= spawnIntervalS) {
         spawnTimer = 0;
         stepSpawn();
-      }
-    } else if (scheduledMirroredWaves) {
-      spawnTimer += dt;
-      if (spawnTimer + 1e-9 >= spawnIntervalSeconds) {
-        spawnTimer -= spawnIntervalSeconds;
-        if (t + dt < spec.maxSimSeconds) {
-          spawnScheduledMirroredWave();
-        }
       }
     }
     battle.update(dt, noKeys);
@@ -558,13 +537,14 @@ export async function runMatch(
   const worth1Enemy = enemyGasEnd + onFieldEnemyEnd;
 
   const reasonLower = String(outcome.reason).toLowerCase();
-  const tie = scheduledMirroredWaves
+  const populationComparison = maintainUnitsPerSide > 0;
+  const tie = populationComparison
     ? destroyedByPlayer === destroyedByEnemy
     : reasonLower.includes("tie") || reasonLower.includes("round deadline");
-  const playerVictory = scheduledMirroredWaves
+  const playerVictory = populationComparison
     ? destroyedByPlayer > destroyedByEnemy
     : Boolean(outcome.victory);
-  const outcomeReason = scheduledMirroredWaves
+  const outcomeReason = populationComparison
     ? `Destroyed units: player ${destroyedByPlayer}, enemy ${destroyedByEnemy}`
     : String(outcome.reason);
 

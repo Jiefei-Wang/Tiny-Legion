@@ -48,7 +48,6 @@ export const GAME_CONFIG = {
       "aircraftRangeBonusMax": 0,
       "projectileSpeed": 260,
       "projectileGravity": 95,
-      "groundFireYTolerance": 92,
       "targetHistory": {
         "windowSeconds": 1,
         "samples": 10
@@ -406,9 +405,11 @@ export const GAME_CONFIG = {
         "baseHp": 1000000000
       },
       "comparison": {
-        "spawnCountPerSide": 4,
-        "spawnIntervalSeconds": 20,
-        "maxSimSeconds": 80,
+        "unitsPerSide": 4,
+        "battlefieldWidth": 1500,
+        "battlefieldHeight": 1500,
+        "groundHeight": 600,
+        "maxSimSeconds": 200,
         "baseWorthUnits": 20
       }
     }
@@ -711,7 +712,6 @@ export const GAME_CONFIG_DESCRIPTIONS = {
       "aircraftRangeBonusMax": "Maximum extra firing range granted to an air unit at the top of the air zone.",
       "projectileSpeed": "Fallback projectile speed when a weapon or part does not provide one.",
       "projectileGravity": "Fallback projectile gravity when a weapon or part does not provide one.",
-      "groundFireYTolerance": "Maximum vertical separation for ground-to-ground AI target and firing checks.",
       "targetHistory.windowSeconds": "Duration of target positions retained for AI motion prediction.",
       "targetHistory.samples": "Maximum number of target-position samples retained during the history window."
     },
@@ -980,8 +980,10 @@ export const GAME_CONFIG_DESCRIPTIONS = {
     "arenaComparison": {
       "testArena.nodeDefense": "Default Test Arena node defense multiplier shared by browser and headless AI comparison.",
       "testArena.baseHp": "Default HP assigned to both Test Arena bases and headless AI comparison bases.",
-      "comparison.spawnCountPerSide": "Number of identical randomly selected craft spawned for each side in every headless AI comparison wave.",
-      "comparison.spawnIntervalSeconds": "Game-time interval in seconds between headless AI comparison spawn waves.",
+      "comparison.unitsPerSide": "Target number of live craft maintained for each side during a headless AI comparison.",
+      "comparison.battlefieldWidth": "Logical battlefield width used only by headless AI comparisons and leaderboard matches.",
+      "comparison.battlefieldHeight": "Logical battlefield height used only by headless AI comparisons and leaderboard matches.",
+      "comparison.groundHeight": "Ground-zone height used only by headless AI comparisons and leaderboard matches.",
       "comparison.maxSimSeconds": "Game-time duration in seconds of each headless AI comparison.",
       "comparison.baseWorthUnits": "Number of destroyed craft credited for destroying the opposing base."
     }

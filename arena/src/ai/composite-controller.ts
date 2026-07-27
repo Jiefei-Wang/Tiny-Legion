@@ -1,6 +1,3 @@
-import {
-  GROUND_FIRE_Y_TOLERANCE,
-} from "../../../game-core/src/config/balance/range.ts";
 import { structureIntegrity } from "../../../game-core/src/simulation/units/structure-grid.ts";
 import {
   createAutoregShootAi,
@@ -35,7 +32,6 @@ import { clamp } from "../../../game-core/src/simulation/physics/impulse-model.t
 import { canOperate } from "../../../game-core/src/simulation/units/control-unit-rules.ts";
 import type { Params, ParamSchema } from "./ai-schema.ts";
 import type { MatchAiSpec } from "../match/match-types.ts";
-import type { UnitType } from "../../../game-core/src/types.ts";
 
 export type CompositeModuleSpec = {
   familyId: string;
@@ -58,13 +54,6 @@ function pickNumber(params: Params, key: string, fallback: number): number {
 
 function pickInt(params: Params, key: string, fallback: number): number {
   return Math.floor(pickNumber(params, key, fallback));
-}
-
-function canHitByAxis(unit: { y: number; type: UnitType }, targetY: number, targetType: UnitType): boolean {
-  if (unit.type === "air" || targetType === "air") {
-    return true;
-  }
-  return Math.abs(targetY - unit.y) <= GROUND_FIRE_Y_TOLERANCE;
 }
 
 export const DT_TARGET_SCHEMA: ParamSchema = {
@@ -308,15 +297,6 @@ function createDecisionTreeShootAi(params: Params): ShootAiModule {
         return { ...adjustedDecision, debugTag: "shoot.dt.s0" };
       }
 
-      const primary = target.rankedTargets[0] ?? null;
-      if (primary && !canHitByAxis(input.unit, primary.y, primary.type)) {
-        return {
-          firePlan: null,
-          fireBlockedReason: "axis-mismatch",
-          debugTag: `shoot.dt.s${strategy}.blocked-axis`,
-        };
-      }
-
       const integrity = structureIntegrity(input.unit);
       const distance = Math.hypot(target.attackPoint.x - input.unit.x, target.attackPoint.y - input.unit.y);
       if (strategy === 1) {
@@ -396,15 +376,6 @@ function createDecisionTreeShootAtanAi(params: Params): ShootAiModule {
 
       if (strategy === 0) {
         return { ...adjustedDecision, debugTag: "shoot.dt-atan.s0" };
-      }
-
-      const primary = target.rankedTargets[0] ?? null;
-      if (primary && !canHitByAxis(input.unit, primary.y, primary.type)) {
-        return {
-          firePlan: null,
-          fireBlockedReason: "axis-mismatch",
-          debugTag: `shoot.dt-atan.s${strategy}.blocked-axis`,
-        };
       }
 
       const integrity = structureIntegrity(input.unit);

@@ -3,14 +3,12 @@ _descriptions:
   aircraftRangeBonusMax: Maximum extra firing range granted to an air unit at the top of the air zone.
   projectileSpeed: Fallback projectile speed when a weapon or part does not provide one.
   projectileGravity: Fallback projectile gravity when a weapon or part does not provide one.
-  groundFireYTolerance: Maximum vertical separation for ground-to-ground AI target and firing checks.
   targetHistory.windowSeconds: Duration of target positions retained for AI motion prediction.
   targetHistory.samples: Maximum number of target-position samples retained during the history window.
 weaponRangeMultiplier: 1.5
 aircraftRangeBonusMax: 0
 projectileSpeed: 260
 projectileGravity: 95
-groundFireYTolerance: 92
 targetHistory:
   windowSeconds: 1
   samples: 10

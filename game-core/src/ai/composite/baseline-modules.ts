@@ -1,6 +1,5 @@
 import {
   AI_TARGET_HISTORY_SAMPLE_INTERVAL_S,
-  GROUND_FIRE_Y_TOLERANCE,
 } from "../../config/balance/range.ts";
 import { structureIntegrity } from "../../simulation/units/structure-grid.ts";
 import { clamp } from "../../simulation/physics/impulse-model.ts";
@@ -153,16 +152,6 @@ function estimateLagVelocitiesFromHistory(
   return out;
 }
 
-function canHitByAxis(unit: BattleAiInput["unit"], target: { y: number; type: BattleAiInput["unit"]["type"] } | null): boolean {
-  if (!target) {
-    return true;
-  }
-  if (unit.type === "air" || target.type === "air") {
-    return true;
-  }
-  return Math.abs(target.y - unit.y) <= GROUND_FIRE_Y_TOLERANCE;
-}
-
 export function createBaselineTargetAi(): TargetAiModule {
   return {
     decideTarget: (input) => {
@@ -242,13 +231,6 @@ export function createBaselineShootAi(): ShootAiModule {
   return {
     decideShoot: (input, target) => {
       const unit = input.unit;
-      if (!canHitByAxis(unit, target.rankedTargets[0] ?? null)) {
-        return {
-          firePlan: null,
-          fireBlockedReason: "axis-mismatch",
-          debugTag: "shoot.axis-blocked",
-        };
-      }
       const correctedTargetX = target.attackPoint.x;
       const correctedTargetY = target.attackPoint.y;
       let best: FirePlan | null = null;
@@ -394,13 +376,6 @@ export function createHistoryWeightedShootAi(recencyPowerRaw = 1): ShootAiModule
     decideShoot: (input, target) => {
       const unit = input.unit;
       const primary = target.rankedTargets[0] ?? null;
-      if (!canHitByAxis(unit, primary)) {
-        return {
-          firePlan: null,
-          fireBlockedReason: "axis-mismatch",
-          debugTag: "shoot.history.blocked-axis",
-        };
-      }
       const correctedTargetX = target.attackPoint.x;
       const correctedTargetY = target.attackPoint.y;
       let best: FirePlan | null = null;
@@ -521,13 +496,6 @@ export function createAutoregShootAi(alphaRaw: number): ShootAiModule {
     decideShoot: (input, target) => {
       const unit = input.unit;
       const primary = target.rankedTargets[0] ?? null;
-      if (!canHitByAxis(unit, primary)) {
-        return {
-          firePlan: null,
-          fireBlockedReason: "axis-mismatch",
-          debugTag: "shoot.autoreg.blocked-axis",
-        };
-      }
       const correctedTargetX = target.attackPoint.x;
       const correctedTargetY = target.attackPoint.y;
       let best: FirePlan | null = null;
@@ -635,13 +603,6 @@ export function createWeightedLagShootAi(alphaRaw: ReadonlyArray<number>): Shoot
     decideShoot: (input, target) => {
       const unit = input.unit;
       const primary = target.rankedTargets[0] ?? null;
-      if (!canHitByAxis(unit, primary)) {
-        return {
-          firePlan: null,
-          fireBlockedReason: "axis-mismatch",
-          debugTag: "shoot.w11.blocked-axis",
-        };
-      }
       const correctedTargetX = target.attackPoint.x;
       const correctedTargetY = target.attackPoint.y;
       let best: FirePlan | null = null;

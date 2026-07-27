@@ -158,8 +158,6 @@ async function main(): Promise<void> {
     const { evaluateAiLevels } = await import("./eval/evaluate-ai-levels.ts");
     await evaluateAiLevels(
       asNumber(args.maxLevel, 5),
-      asNumber(args.seeds, 128),
-      asNumber(args.threshold, 0.6),
       asNumber(args.minLevel, 2),
     );
     return;
@@ -173,7 +171,7 @@ async function main(): Promise<void> {
       "  match --seed 123 --out match.json",
       "  match --playerComposite player.json --enemyComposite enemy.json --seed 123 --out match.json",
       "  eval-tiers --seeds 10",
-      "  eval-levels --minLevel 2 --maxLevel 5 --seeds 128 --threshold 0.6",
+      "  eval-levels --minLevel 2 --maxLevel 5",
       "  train-composite --scope all --generations 20 --population 24 --phaseSeeds 16 --nUnits 4",
       "  train-composite --scope shoot --shootSource new --movementSource baseline --targetSource baseline",
       "  train-composite --scope shoot --shootSource new --shootFamily dt-shoot-atan",

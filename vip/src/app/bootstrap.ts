@@ -5698,6 +5698,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       })
       .join("");
     const leaderboardProgressRows = testArenaLeaderboardCompeteProgress
+      .filter((match) => match.status !== "completed")
       .map((match) => {
         const simSeconds = Math.min(match.maxSimSeconds || match.simSecondsElapsed, match.simSecondsElapsed);
         const progressRatio = match.maxSimSeconds > 0 ? Math.min(1, simSeconds / match.maxSimSeconds) : 0;

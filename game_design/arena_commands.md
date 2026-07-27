@@ -53,9 +53,9 @@ Phase entries support:
 - `templateNames`: wildcard patterns (`"*" = all templates`)
 - `battlefield.width`, `battlefield.height`, optional `battlefield.groundHeight`
 - `initialUnitsPerSide`: free starter population on each side
-- `scheduledMirroredWaves`: comparison mode that spawns free, uncapped mirrored batches from one random non-base craft per wave
-- `nodeDefense`, `baseHp`, `maxSimSeconds`, `playerGas`, `enemyGas`, `spawnBurst`, `spawnIntervalSeconds`, and `baseWorthUnits`
-- Leaderboard comparison values for spawn count, spawn interval, duration, and base worth come from Global Settings -> AI (`ai/arena-comparison.yaml`).
+- `maintainUnitsPerSide`: free target population; random valid craft are spawned immediately and after losses until each side reaches the target
+- `nodeDefense`, `baseHp`, `maxSimSeconds`, `playerGas`, `enemyGas`, `spawnBurst`, and `baseWorthUnits`
+- Leaderboard comparison values for units per side, duration, and base worth come from Global Settings -> AI (`ai/arena-comparison.yaml`).
 
 ## Train One Combination (Recommended)
 

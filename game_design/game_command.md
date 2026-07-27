@@ -160,3 +160,11 @@ Optional filters:
 ```bash
 npm --prefix arena run verify:shooting-ai -- --seed 20260727 --trials 1000 --weapon "anti-tank"
 ```
+
+## 10) Verify Adjacent AI Levels
+
+Run one deterministic symmetric `p4-leaderboard` match for each requested level against its immediately previous level. The higher level must achieve at least a `1.10` weighted craft-destroy ratio; no side-swapped rematch or multi-seed round robin is performed.
+
+```bash
+npm --prefix arena run eval:levels -- --minLevel 2 --maxLevel 5
+```

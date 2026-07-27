@@ -4,18 +4,20 @@ import { compareMatchResult } from "../match/match-comparison.ts";
 import { levelCompositeConfig } from "../ai/composite-controller.ts";
 import { runMatch } from "../match/run-match.ts";
 import {
-  BATTLEFIELD_HEIGHT,
-  BATTLEFIELD_WIDTH,
-  DEFAULT_GROUND_HEIGHT,
-} from "../../../game-core/src/config/balance/battlefield.ts";
-import {
+  AI_COMPARISON_BATTLEFIELD_HEIGHT,
+  AI_COMPARISON_BATTLEFIELD_WIDTH,
   AI_COMPARISON_BASE_WORTH_UNITS,
+  AI_COMPARISON_GROUND_HEIGHT,
   AI_COMPARISON_MAX_SIM_SECONDS,
-  AI_COMPARISON_SPAWN_COUNT_PER_SIDE,
-  AI_COMPARISON_SPAWN_INTERVAL_SECONDS,
+  AI_COMPARISON_UNITS_PER_SIDE,
   TEST_ARENA_BASE_HP,
   TEST_ARENA_NODE_DEFENSE,
 } from "../../../game-core/src/config/ai/arena-comparison.ts";
+import {
+  adjacentLevelDestroyRatio,
+  AI_LEVEL_MIN_DESTROY_RATIO,
+  AI_LEVEL_CERTIFICATION_SERIES,
+} from "./evaluate-ai-levels.ts";
 import {
   hasEnemyWithinAwareness,
 } from "../../../game-core/src/ai/composite/level-modules.ts";
@@ -89,12 +91,13 @@ assert.equal(destroyedCountResult.decidingMetric, "destroyed-units");
 assert.equal(destroyedCountResult.destroyedByA, 12);
 assert.equal(destroyedCountResult.destroyedByB, 7);
 assert.equal(destroyedCountResult.ratioA, 12 / 7);
+assert.equal(adjacentLevelDestroyRatio(11, 10), AI_LEVEL_MIN_DESTROY_RATIO);
+assert.equal(adjacentLevelDestroyRatio(10, 10), 1);
+assert.equal(AI_LEVEL_CERTIFICATION_SERIES, 16, "manual leaderboard rounds retain sixteen deterministic seeds");
 
 const scenario = loadLeaderboardScenario();
 assert.equal(scenario.initialUnitsPerSide, 0);
-assert.equal(scenario.scheduledMirroredWaves, true);
-assert.equal(scenario.spawnBurst, AI_COMPARISON_SPAWN_COUNT_PER_SIDE);
-assert.equal(scenario.spawnIntervalSeconds, AI_COMPARISON_SPAWN_INTERVAL_SECONDS);
+assert.equal(scenario.unitsPerSide, AI_COMPARISON_UNITS_PER_SIDE);
 assert.equal(scenario.maxSimSeconds, AI_COMPARISON_MAX_SIM_SECONDS);
 assert.equal(scenario.baseWorthUnits, AI_COMPARISON_BASE_WORTH_UNITS);
 assert.equal(scenario.nodeDefense, TEST_ARENA_NODE_DEFENSE);
@@ -105,11 +108,11 @@ assert.deepEqual(scenario.templateNames, ["*"], "AI comparison must admit every 
 assert.deepEqual(
   scenario.battlefield,
   {
-    width: BATTLEFIELD_WIDTH,
-    height: BATTLEFIELD_HEIGHT,
-    groundHeight: DEFAULT_GROUND_HEIGHT,
+    width: AI_COMPARISON_BATTLEFIELD_WIDTH,
+    height: AI_COMPARISON_BATTLEFIELD_HEIGHT,
+    groundHeight: AI_COMPARISON_GROUND_HEIGHT,
   },
-  "leaderboard certification must use the same authored battlefield defaults as Test Arena",
+  "leaderboard certification must use the authored AI-comparison battlefield dimensions",
 );
 
 const parityAi: MatchAiSpec = {
@@ -129,16 +132,14 @@ const paritySmoke = await runMatch({
   scenario: {
     withBase: scenario.withBase,
     initialUnitsPerSide: scenario.initialUnitsPerSide,
-    scheduledMirroredWaves: scenario.scheduledMirroredWaves,
+    maintainUnitsPerSide: scenario.unitsPerSide,
   },
   templateNames: scenario.templateNames,
   battlefield: scenario.battlefield,
   spawnMode: "mirrored-random",
-  spawnBurst: scenario.spawnBurst,
-  spawnIntervalSeconds: scenario.spawnIntervalSeconds,
   baseWorthUnits: scenario.baseWorthUnits,
 });
-assert.equal(paritySmoke.final.playerOperationalUnits, AI_COMPARISON_SPAWN_COUNT_PER_SIDE);
-assert.equal(paritySmoke.final.enemyOperationalUnits, AI_COMPARISON_SPAWN_COUNT_PER_SIDE);
+assert.equal(paritySmoke.final.playerOperationalUnits, AI_COMPARISON_UNITS_PER_SIDE);
+assert.equal(paritySmoke.final.enemyOperationalUnits, AI_COMPARISON_UNITS_PER_SIDE);
 
 console.log("AI rule verification passed.");

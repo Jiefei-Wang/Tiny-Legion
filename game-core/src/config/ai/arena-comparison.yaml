@@ -1,15 +1,19 @@
 _descriptions:
   testArena.nodeDefense: Default Test Arena node defense multiplier shared by browser and headless AI comparison.
   testArena.baseHp: Default HP assigned to both Test Arena bases and headless AI comparison bases.
-  comparison.spawnCountPerSide: Number of identical randomly selected craft spawned for each side in every headless AI comparison wave.
-  comparison.spawnIntervalSeconds: Game-time interval in seconds between headless AI comparison spawn waves.
+  comparison.unitsPerSide: Target number of live craft maintained for each side during a headless AI comparison.
+  comparison.battlefieldWidth: Logical battlefield width used only by headless AI comparisons and leaderboard matches.
+  comparison.battlefieldHeight: Logical battlefield height used only by headless AI comparisons and leaderboard matches.
+  comparison.groundHeight: Ground-zone height used only by headless AI comparisons and leaderboard matches.
   comparison.maxSimSeconds: Game-time duration in seconds of each headless AI comparison.
   comparison.baseWorthUnits: Number of destroyed craft credited for destroying the opposing base.
 testArena:
   nodeDefense: 1.1
   baseHp: 1000000000
 comparison:
-  spawnCountPerSide: 4
-  spawnIntervalSeconds: 20
-  maxSimSeconds: 80
+  unitsPerSide: 4
+  battlefieldWidth: 1500
+  battlefieldHeight: 1500
+  groundHeight: 600
+  maxSimSeconds: 200
   baseWorthUnits: 20

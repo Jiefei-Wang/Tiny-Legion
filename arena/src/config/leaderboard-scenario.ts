@@ -1,15 +1,12 @@
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import {
-  BATTLEFIELD_HEIGHT,
-  BATTLEFIELD_WIDTH,
-  DEFAULT_GROUND_HEIGHT,
-} from "../../../game-core/src/config/balance/battlefield.ts";
-import {
+  AI_COMPARISON_BATTLEFIELD_HEIGHT,
+  AI_COMPARISON_BATTLEFIELD_WIDTH,
   AI_COMPARISON_BASE_WORTH_UNITS,
+  AI_COMPARISON_GROUND_HEIGHT,
   AI_COMPARISON_MAX_SIM_SECONDS,
-  AI_COMPARISON_SPAWN_COUNT_PER_SIDE,
-  AI_COMPARISON_SPAWN_INTERVAL_SECONDS,
+  AI_COMPARISON_UNITS_PER_SIDE,
   TEST_ARENA_BASE_HP,
   TEST_ARENA_NODE_DEFENSE,
 } from "../../../game-core/src/config/ai/arena-comparison.ts";
@@ -17,7 +14,6 @@ import {
 export type LeaderboardScenario = {
   withBase: boolean;
   initialUnitsPerSide: number;
-  scheduledMirroredWaves: boolean;
   templateNames: string[];
   battlefield: { width: number; height: number; groundHeight?: number };
   maxSimSeconds: number;
@@ -25,28 +21,27 @@ export type LeaderboardScenario = {
   baseHp: number;
   playerGas: number;
   enemyGas: number;
-  spawnBurst: number;
-  spawnIntervalSeconds: number;
+  unitsPerSide: number;
   baseWorthUnits: number;
 };
 
 const fallback: LeaderboardScenario = {
   withBase: true,
   initialUnitsPerSide: 0,
-  scheduledMirroredWaves: true,
   templateNames: ["*"],
-  battlefield: { width: BATTLEFIELD_WIDTH, height: BATTLEFIELD_HEIGHT, groundHeight: DEFAULT_GROUND_HEIGHT },
+  battlefield: {
+    width: AI_COMPARISON_BATTLEFIELD_WIDTH,
+    height: AI_COMPARISON_BATTLEFIELD_HEIGHT,
+    groundHeight: AI_COMPARISON_GROUND_HEIGHT,
+  },
   maxSimSeconds: AI_COMPARISON_MAX_SIM_SECONDS,
   nodeDefense: TEST_ARENA_NODE_DEFENSE,
   baseHp: TEST_ARENA_BASE_HP,
   playerGas: 0,
   enemyGas: 0,
-  spawnBurst: AI_COMPARISON_SPAWN_COUNT_PER_SIDE,
-  spawnIntervalSeconds: AI_COMPARISON_SPAWN_INTERVAL_SECONDS,
+  unitsPerSide: AI_COMPARISON_UNITS_PER_SIDE,
   baseWorthUnits: AI_COMPARISON_BASE_WORTH_UNITS,
 };
-
-const finite = (value: unknown, defaultValue: number): number => typeof value === "number" && Number.isFinite(value) ? value : defaultValue;
 
 function defaultConfigPath(): string {
   const direct = resolve(process.cwd(), "composite-training.phases.json");
@@ -60,10 +55,6 @@ export function loadLeaderboardScenario(configPath = defaultConfigPath()): Leade
     const parsed = JSON.parse(readFileSync(configPath, "utf8")) as { phases?: Array<Record<string, unknown>> };
     const phase = parsed.phases?.find((entry) => entry?.id === "p4-leaderboard");
     if (!phase) return { ...fallback, battlefield: { ...fallback.battlefield } };
-    const useGlobalBattlefield = phase.useGlobalBattlefield === true;
-    const battlefieldRaw = phase.battlefield && typeof phase.battlefield === "object"
-      ? phase.battlefield as Record<string, unknown>
-      : {};
     const templateNames = Array.isArray(phase.templateNames)
       ? phase.templateNames.map(String).filter((name) => name.trim().length > 0)
       : fallback.templateNames;
@@ -71,26 +62,14 @@ export function loadLeaderboardScenario(configPath = defaultConfigPath()): Leade
       withBase: phase.withBase !== false,
       // Comparison rules are authored in Global Settings (AI), not duplicated in phase JSON.
       initialUnitsPerSide: 0,
-      scheduledMirroredWaves: true,
       templateNames: templateNames.length > 0 ? templateNames : fallback.templateNames,
-      battlefield: {
-        width: useGlobalBattlefield
-          ? BATTLEFIELD_WIDTH
-          : Math.max(640, Math.floor(finite(battlefieldRaw.width, fallback.battlefield.width))),
-        height: useGlobalBattlefield
-          ? BATTLEFIELD_HEIGHT
-          : Math.max(360, Math.floor(finite(battlefieldRaw.height, fallback.battlefield.height))),
-        groundHeight: useGlobalBattlefield
-          ? DEFAULT_GROUND_HEIGHT
-          : Math.max(80, Math.floor(finite(battlefieldRaw.groundHeight, fallback.battlefield.groundHeight ?? DEFAULT_GROUND_HEIGHT))),
-      },
+      battlefield: { ...fallback.battlefield },
       maxSimSeconds: AI_COMPARISON_MAX_SIM_SECONDS,
       nodeDefense: TEST_ARENA_NODE_DEFENSE,
       baseHp: TEST_ARENA_BASE_HP,
       playerGas: 0,
       enemyGas: 0,
-      spawnBurst: AI_COMPARISON_SPAWN_COUNT_PER_SIDE,
-      spawnIntervalSeconds: AI_COMPARISON_SPAWN_INTERVAL_SECONDS,
+      unitsPerSide: AI_COMPARISON_UNITS_PER_SIDE,
       baseWorthUnits: AI_COMPARISON_BASE_WORTH_UNITS,
     };
   } catch {

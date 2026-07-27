@@ -476,17 +476,14 @@ export async function runCompositeTraining(opts: {
             : {}),
           playerGas: leaderboardScenario?.playerGas ?? phase.playerGas ?? opts.playerGas,
           enemyGas: leaderboardScenario?.enemyGas ?? phase.enemyGas ?? opts.enemyGas,
-          spawnBurst: leaderboardScenario?.spawnBurst ?? phase.spawnBurst ?? opts.spawnBurst,
+          ...(leaderboardScenario ? {} : { spawnBurst: phase.spawnBurst ?? opts.spawnBurst }),
           spawnMaxActive: phase.spawnMaxActive ?? opts.spawnMaxActive,
-          ...(leaderboardScenario ? {
-            spawnIntervalSeconds: leaderboardScenario.spawnIntervalSeconds,
-            baseWorthUnits: leaderboardScenario.baseWorthUnits,
-          } : {}),
+          ...(leaderboardScenario ? { baseWorthUnits: leaderboardScenario.baseWorthUnits } : {}),
           scenario: {
             withBase: phase.withBase,
             initialUnitsPerSide: leaderboardScenario?.initialUnitsPerSide ?? phase.initialUnitsPerSide,
-            ...(leaderboardScenario?.scheduledMirroredWaves
-              ? { scheduledMirroredWaves: true }
+            ...(leaderboardScenario
+              ? { maintainUnitsPerSide: leaderboardScenario.unitsPerSide }
               : typeof phase.maintainUnitsPerSide === "number"
               ? { maintainUnitsPerSide: phase.maintainUnitsPerSide }
               : {}),

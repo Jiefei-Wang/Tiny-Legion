@@ -1,4 +1,4 @@
-import { AI_TARGET_HISTORY_SAMPLE_INTERVAL_S, GROUND_FIRE_Y_TOLERANCE } from "../../config/balance/range.ts";
+import { AI_TARGET_HISTORY_SAMPLE_INTERVAL_S } from "../../config/balance/range.ts";
 import { structureIntegrity } from "../../simulation/units/structure-grid.ts";
 import { getStructureCellSize } from "../../config/balance/battlefield.ts";
 import { MAX_CERTIFIED_AI_LEVEL } from "../../config/ai/levels.ts";
@@ -33,10 +33,6 @@ import type { StructureCell, UnitInstance } from "../../types.ts";
 
 export type AiLevel = number;
 export { MAX_CERTIFIED_AI_LEVEL };
-
-function canHitByAxis(unit: UnitInstance, target: RankedTarget): boolean {
-  return unit.type === "air" || target.type === "air" || Math.abs(target.y - unit.y) <= GROUND_FIRE_Y_TOLERANCE;
-}
 
 function remainingCellRatio(cell: StructureCell): number {
   return Math.max(0, cell.breakThreshold - cell.strain) / Math.max(1, cell.breakThreshold);
@@ -211,7 +207,6 @@ function solvePlan(
   target: RankedTarget | null,
   point: { x: number; y: number },
 ): FirePlan | null {
-  if (target && !canHitByAxis(input.unit, target)) return null;
   const distance = Math.hypot(point.x - weapon.firepointX, point.y - weapon.firepointY);
   if (distance > weapon.effectiveRange * 1.04) return null;
   const solved = solveBallisticAim(
@@ -1675,7 +1670,6 @@ function canWeaponInterceptTarget(
   candidate: RankedTarget,
   weapon: WeaponFireAiInput,
 ): boolean {
-  if (!canHitByAxis(input.unit, candidate)) return false;
   const rx = candidate.x - weapon.firepointX;
   const ry = candidate.y - weapon.firepointY;
   const distance = Math.hypot(rx, ry);
@@ -1855,8 +1849,7 @@ function createCapabilityAwareShootAi(level: AiLevel): ShootAiModule {
         } else if (level >= 21 && level < 25) {
           selectedTarget = target.rankedTargets
             .filter((candidate) => (
-              canHitByAxis(input.unit, candidate)
-              && Math.hypot(candidate.x - weapon.firepointX, candidate.y - weapon.firepointY)
+              Math.hypot(candidate.x - weapon.firepointX, candidate.y - weapon.firepointY)
                 <= weapon.effectiveRange * 1.04
             ))
             .map((candidate) => {
@@ -1900,12 +1893,10 @@ function createCapabilityAwareShootAi(level: AiLevel): ShootAiModule {
             ?? primary;
         } else if (level >= 7 && level < 25) {
           selectedTarget = target.rankedTargets.find((candidate) => (
-            canHitByAxis(input.unit, candidate)
-            && Math.hypot(candidate.x - weapon.firepointX, candidate.y - weapon.firepointY) <= weapon.effectiveRange * 1.04
+            Math.hypot(candidate.x - weapon.firepointX, candidate.y - weapon.firepointY) <= weapon.effectiveRange * 1.04
           )) ?? primary;
         } else if (maxReadyDamage > 0 && weapon.damage < maxReadyDamage * 0.5) {
           const compatible = target.rankedTargets
-            .filter((candidate) => canHitByAxis(input.unit, candidate))
             .map((candidate) => ({ candidate, distance: Math.hypot(candidate.x - weapon.firepointX, candidate.y - weapon.firepointY) }))
             .filter((entry) => entry.distance <= weapon.effectiveRange * 1.04)
             .sort((a, b) => {

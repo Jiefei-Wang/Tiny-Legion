@@ -37,8 +37,6 @@ export type MatchSpec = {
     initialUnitsPerSide: number;
     /** Free, immediate Test-Arena-style replenishment target for each side. */
     maintainUnitsPerSide?: number;
-    /** Spawn free mirrored waves from one random non-base craft selection. */
-    scheduledMirroredWaves?: boolean;
     initialLineup?: {
       player: { templateId: number; count: number };
       enemy: { templateId: number; count: number };

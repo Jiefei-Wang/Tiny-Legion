@@ -1,4 +1,3 @@
-import { GROUND_FIRE_Y_TOLERANCE } from "../../config/balance/range.ts";
 import { getStructureCellSize } from "../../config/balance/battlefield.ts";
 import { clamp } from "../../simulation/physics/impulse-model.ts";
 import { canOperate } from "../../simulation/units/control-unit-rules.ts";
@@ -16,13 +15,9 @@ import type {
   ShootAiModule,
   TargetAiModule,
 } from "./composite-ai.ts";
-import type { StructureCell, UnitInstance, UnitType } from "../../types.ts";
+import type { StructureCell, UnitInstance } from "../../types.ts";
 
 export type AiSkillTier = "baseline" | "low" | "medium" | "high";
-
-function canHitByAxis(unitY: number, unitType: UnitType, targetY: number, targetType: UnitType): boolean {
-  return unitType === "air" || targetType === "air" || Math.abs(targetY - unitY) <= GROUND_FIRE_Y_TOLERANCE;
-}
 
 function stableUnitPhase(id: string): number {
   let hash = 2166136261;
@@ -107,7 +102,6 @@ export function createSkillTierTargetAi(tier: AiSkillTier): TargetAiModule {
           const integrity = structureIntegrity(enemy);
           const threat = enemy.weaponAttachmentIds.filter((attachmentId) => enemy.attachments.some((a) => a.id === attachmentId && a.alive)).length;
           const maxArmor = enemy.structure.filter((cell) => !cell.destroyed).reduce((value, cell) => Math.max(value, cell.armor), 0);
-          const axisPenalty = canHitByAxis(input.unit.y, input.unit.type, aimPoint.y, enemy.type) ? 0 : 50_000;
           const rangePenalty = Math.max(0, distance - weapon.maxRange * 1.08) * 0.3;
           const armorMismatch = Math.max(0, maxArmor - weapon.maxPenetration) * (weapon.hasRapidFire ? 2.2 : 0.5);
           const finishWeight = tier === "baseline" ? 0 : 320;
@@ -123,7 +117,7 @@ export function createSkillTierTargetAi(tier: AiSkillTier): TargetAiModule {
           );
           return {
             targetId: enemy.id,
-            score: axisPenalty + rangePenalty + distance * distanceWeight + integrity * finishWeight + armorMismatch - threat * threatWeight - counterBonus,
+            score: rangePenalty + distance * distanceWeight + integrity * finishWeight + armorMismatch - threat * threatWeight - counterBonus,
             x: aimPoint.x,
             y: aimPoint.y,
             vx: enemy.vx,
@@ -241,10 +235,6 @@ export function createSkillTierShootAi(tier: AiSkillTier): ShootAiModule {
         if (!weapon) continue;
         for (let targetIndex = 0; targetIndex < candidates.length; targetIndex += 1) {
           const candidate = candidates[targetIndex]!;
-          if (!canHitByAxis(input.unit.y, input.unit.type, candidate.y, candidate.type)) {
-            blockedReason = "axis-mismatch";
-            continue;
-          }
           const distance = Math.hypot(candidate.x - weapon.firepointX, candidate.y - weapon.firepointY);
           if (distance > weapon.effectiveRange * 1.04) {
             blockedReason = "out-of-range";

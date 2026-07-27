@@ -135,7 +135,7 @@ export function validateGameConfig(config) {
   const separation = validateScalarObject(battlefield.separation, ["enabled", "overlapAllowanceRatio", "positionFactor", "velocityDamping", "gridSize", "spawnPlacementAttempts"], "balance/battlefield.yaml.separation");
   booleanAt(separation, "enabled", "balance/battlefield.yaml.separation");
 
-  const range = validateScalarObject(config.balance.range, ["weaponRangeMultiplier", "aircraftRangeBonusMax", "projectileSpeed", "projectileGravity", "groundFireYTolerance", "targetHistory"], "balance/range.yaml");
+  const range = validateScalarObject(config.balance.range, ["weaponRangeMultiplier", "aircraftRangeBonusMax", "projectileSpeed", "projectileGravity", "targetHistory"], "balance/range.yaml");
   validateScalarObject(range.targetHistory, ["windowSeconds", "samples"], "balance/range.yaml.targetHistory");
   const commander = exactKeys(config.balance.commander, ["armyCap"], "balance/commander.yaml");
   validateScalarObject(commander.armyCap, ["base", "skillPerAdditionalUnit"], "balance/commander.yaml.armyCap");
@@ -255,16 +255,25 @@ export function validateGameConfig(config) {
   validateScalarObject(arenaComparison.testArena, ["nodeDefense", "baseHp"], "ai/arena-comparison.yaml.testArena");
   const comparison = validateScalarObject(
     arenaComparison.comparison,
-    ["spawnCountPerSide", "spawnIntervalSeconds", "maxSimSeconds", "baseWorthUnits"],
+    ["unitsPerSide", "battlefieldWidth", "battlefieldHeight", "groundHeight", "maxSimSeconds", "baseWorthUnits"],
     "ai/arena-comparison.yaml.comparison",
   );
-  for (const key of ["spawnCountPerSide", "baseWorthUnits"]) {
+  for (const key of ["unitsPerSide", "baseWorthUnits"]) {
     const value = numberAt(comparison, key, "ai/arena-comparison.yaml.comparison");
     if (!Number.isInteger(value) || value <= 0) {
       fail(`ai/arena-comparison.yaml.comparison.${key}`, "expected a positive integer");
     }
   }
-  for (const key of ["spawnIntervalSeconds", "maxSimSeconds"]) {
+  for (const [key, minimum] of [["battlefieldWidth", 640], ["battlefieldHeight", 360], ["groundHeight", 80]]) {
+    const value = numberAt(comparison, key, "ai/arena-comparison.yaml.comparison");
+    if (!Number.isInteger(value) || value < minimum) {
+      fail(`ai/arena-comparison.yaml.comparison.${key}`, `expected an integer greater than or equal to ${minimum}`);
+    }
+  }
+  if (numberAt(comparison, "groundHeight", "ai/arena-comparison.yaml.comparison") > numberAt(comparison, "battlefieldHeight", "ai/arena-comparison.yaml.comparison") - 40) {
+    fail("ai/arena-comparison.yaml.comparison.groundHeight", "expected to be at least 40 below battlefieldHeight");
+  }
+  for (const key of ["maxSimSeconds"]) {
     if (numberAt(comparison, key, "ai/arena-comparison.yaml.comparison") <= 0) {
       fail(`ai/arena-comparison.yaml.comparison.${key}`, "expected a value greater than zero");
     }

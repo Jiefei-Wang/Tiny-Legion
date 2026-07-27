@@ -23,13 +23,11 @@ function matchSpec(seed: number, player: TierName, enemy: TierName): MatchSpec {
     scenario: {
       withBase: scenario.withBase,
       initialUnitsPerSide: scenario.initialUnitsPerSide,
-      scheduledMirroredWaves: scenario.scheduledMirroredWaves,
+      maintainUnitsPerSide: scenario.unitsPerSide,
     },
     templateNames: scenario.templateNames,
     battlefield: scenario.battlefield,
     spawnMode: "mirrored-random",
-    spawnBurst: scenario.spawnBurst,
-    spawnIntervalSeconds: scenario.spawnIntervalSeconds,
     baseWorthUnits: scenario.baseWorthUnits,
   };
 }

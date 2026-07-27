@@ -33,7 +33,6 @@
       "initialUnitsPerSide": 0,
       "seeds": 16,
       "templateNames": ["*"],
-      "useGlobalBattlefield": true,
       "opponentMode": "leaderboard-nearby",
       "leaderboard": { "opponentCount": 6 }
     }
