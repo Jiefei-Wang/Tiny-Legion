@@ -24,6 +24,7 @@ export const CONFIG_FILES = {
   ai: {
     shooting: "ai/shooting.yaml",
     levels: "ai/levels.yaml",
+    behavior: "ai/behavior.yaml",
     arenaComparison: "ai/arena-comparison.yaml",
   },
   display: {
@@ -99,7 +100,7 @@ function validateScalarObject(value, keys, path) {
 export function validateGameConfig(config) {
   exactKeys(config, ["balance", "ai", "display", "editor", "sound"], "config");
   exactKeys(config.balance, ["battlefield", "range", "commander", "economy", "materials", "units", "weapons", "campaign"], "config.balance");
-  exactKeys(config.ai, ["shooting", "levels", "arenaComparison"], "config.ai");
+  exactKeys(config.ai, ["shooting", "levels", "behavior", "arenaComparison"], "config.ai");
   exactKeys(config.display, ["battle"], "config.display");
   exactKeys(config.editor, ["editor"], "config.editor");
   exactKeys(config.sound, ["battle"], "config.sound");
@@ -137,6 +138,20 @@ export function validateGameConfig(config) {
 
   const range = validateScalarObject(config.balance.range, ["weaponRangeMultiplier", "aircraftRangeBonusMax", "projectileSpeed", "projectileGravity", "targetHistory"], "balance/range.yaml");
   validateScalarObject(range.targetHistory, ["windowSeconds", "samples"], "balance/range.yaml.targetHistory");
+  const behavior = exactKeys(config.ai.behavior, ["border", "target", "movement"], "ai/behavior.yaml");
+  const borderBehavior = validateScalarObject(behavior.border, ["marginRatio", "graceSeconds", "recoverySeconds", "cornerMultiplier"], "ai/behavior.yaml.border");
+  if (!(numberAt(borderBehavior, "marginRatio", "ai/behavior.yaml.border") > 0 && numberAt(borderBehavior, "marginRatio", "ai/behavior.yaml.border") < 0.5)) fail("ai/behavior.yaml.border.marginRatio", "expected a value between 0 and 0.5");
+  if (!(numberAt(borderBehavior, "graceSeconds", "ai/behavior.yaml.border") >= 0)) fail("ai/behavior.yaml.border.graceSeconds", "expected a non-negative number");
+  if (!(numberAt(borderBehavior, "recoverySeconds", "ai/behavior.yaml.border") > 0)) fail("ai/behavior.yaml.border.recoverySeconds", "expected a positive number");
+  if (!(numberAt(borderBehavior, "cornerMultiplier", "ai/behavior.yaml.border") >= 1)) fail("ai/behavior.yaml.border.cornerMultiplier", "expected a value of at least 1");
+  const targetBehavior = validateScalarObject(behavior.target, ["minimumCommitSeconds", "challengerImprovementRatio", "awarenessRangeFactor"], "ai/behavior.yaml.target");
+  if (!(numberAt(targetBehavior, "minimumCommitSeconds", "ai/behavior.yaml.target") >= 0)) fail("ai/behavior.yaml.target.minimumCommitSeconds", "expected a non-negative number");
+  if (!(numberAt(targetBehavior, "challengerImprovementRatio", "ai/behavior.yaml.target") >= 0)) fail("ai/behavior.yaml.target.challengerImprovementRatio", "expected a non-negative number");
+  if (!(numberAt(targetBehavior, "awarenessRangeFactor", "ai/behavior.yaml.target") > 0)) fail("ai/behavior.yaml.target.awarenessRangeFactor", "expected a positive number");
+  const movementBehavior = validateScalarObject(behavior.movement, ["minimumFacingChangeSeconds", "minimumGroundDirectionHoldSeconds", "groundReverseCloseRangeFactor"], "ai/behavior.yaml.movement");
+  if (!(numberAt(movementBehavior, "minimumFacingChangeSeconds", "ai/behavior.yaml.movement") >= 0)) fail("ai/behavior.yaml.movement.minimumFacingChangeSeconds", "expected a non-negative number");
+  if (!(numberAt(movementBehavior, "minimumGroundDirectionHoldSeconds", "ai/behavior.yaml.movement") >= 0)) fail("ai/behavior.yaml.movement.minimumGroundDirectionHoldSeconds", "expected a non-negative number");
+  if (!(numberAt(movementBehavior, "groundReverseCloseRangeFactor", "ai/behavior.yaml.movement") > 0)) fail("ai/behavior.yaml.movement.groundReverseCloseRangeFactor", "expected a positive number");
   const commander = exactKeys(config.balance.commander, ["armyCap"], "balance/commander.yaml");
   validateScalarObject(commander.armyCap, ["base", "skillPerAdditionalUnit"], "balance/commander.yaml.armyCap");
   validateScalarObject(config.balance.economy, ["baseIncome", "refineryIncome", "garrisonUpkeep"], "balance/economy.yaml");

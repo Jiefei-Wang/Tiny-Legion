@@ -5,21 +5,17 @@ export type Aggregate = {
   wins: number;
   ties: number;
   losses: number;
-  avgGasWorthDelta: number;
-  score: number;
+  destroyedBySide: number;
+  destroyedByOpponent: number;
+  avgDestroyedMargin: number;
 };
-
-export function scoreForSide(outcome: "win" | "tie" | "loss", gasWorthDelta: number): number {
-  const O = outcome === "win" ? 2 : outcome === "tie" ? 1 : 0;
-  return O * 1_000_000 + gasWorthDelta;
-}
 
 export function aggregateResults(results: MatchResult[]): Aggregate {
   let wins = 0;
   let ties = 0;
   let losses = 0;
-  let sumGas = 0;
-  let sumScore = 0;
+  let destroyedBySide = 0;
+  let destroyedByOpponent = 0;
   for (let index = 0; index < results.length; index += 1) {
     const r = results[index];
     const s = r.sides.player;
@@ -31,8 +27,8 @@ export function aggregateResults(results: MatchResult[]): Aggregate {
     } else {
       losses += 1;
     }
-    sumGas += s.gasWorthDelta;
-    sumScore += scoreForSide(outcome, s.gasWorthDelta);
+    destroyedBySide += r.performance.destroyedByPlayer;
+    destroyedByOpponent += r.performance.destroyedByEnemy;
   }
   const games = results.length;
   return {
@@ -40,8 +36,9 @@ export function aggregateResults(results: MatchResult[]): Aggregate {
     wins,
     ties,
     losses,
-    avgGasWorthDelta: games > 0 ? sumGas / games : 0,
-    score: games > 0 ? sumScore / games : 0,
+    destroyedBySide,
+    destroyedByOpponent,
+    avgDestroyedMargin: games > 0 ? (destroyedBySide - destroyedByOpponent) / games : 0,
   };
 }
 

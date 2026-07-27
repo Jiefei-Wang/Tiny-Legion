@@ -1,3 +1,4 @@
+import { AI_BEHAVIOR_CONFIG } from "../../config/ai/behavior.ts";
 import type { ComponentId, ProjectileClass } from "../../types.ts";
 import type { BattleState, UnitInstance } from "../../types.ts";
 
@@ -38,6 +39,16 @@ export interface BattleAiInput {
   dt: number;
   desiredRange: number;
   baseTarget: { x: number; y: number };
+  battlefield: {
+    width: number;
+    height: number;
+    laneBounds: {
+      airMinZ: number;
+      airMaxZ: number;
+      groundMinY: number;
+      groundMaxY: number;
+    };
+  };
   canShootAtAngle: (
     componentId: ComponentId,
     dx: number,
@@ -131,15 +142,30 @@ export interface BattleAiController {
 }
 
 export function createCompositeAiController(modules: CompositeAiModules): BattleAiController {
+  const facingState = new Map<string, { facing: 1 | -1; changedAt: number }>();
   return {
     decide: (input): CombatDecision => {
       const target = modules.target.decideTarget(input);
       const movement = modules.movement.decideMovement(input, target);
       const shoot = modules.shoot.decideShoot(input, target, movement);
       const firePlans = shoot.firePlans ?? (shoot.firePlan ? [shoot.firePlan] : []);
-      const facing = shoot.preserveFacing === true
+      const requestedFacing = shoot.preserveFacing === true
         ? input.unit.facing
         : target.attackPoint.x >= input.unit.x ? 1 : -1;
+      const previousFacing = facingState.get(input.unit.id) ?? {
+        facing: input.unit.facing,
+        changedAt: input.unit.aiStateTimer,
+      };
+      const canChangeFacing = input.unit.aiStateTimer - previousFacing.changedAt
+        >= AI_BEHAVIOR_CONFIG.movement.minimumFacingChangeSeconds;
+      const facing = requestedFacing !== previousFacing.facing && !canChangeFacing
+        ? previousFacing.facing
+        : requestedFacing;
+      if (facing !== previousFacing.facing) {
+        facingState.set(input.unit.id, { facing, changedAt: input.unit.aiStateTimer });
+      } else if (!facingState.has(input.unit.id)) {
+        facingState.set(input.unit.id, previousFacing);
+      }
       const targetId = target.rankedTargets[0]?.targetId ?? null;
       return {
         facing,

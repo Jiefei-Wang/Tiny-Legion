@@ -399,6 +399,24 @@ export const GAME_CONFIG = {
     "levels": {
       "maxCertifiedLevel": 5
     },
+    "behavior": {
+      "border": {
+        "marginRatio": 0.07,
+        "graceSeconds": 3,
+        "recoverySeconds": 5,
+        "cornerMultiplier": 2
+      },
+      "target": {
+        "minimumCommitSeconds": 0.75,
+        "challengerImprovementRatio": 0.2,
+        "awarenessRangeFactor": 1.25
+      },
+      "movement": {
+        "minimumFacingChangeSeconds": 0.5,
+        "minimumGroundDirectionHoldSeconds": 0.8,
+        "groundReverseCloseRangeFactor": 0.45
+      }
+    },
     "arenaComparison": {
       "testArena": {
         "nodeDefense": 1.1,
@@ -409,7 +427,7 @@ export const GAME_CONFIG = {
         "battlefieldWidth": 1500,
         "battlefieldHeight": 1500,
         "groundHeight": 600,
-        "maxSimSeconds": 200,
+        "maxSimSeconds": 100,
         "baseWorthUnits": 20
       }
     }
@@ -976,6 +994,18 @@ export const GAME_CONFIG_DESCRIPTIONS = {
     },
     "levels": {
       "maxCertifiedLevel": "Highest built-in AI skill level exposed by certified level selectors."
+    },
+    "behavior": {
+      "border.marginRatio": "Fraction of each navigable battlefield span treated as the soft border-dwell band for AI movement.",
+      "border.graceSeconds": "Continuous seconds an AI may remain in the border band before inward recovery steering begins.",
+      "border.recoverySeconds": "Additional border exposure required for inward recovery steering to reach full strength.",
+      "border.cornerMultiplier": "Multiplier applied to border exposure when a unit occupies two border bands at once.",
+      "target.minimumCommitSeconds": "Minimum ordinary target commitment time before switching to a merely better challenger.",
+      "target.challengerImprovementRatio": "Fractional utility improvement an ordinary challenger needs before replacing the committed target.",
+      "target.awarenessRangeFactor": "Multiplier applied to desired weapon range when defining immediate local enemy awareness.",
+      "movement.minimumFacingChangeSeconds": "Minimum time between ordinary AI visual-facing changes.",
+      "movement.minimumGroundDirectionHoldSeconds": "Minimum time a ground craft holds a horizontal movement direction before an ordinary reversal.",
+      "movement.groundReverseCloseRangeFactor": "Desired-range fraction inside which a ground craft may reverse to escape a dangerously close enemy."
     },
     "arenaComparison": {
       "testArena.nodeDefense": "Default Test Arena node defense multiplier shared by browser and headless AI comparison.",

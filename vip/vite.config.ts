@@ -1737,11 +1737,9 @@ function arenaModelPlugin() {
               parallelMode: pool ? "worker-threads" : "single-thread-fallback",
               craftA: {
                 destroyed: result.losses.player.destroyedObjects,
-                gasWasted: round2(result.losses.player.gasWasted),
               },
               craftB: {
                 destroyed: result.losses.enemy.destroyedObjects,
-                gasWasted: round2(result.losses.enemy.gasWasted),
               },
             });
           } catch (error) {

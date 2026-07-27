@@ -57,12 +57,6 @@ export type MatchSpec = {
 export type SideOutcome = {
   win: boolean;
   tie: boolean;
-  gasStart: number;
-  gasEnd: number;
-  onFieldGasValueStart: number;
-  onFieldGasValueEnd: number;
-  gasWorthDelta: number;
-  score: number;
 };
 
 export type MatchResult = {
@@ -85,8 +79,8 @@ export type MatchResult = {
     enemyUnitIntegrity: number;
   };
   losses: {
-    player: { destroyedObjects: number; gasWasted: number };
-    enemy: { destroyedObjects: number; gasWasted: number };
+    player: { destroyedObjects: number };
+    enemy: { destroyedObjects: number };
   };
   performance: {
     /** Weighted opposing objects destroyed by each side; a base uses baseWorthUnits. */

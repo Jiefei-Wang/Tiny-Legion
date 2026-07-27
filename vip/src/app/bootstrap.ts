@@ -7,7 +7,6 @@ import {
   BATTLEFIELD_WIDTH,
   DEFAULT_UNIT_MOVEMENT_SPEED_MULTIPLIER,
   DEFAULT_GROUND_HEIGHT_RATIO,
-  BATTLE_SALVAGE_REFUND_FACTOR,
 } from "../config/balance/battlefield.ts";
 import { createMapNodes } from "../gameplay/map/node-graph.ts";
 import {
@@ -670,7 +669,6 @@ export function bootstrap(options: BootstrapOptions = {}): void {
   let testArenaTemplateStoreReady = false;
   type CraftArenaSideResult = {
     destroyed: number;
-    gasWasted: number;
   };
   type CraftArenaResult = {
     durationMinutes: number;
@@ -707,7 +705,6 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     groundHeight: Math.floor(BATTLEFIELD_HEIGHT * DEFAULT_GROUND_HEIGHT_RATIO),
   };
   let craftArenaScenarios: CraftArenaScenario[] = [];
-  let craftArenaMetric: "destroyed" | "gasWasted" = "destroyed";
   let craftArenaSelectedScenarioId: string | null = null;
   const craftArenaPairKey = (craftAId: number, craftBId: number): string => (
     craftAId < craftBId ? `${craftAId}:${craftBId}` : `${craftBId}:${craftAId}`
@@ -2400,28 +2397,6 @@ export function bootstrap(options: BootstrapOptions = {}): void {
 
   startDebugProbeLoop();
 
-  const refundFactor = BATTLE_SALVAGE_REFUND_FACTOR;
-  const computeOnFieldGasValue = (side: "player" | "enemy"): number => {
-    const s = battle.getState();
-    let sum = 0;
-    for (const unit of s.units) {
-      if (!unit || !unit.alive || unit.side !== side) {
-        continue;
-      }
-      const cost = typeof unit.deploymentGasCost === "number" ? unit.deploymentGasCost : 0;
-      const refundable = Math.floor(cost * refundFactor);
-      if (refundable > 0) {
-        sum += refundable;
-      }
-    }
-    return sum;
-  };
-
-  let gasStartPlayer = 0;
-  let gasStartEnemy = 0;
-  let onFieldStartPlayer = 0;
-  let onFieldStartEnemy = 0;
-
   const blockUserInputForReplay = (): void => {
     const stopAll = (event: Event): void => {
       const target = event.target;
@@ -2535,11 +2510,6 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     const spawnBurst = Math.max(1, Math.floor(spec.spawnBurst ?? 1));
     const spawnMaxActive = Math.max(1, Math.floor(spec.spawnMaxActive ?? 5));
 
-    gasStartPlayer = gas;
-    gasStartEnemy = battle.getState().enemyGas;
-    onFieldStartPlayer = computeOnFieldGasValue("player");
-    onFieldStartEnemy = computeOnFieldGasValue("enemy");
-
     const pickMirrored = (): { templateId: number | null; y: number } => {
       if (roster.length === 0) {
         return { templateId: null, y: 0 };
@@ -2646,37 +2616,18 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       if (battle.getState().outcome) {
         // Verify replay stats against expected.
         const final = battle.getState();
-        const gasEndPlayer = gas;
-        const gasEndEnemy = final.enemyGas;
-        const onFieldEndPlayer = computeOnFieldGasValue("player");
-        const onFieldEndEnemy = computeOnFieldGasValue("enemy");
-        const worthDeltaPlayer = (gasEndPlayer + onFieldEndPlayer) - (gasStartPlayer + onFieldStartPlayer);
-        const worthDeltaEnemy = (gasEndEnemy + onFieldEndEnemy) - (gasStartEnemy + onFieldStartEnemy);
         const tie = String(final.outcome?.reason ?? "").toLowerCase().includes("deadline");
-        const playerOutcome: "win" | "tie" | "loss" = tie ? "tie" : Boolean(final.outcome?.victory) ? "win" : "loss";
-        const enemyOutcome: "win" | "tie" | "loss" = tie ? "tie" : Boolean(final.outcome?.victory) ? "loss" : "win";
-        const playerScore = (playerOutcome === "win" ? 2 : playerOutcome === "tie" ? 1 : 0) * 1_000_000 + worthDeltaPlayer;
-        const enemyScore = (enemyOutcome === "win" ? 2 : enemyOutcome === "tie" ? 1 : 0) * 1_000_000 + worthDeltaEnemy;
+        const losses = battle.getLossStats();
         const actual = {
           simSecondsElapsed: simT,
           outcome: { playerVictory: Boolean(final.outcome?.victory), reason: String(final.outcome?.reason ?? "") },
           sides: {
-            player: {
-              gasStart: gasStartPlayer,
-              gasEnd: gasEndPlayer,
-              onFieldGasValueStart: onFieldStartPlayer,
-              onFieldGasValueEnd: onFieldEndPlayer,
-              gasWorthDelta: worthDeltaPlayer,
-              score: playerScore,
-            },
-            enemy: {
-              gasStart: gasStartEnemy,
-              gasEnd: gasEndEnemy,
-              onFieldGasValueStart: onFieldStartEnemy,
-              onFieldGasValueEnd: onFieldEndEnemy,
-              gasWorthDelta: worthDeltaEnemy,
-              score: enemyScore,
-            },
+            player: { win: !tie && Boolean(final.outcome?.victory), tie },
+            enemy: { win: !tie && !Boolean(final.outcome?.victory), tie },
+          },
+          losses: {
+            player: { destroyedObjects: losses.player.destroyedObjects },
+            enemy: { destroyedObjects: losses.enemy.destroyedObjects },
           },
         };
 
@@ -2685,21 +2636,10 @@ export function bootstrap(options: BootstrapOptions = {}): void {
           const epsT = 1e-6;
           const tOk = Math.abs((expected.simSecondsElapsed ?? 0) - actual.simSecondsElapsed) < epsT;
           const outcomeOk = Boolean(expected.outcome.playerVictory) === actual.outcome.playerVictory && String(expected.outcome.reason ?? "") === actual.outcome.reason;
-          const sidesOk = (side: "player" | "enemy"): boolean => {
-            const e = expected.sides?.[side];
-            const a = (actual as any).sides?.[side];
-            if (!e || !a) return false;
-            return (
-              e.gasStart === a.gasStart &&
-              e.gasEnd === a.gasEnd &&
-              e.onFieldGasValueStart === a.onFieldGasValueStart &&
-              e.onFieldGasValueEnd === a.onFieldGasValueEnd &&
-              e.gasWorthDelta === a.gasWorthDelta &&
-              e.score === a.score
-            );
-          };
-          const ok = tOk && outcomeOk && sidesOk("player") && sidesOk("enemy");
-          addLog(`[replay-verify] ${ok ? "PASS" : "FAIL"} | outcome=${outcomeOk} time=${tOk} sides=${sidesOk("player") && sidesOk("enemy")}`, ok ? "good" : "bad");
+          const destroyedOk = expected.losses?.player?.destroyedObjects === actual.losses.player.destroyedObjects
+            && expected.losses?.enemy?.destroyedObjects === actual.losses.enemy.destroyedObjects;
+          const ok = tOk && outcomeOk && destroyedOk;
+          addLog(`[replay-verify] ${ok ? "PASS" : "FAIL"} | outcome=${outcomeOk} time=${tOk} destroyed=${destroyedOk}`, ok ? "good" : "bad");
         } else {
           addLog("[replay-verify] No expected stats in artifact", "warn");
         }
@@ -2910,17 +2850,8 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       return;
     }
     testArenaLossStats.classList.add("hidden");
-    const state = battle.getState();
-    const onFieldPlayer = computeOnFieldGasValue("player");
-    const onFieldEnemy = computeOnFieldGasValue("enemy");
-    const worthDeltaPlayer = (gas + onFieldPlayer) - (gasStartPlayer + onFieldStartPlayer);
-    const worthDeltaEnemy = (state.enemyGas + onFieldEnemy) - (gasStartEnemy + onFieldStartEnemy);
-    const tie = state.outcome?.reason?.toLowerCase().includes("deadline") ?? false;
-    const playerOutcome: "win" | "tie" | "loss" = !state.outcome ? "loss" : tie ? "tie" : state.outcome.victory ? "win" : "loss";
-    const enemyOutcome: "win" | "tie" | "loss" = !state.outcome ? "loss" : tie ? "tie" : state.outcome.victory ? "loss" : "win";
-    const playerScore = (playerOutcome === "win" ? 2 : playerOutcome === "tie" ? 1 : 0) * 1_000_000 + worthDeltaPlayer;
-    const enemyScore = (enemyOutcome === "win" ? 2 : enemyOutcome === "tie" ? 1 : 0) * 1_000_000 + worthDeltaEnemy;
-    arenaReplayStats.textContent = `Replay | P gas=${Math.floor(gas)} field=${Math.floor(onFieldPlayer)} dWorth=${Math.floor(worthDeltaPlayer)} score=${Math.floor(playerScore)} | E gas=${Math.floor(state.enemyGas)} field=${Math.floor(onFieldEnemy)} dWorth=${Math.floor(worthDeltaEnemy)} score=${Math.floor(enemyScore)}`;
+    const losses = battle.getLossStats();
+    arenaReplayStats.textContent = `Replay | P destroyed=${losses.enemy.destroyedObjects} | E destroyed=${losses.player.destroyedObjects}`;
   };
 
   const setScreen = (next: ScreenMode): void => {
@@ -3354,10 +3285,9 @@ export function bootstrap(options: BootstrapOptions = {}): void {
           <div class="craft-matchup-inspector-heading"><strong>${escapeHtml(craftA?.name ?? `Missing craft ${scenario.craftAId}`)}</strong><span>vs</span><strong>${escapeHtml(craftB?.name ?? `Missing craft ${scenario.craftBId}`)}</strong></div>
           <div class="small">${craftArenaSettings.quantity} vs ${craftArenaSettings.quantity} · ${craftArenaSettings.durationMinutes} minutes · immediate replenishment</div>
           ${result ? `
-            <div class="craft-matchup-side-stat"><span>Craft A · Left</span><strong>${result.craftA.destroyed} destroyed</strong><small>${result.craftA.gasWasted.toFixed(0)} gas wasted</small></div>
-            <div class="craft-matchup-side-stat"><span>Craft B · Right</span><strong>${result.craftB.destroyed} destroyed</strong><small>${result.craftB.gasWasted.toFixed(0)} gas wasted</small></div>
+            <div class="craft-matchup-side-stat"><span>Craft A · Left</span><strong>${result.craftA.destroyed} destroyed</strong></div>
+            <div class="craft-matchup-side-stat"><span>Craft B · Right</span><strong>${result.craftB.destroyed} destroyed</strong></div>
             <div class="sidebar-metric"><span>Destroyed difference</span><strong>${Math.abs(result.craftA.destroyed - result.craftB.destroyed)}</strong></div>
-            <div class="sidebar-metric"><span>Gas-waste difference</span><strong>${Math.abs(result.craftA.gasWasted - result.craftB.gasWasted).toFixed(0)}</strong></div>
             <div class="small">Completed ${escapeHtml(new Date(result.completedAt).toLocaleString())} · ${result.simSecondsElapsed.toFixed(0)} simulated seconds</div>
           ` : `<div class="small">${scenario.busy ? "Simulation running…" : "This matchup has no result for the current global settings."}</div>`}
           ${scenario.error ? `<div class="small warn">${escapeHtml(scenario.error)}</div>` : ""}
@@ -5609,8 +5539,8 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     );
     const heatmapDifferences = craftArenaScenarios.flatMap((scenario) => {
       if (!scenario.result) return [];
-      const valueA = scenario.result.craftA[craftArenaMetric];
-      const valueB = scenario.result.craftB[craftArenaMetric];
+      const valueA = scenario.result.craftA.destroyed;
+      const valueB = scenario.result.craftB.destroyed;
       return [Math.abs(valueB - valueA)];
     });
     const heatmapMaxDifference = Math.max(1, ...heatmapDifferences);
@@ -5627,15 +5557,15 @@ export function bootstrap(options: BootstrapOptions = {}): void {
           }
           const rowResult = resultSideForCraft(scenario, rowCraft.id);
           const columnResult = resultSideForCraft(scenario, columnCraft.id);
-          const rowValue = rowResult?.[craftArenaMetric];
-          const columnValue = columnResult?.[craftArenaMetric];
+          const rowValue = rowResult?.destroyed;
+          const columnValue = columnResult?.destroyed;
           const difference = typeof rowValue === "number" && typeof columnValue === "number"
             ? columnValue - rowValue
             : 0;
           const intensity = Math.min(1, Math.abs(difference) / heatmapMaxDifference);
           const tone = difference > 0 ? "advantage" : difference < 0 ? "disadvantage" : "neutral";
           const displayValue = typeof rowValue === "number" ? Math.round(rowValue).toLocaleString() : "…";
-          const unit = craftArenaMetric === "gasWasted" ? "gas wasted" : "destroyed";
+          const unit = "destroyed";
           return `<td>
             <button
               class="craft-heatmap-cell ${tone} ${craftArenaSelectedScenarioId === scenario.id ? "selected" : ""}"
@@ -5649,13 +5579,9 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     `).join("");
     craftArenaCenter.innerHTML = `
       <div class="workspace-header"><div><span class="eyebrow">Developer Tools / Craft Arena</span><h1>Craft Comparison</h1><p>Each cell reports the row craft's result against the column craft. Cooler green means the row craft lost less; warmer red means it lost more.</p></div></div>
-      <div class="craft-heatmap-tabs" role="tablist" aria-label="Heat map metric">
-        <button id="craftHeatmapDestroyed" role="tab" aria-selected="${craftArenaMetric === "destroyed"}" class="${craftArenaMetric === "destroyed" ? "active" : ""}">Number destroyed</button>
-        <button id="craftHeatmapGas" role="tab" aria-selected="${craftArenaMetric === "gasWasted"}" class="${craftArenaMetric === "gasWasted" ? "active" : ""}">Gas wasted</button>
-      </div>
       ${heatmapTemplates.length > 1 ? `
         <div class="craft-heatmap-wrap">
-          <table class="craft-heatmap" aria-label="Craft comparison heat map for ${craftArenaMetric === "gasWasted" ? "gas wasted" : "number destroyed"}">
+          <table class="craft-heatmap" aria-label="Craft comparison heat map for number destroyed">
             <thead><tr><th></th>${heatmapTemplates.map((template) => `<th scope="col">${escapeHtml(template.name)}</th>`).join("")}</tr></thead>
             <tbody>${heatmapRows}</tbody>
           </table>
@@ -5780,7 +5706,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
 
     leaderboardCenter.innerHTML = `
       <h3>AI Leaderboard</h3>
-      <div class="small">Persistent head-to-head ranking. “Vs previous” is certified after 16 matches and must exceed 60%.</div>
+      <div class="small">Persistent head-to-head ranking. “Vs previous” is certified across 16 alternating-side matches and must reach a 1.10 destroyed ratio.</div>
       <div class="leaderboard-table-wrap" style="margin-top:6px; border:1px solid #333; border-radius:6px; padding:6px; max-height:520px; overflow:auto;">
         ${testArenaLeaderboardLoading ? `<div class="small">Loading...</div>` : ""}
         ${!testArenaLeaderboardLoading && leaderboardRows.length <= 0 ? `<div class="small warn">No leaderboard data found. Train composite runs first.</div>` : ""}
@@ -6498,14 +6424,6 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     });
     getOptionalElement<HTMLButtonElement>("#btnRunAllCraftArena")?.addEventListener("click", () => {
       void Promise.all(craftArenaScenarios.map((scenario) => runCraftArenaScenario(scenario.id)));
-    });
-    getOptionalElement<HTMLButtonElement>("#craftHeatmapDestroyed")?.addEventListener("click", () => {
-      craftArenaMetric = "destroyed";
-      renderPanels();
-    });
-    getOptionalElement<HTMLButtonElement>("#craftHeatmapGas")?.addEventListener("click", () => {
-      craftArenaMetric = "gasWasted";
-      renderPanels();
     });
     craftArenaCenter.querySelectorAll<HTMLButtonElement>("[data-craft-arena-select]").forEach((cell) => {
       cell.addEventListener("click", () => {

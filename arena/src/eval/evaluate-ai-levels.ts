@@ -11,6 +11,7 @@ export type LevelEvaluationResult = {
   destroyedByHigher: number;
   destroyedByLower: number;
   destroyRatio: number;
+  matches: number;
   pass: boolean;
 };
 
@@ -71,6 +72,7 @@ export async function evaluateCompositePair(
     destroyedByHigher: comparison.destroyedByA,
     destroyedByLower: comparison.destroyedByB,
     destroyRatio,
+    matches: 1,
     pass: destroyRatio >= minimumDestroyRatio,
   };
 }
@@ -78,16 +80,34 @@ export async function evaluateCompositePair(
 export async function evaluateAiLevelPair(
   lowerLevel: number,
   higherLevel: number,
-  seed = aiLevelCertificationSeed(0),
   minimumDestroyRatio = AI_LEVEL_MIN_DESTROY_RATIO,
 ): Promise<LevelEvaluationResult> {
-  const result = await evaluateCompositePair(
-    levelCompositeConfig(lowerLevel),
-    levelCompositeConfig(higherLevel),
-    seed,
-    minimumDestroyRatio,
-  );
-  return { lowerLevel, higherLevel, ...result };
+  const lower = configAiSpec(levelCompositeConfig(lowerLevel));
+  const higher = configAiSpec(levelCompositeConfig(higherLevel));
+  let destroyedByHigher = 0;
+  let destroyedByLower = 0;
+  for (let index = 0; index < AI_LEVEL_CERTIFICATION_SERIES; index += 1) {
+    const higherOnPlayer = index % 2 === 0;
+    const result = await runMatch(configMatchSpec(
+      aiLevelCertificationSeed(index),
+      higherOnPlayer ? higher : lower,
+      higherOnPlayer ? lower : higher,
+    ));
+    const comparison = compareMatchResult(result);
+    destroyedByHigher += higherOnPlayer ? comparison.destroyedByA : comparison.destroyedByB;
+    destroyedByLower += higherOnPlayer ? comparison.destroyedByB : comparison.destroyedByA;
+  }
+  const destroyRatio = adjacentLevelDestroyRatio(destroyedByHigher, destroyedByLower);
+  return {
+    lowerLevel,
+    higherLevel,
+    seed: aiLevelCertificationSeed(0),
+    destroyedByHigher,
+    destroyedByLower,
+    destroyRatio,
+    matches: AI_LEVEL_CERTIFICATION_SERIES,
+    pass: destroyRatio >= minimumDestroyRatio,
+  };
 }
 
 export async function evaluateAiLevels(

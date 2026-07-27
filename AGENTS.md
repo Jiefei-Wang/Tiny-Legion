@@ -40,6 +40,13 @@ If you are a new coding agent/session, read this file first, then read:
   - `src/ai/shooting/ballistic-aim.ts`
   - `src/ai/movement/threat-movement.ts`
   - `src/ai/shooting/weapon-ai-policy.ts`
+- Certified AI behavior rules:
+  1. Do not stay at the battlefield border for too long; border travel remains unrestricted, but prolonged dwell must produce soft inward recovery.
+  2. Do not flip facing or horizontal movement direction too quickly.
+  3. Ground craft/tanks should dodge bullets with up/down movement and should not move backward frequently.
+  4. Aircraft may fly in any direction to dodge bullets.
+  5. Movement must not ignore nearby enemies even while pursuing a separate strategic target.
+  6. Reuse the current unified shooting algorithm. Target selection/integration may change, but ballistic solving, accuracy calibration, and miss behavior must not be replaced.
 - Arena workflow is JS/TS-only (no Python bridge, no gRPC battlefield service).
 - Multi-weapon units with independent cooldown timers
 - Player weapon controls:

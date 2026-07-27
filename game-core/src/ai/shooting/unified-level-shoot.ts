@@ -52,25 +52,21 @@ export function createUnifiedLevelShootAi(levelRaw: number): ShootAiModule {
 
   return {
     decideShoot: (input, target, movement) => {
-      const primary = target.rankedTargets[0] ?? null;
-      let observedTarget: TargetDecision = target;
-      if (primary) {
-        const observationKey = `${input.unit.id}:${primary.targetId}`;
-        const prior = observedVelocityByTarget.get(observationKey);
-        const observed = prior
-          ? {
-              vx: prior.vx * (1 - responseWeight) + primary.vx * responseWeight,
-              vy: prior.vy * (1 - responseWeight) + primary.vy * responseWeight,
-            }
-          : { vx: primary.vx, vy: primary.vy };
-        observedVelocityByTarget.set(observationKey, observed);
-        observedTarget = {
-          ...target,
-          rankedTargets: target.rankedTargets.map((candidate, index) => index === 0
-            ? { ...candidate, vx: observed.vx, vy: observed.vy }
-            : candidate),
-        };
-      }
+      const observedTarget: TargetDecision = {
+        ...target,
+        rankedTargets: target.rankedTargets.map((candidate) => {
+          const observationKey = `${input.unit.id}:${candidate.targetId}`;
+          const prior = observedVelocityByTarget.get(observationKey);
+          const observed = prior
+            ? {
+                vx: prior.vx * (1 - responseWeight) + candidate.vx * responseWeight,
+                vy: prior.vy * (1 - responseWeight) + candidate.vy * responseWeight,
+              }
+            : { vx: candidate.vx, vy: candidate.vy };
+          observedVelocityByTarget.set(observationKey, observed);
+          return { ...candidate, vx: observed.vx, vy: observed.vy };
+        }),
+      };
 
       const exact = core.decideShoot(input, observedTarget, movement);
       const plans = exact.firePlans ?? (exact.firePlan ? [exact.firePlan] : []);
@@ -81,19 +77,18 @@ export function createUnifiedLevelShootAi(levelRaw: number): ShootAiModule {
         };
       }
 
-      const targetUnit = primary
-        ? input.state.units.find((unit) => unit.id === primary.targetId) ?? null
-        : null;
-      const missProfileKey = primary ? `${input.unit.id}:${primary.targetId}` : "missing-target";
-      const missProfile = missProfileByTarget.get(missProfileKey) ?? createMissProfile(missProfileKey);
-      missProfileByTarget.set(missProfileKey, missProfile);
       const biasedPlans = plans.flatMap((plan) => {
         const weapon = input.getWeaponFireInput(plan.preferredSlot);
-        if (!weapon || !primary) return [];
+        const planTarget = observedTarget.rankedTargets.find((candidate) => candidate.targetId === plan.intendedTargetId) ?? null;
+        if (!weapon || !planTarget) return [];
+        const targetUnit = input.state.units.find((unit) => unit.id === planTarget.targetId) ?? null;
+        const missProfileKey = `${input.unit.id}:${planTarget.targetId}`;
+        const missProfile = missProfileByTarget.get(missProfileKey) ?? createMissProfile(missProfileKey);
+        missProfileByTarget.set(missProfileKey, missProfile);
         const muzzleX = weapon.projectileOriginBaseX + Math.cos(plan.angleRad) * weapon.projectileOriginForwardOffset;
         const muzzleY = weapon.projectileOriginBaseY + Math.sin(plan.angleRad) * weapon.projectileOriginForwardOffset;
-        const predictedTargetX = primary.x + primary.vx * plan.leadTimeS;
-        const predictedTargetY = primary.y + primary.vy * plan.leadTimeS;
+        const predictedTargetX = planTarget.x + planTarget.vx * plan.leadTimeS;
+        const predictedTargetY = planTarget.y + planTarget.vy * plan.leadTimeS;
         const distance = Math.hypot(predictedTargetX - muzzleX, predictedTargetY - muzzleY);
         const targetRadius = Math.max(4, targetUnit?.radius ?? 0);
         const projectileRadius = Math.max(2, Math.sqrt(Math.max(0, weapon.damage)) * 0.35);

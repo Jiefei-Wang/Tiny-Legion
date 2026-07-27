@@ -15,5 +15,5 @@ comparison:
   battlefieldWidth: 1500
   battlefieldHeight: 1500
   groundHeight: 600
-  maxSimSeconds: 200
+  maxSimSeconds: 100
   baseWorthUnits: 20

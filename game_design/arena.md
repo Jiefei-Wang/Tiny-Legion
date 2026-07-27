@@ -215,58 +215,17 @@ For each AI family:
 
 Optimization is match-evaluation-bound and parallelizable.
 
-## 8) Scoring Function (Priority: Win > Time > Destroyed)
+## 8) AI Evaluation (Destroyed Units Only)
 
-We score each match with a single scalar that encodes lexicographic priority.
+AI evaluation does not emit or consume gas-derived fitness. Each match reports win/tie/loss plus the weighted opposing objects destroyed by each side; ordinary craft count as one and bases count as the scenario's configured `baseWorthUnits`.
 
-Priority order:
+Composite candidate ordering is lexicographic:
 
-1. Win the battle
-2. Minimize net gas cost
+1. Elo rating in the leaderboard-nearby phase.
+2. Wilson win-rate lower bound.
+3. Average destroyed-unit margin: `(destroyedBySide - destroyedByOpponent) / matches`.
 
-Key constraint: do not assume a unit “disappearing” means it was fully destroyed. Gas can be recovered via special mechanics (e.g., withdrawal refunds), so the scoring must be based on resource accounting (gas delta) plus the on-field gas value.
-
-Definitions per match:
-
-- `O = 2` if win (enemy base destroyed)
-- `O = 1` if tie (time limit)
-- `O = 0` if loss
-
-Gas accounting terms (for the scoring side):
-
-- `G0 = gasStart` (gas at match start)
-- `G1 = gasEnd` (gas at match end)
-- `V0 = onFieldGasValueStart`
-- `V1 = onFieldGasValueEnd`
-
-Where “on-field gas value” is the recoverable value of currently deployed assets on the battlefield (not “destroyed units”), computed by the engine from authoritative state (e.g., refundable portion of each alive unit’s `deploymentGasCost`, plus any other recoverable gas mechanisms).
-
-We score “gas efficiency” as the change in total gas worth:
-
-```ts
-totalWorth0 = G0 + V0;
-totalWorth1 = G1 + V1;
-gasWorthDelta = totalWorth1 - totalWorth0; // higher is better
-```
-
-Score:
-
-```ts
-// Outcome dominates, then gas worth (minimize net gas cost).
-score = O * 1_000_000
-      + gasWorthDelta;
-```
-
-Evaluation score for an entrant configuration over N matches:
-
-```ts
-fitness = (1 / N) * Σ score_i;
-```
-
-This guarantees:
-
-- any win beats any tie/loss regardless of gas
-- among wins (or ties), higher retained/recaptured gas value ranks higher
+Gameplay gas remains a simulation/deployment input, but gas reserves, salvage value, and gas waste never affect AI promotion.
 
 ## 9) CLI (arena-cli/)
 
@@ -292,7 +251,7 @@ Store per match:
 - seed
 - AI ids + parameter vectors
 - outcome (win/loss/tie)
-- gas accounting (for both sides): `gasStart`, `gasEnd`, `onFieldGasValueStart`, `onFieldGasValueEnd`, and optionally a summarized gas event ledger (spend/refund/reward)
+- weighted destroyed totals and destroyed margin
 - optional sim time (useful for debugging/analysis, not a primary objective)
 - optional event trace/replay stream (later)
 

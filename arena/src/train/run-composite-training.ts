@@ -20,11 +20,10 @@ type ShootFamilyId = "dt-shoot" | "dt-shoot-atan" | "w11-shoot" | "autoreg-shoot
 
 type Candidate = {
   params: Params;
-  score: number;
   wins: number;
   games: number;
   wl: number;
-  avgGas: number;
+  avgDestroyedMargin: number;
   eloScore?: number;
 };
 
@@ -538,11 +537,10 @@ export async function runCompositeTraining(opts: {
             const wl = wilsonLowerBound(agg.wins, agg.games);
             const candidate: Candidate = {
               params,
-              score: agg.score,
               wins: agg.wins,
               games: agg.games,
               wl,
-              avgGas: agg.avgGasWorthDelta,
+              avgDestroyedMargin: agg.avgDestroyedMargin,
               ...(phase.opponentMode === "leaderboard-nearby" ? { eloScore } : {}),
             };
             evaluated.push(candidate);
@@ -550,8 +548,8 @@ export async function runCompositeTraining(opts: {
               ? (!bestCandidate
                 || (candidate.eloScore ?? 0) > (bestCandidate.eloScore ?? 0)
                 || ((candidate.eloScore ?? 0) === (bestCandidate.eloScore ?? 0)
-                  && (candidate.wl > bestCandidate.wl || (candidate.wl === bestCandidate.wl && candidate.score > bestCandidate.score))))
-              : (!bestCandidate || candidate.wl > bestCandidate.wl || (candidate.wl === bestCandidate.wl && candidate.score > bestCandidate.score));
+                  && (candidate.wl > bestCandidate.wl || (candidate.wl === bestCandidate.wl && candidate.avgDestroyedMargin > bestCandidate.avgDestroyedMargin))))
+              : (!bestCandidate || candidate.wl > bestCandidate.wl || (candidate.wl === bestCandidate.wl && candidate.avgDestroyedMargin > bestCandidate.avgDestroyedMargin));
             if (better) {
               bestCandidate = candidate;
               currentBestParams = candidate.params;
@@ -574,9 +572,9 @@ export async function runCompositeTraining(opts: {
           }
 
           if (phase.opponentMode === "leaderboard-nearby") {
-            evaluated.sort((a, b) => ((b.eloScore ?? 0) - (a.eloScore ?? 0)) || (b.wl - a.wl) || (b.score - a.score));
+            evaluated.sort((a, b) => ((b.eloScore ?? 0) - (a.eloScore ?? 0)) || (b.wl - a.wl) || (b.avgDestroyedMargin - a.avgDestroyedMargin));
           } else {
-            evaluated.sort((a, b) => (b.wl - a.wl) || (b.score - a.score));
+            evaluated.sort((a, b) => (b.wl - a.wl) || (b.avgDestroyedMargin - a.avgDestroyedMargin));
           }
           const elites = evaluated.slice(0, Math.max(2, Math.floor(opts.population * 0.2)));
           pop.splice(0, pop.length, ...elites.map((e) => e.params));
@@ -590,7 +588,7 @@ export async function runCompositeTraining(opts: {
             // eslint-disable-next-line no-console
             console.log(
               `[compare-composite] scope=${scope} module=${moduleKind} phase=${phase.id} gen=${gen} `
-              + `bestLB=${(bestCandidate?.wl ?? 0).toFixed(4)} bestScore=${(bestCandidate?.score ?? 0).toFixed(2)}`
+              + `bestLB=${(bestCandidate?.wl ?? 0).toFixed(4)} bestDestroyMargin=${(bestCandidate?.avgDestroyedMargin ?? 0).toFixed(2)}`
               + `${phase.opponentMode === "leaderboard-nearby" ? ` bestElo=${(bestCandidate?.eloScore ?? 0).toFixed(2)}` : ""}`,
             );
           }

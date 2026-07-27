@@ -1379,7 +1379,7 @@ export class BattleSession {
       unit.airDropTargetY = clamp(unit.airDropTargetY, bounds.groundMinY, bounds.groundMaxY);
       unit.y = clamp(unit.y, bounds.airMinZ, unit.airDropTargetY);
     } else {
-      unit.y = clamp(unit.y, bounds.airMinZ, bounds.groundMinY);
+      unit.y = clamp(unit.y, bounds.airMinZ, bounds.airMaxZ);
     }
     unit.x = clamp(unit.x, 44, this.battlefieldWidth - 44);
   }
@@ -2970,6 +2970,11 @@ export class BattleSession {
       dt,
       desiredRange,
       baseTarget,
+      battlefield: {
+        width: this.battlefieldWidth,
+        height: this.battlefieldHeight,
+        laneBounds: this.getLaneBounds(),
+      },
       canShootAtAngle: (
         componentId: keyof typeof COMPONENTS,
         dx: number,

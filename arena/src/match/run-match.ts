@@ -7,7 +7,6 @@ import { BattleSession } from "../../../game-core/src/gameplay/battle/battle-ses
 import {
   BATTLEFIELD_HEIGHT,
   BATTLEFIELD_WIDTH,
-  BATTLE_SALVAGE_REFUND_FACTOR,
 } from "../../../game-core/src/config/balance/battlefield.ts";
 import { makeCompositeAiController } from "../ai/composite-controller.ts";
 import { structureIntegrity } from "../../../game-core/src/simulation/units/structure-grid.ts";
@@ -34,26 +33,6 @@ function createMockCanvas(width: number, height: number): any {
     height,
     getContext: (type: string) => (type === "2d" ? contextStub : null),
   };
-}
-
-function computeOnFieldGasValue(units: any[], side: "player" | "enemy", refundFactor: number): number {
-  let sum = 0;
-  for (const unit of units) {
-    if (!unit || unit.type === "base" || !unit.alive || !canOperate(unit) || unit.side !== side) {
-      continue;
-    }
-    const cost = typeof unit.deploymentGasCost === "number" ? unit.deploymentGasCost : 0;
-    const refundable = Math.floor(cost * refundFactor);
-    if (refundable > 0) {
-      sum += refundable;
-    }
-  }
-  return sum;
-}
-
-function scoreFor(outcome: "win" | "tie" | "loss", gasWorthDelta: number): number {
-  const O = outcome === "win" ? 2 : outcome === "tie" ? 1 : 0;
-  return O * 1_000_000 + gasWorthDelta;
 }
 
 function clamp(n: number, min: number, max: number): number {
@@ -130,8 +109,6 @@ export async function runMatch(
     ...validTemplates,
     ...allTemplates.filter((template) => template.type === "base" && validateTemplateDetailed(template, { partCatalog }).errors.length === 0),
   ].filter((template, index, entries) => entries.findIndex((candidate) => candidate.id === template.id) === index);
-  const refundFactor = BATTLE_SALVAGE_REFUND_FACTOR;
-
   let playerGas = spec.playerGas;
   const logs: string[] = [];
   const hooks: GameBattleHooks = {
@@ -290,10 +267,6 @@ export async function runMatch(
     playerGas = 0;
   }
 
-  const playerGasStart = playerGas;
-  const enemyGasStart = state0.enemyGas;
-  const onFieldPlayerStart = computeOnFieldGasValue(state0.units, "player", refundFactor);
-  const onFieldEnemyStart = computeOnFieldGasValue(state0.units, "enemy", refundFactor);
 
   const dt = 1 / 60;
   const noKeys = { a: false, d: false, w: false, s: false, space: false };
@@ -526,16 +499,6 @@ export async function runMatch(
     + (isBaseDestroyed(finalState, "enemy") ? baseWorthUnits : 0);
   const destroyedByEnemy = losses.player.destroyedObjects
     + (isBaseDestroyed(finalState, "player") ? baseWorthUnits : 0);
-  const playerGasEnd = playerGas;
-  const enemyGasEnd = finalState.enemyGas;
-  const onFieldPlayerEnd = computeOnFieldGasValue(finalState.units, "player", refundFactor);
-  const onFieldEnemyEnd = computeOnFieldGasValue(finalState.units, "enemy", refundFactor);
-
-  const worth0Player = playerGasStart + onFieldPlayerStart;
-  const worth1Player = playerGasEnd + onFieldPlayerEnd;
-  const worth0Enemy = enemyGasStart + onFieldEnemyStart;
-  const worth1Enemy = enemyGasEnd + onFieldEnemyEnd;
-
   const reasonLower = String(outcome.reason).toLowerCase();
   const populationComparison = maintainUnitsPerSide > 0;
   const tie = populationComparison
@@ -548,8 +511,6 @@ export async function runMatch(
     ? `Destroyed units: player ${destroyedByPlayer}, enemy ${destroyedByEnemy}`
     : String(outcome.reason);
 
-  const playerOutcome: "win" | "tie" | "loss" = tie ? "tie" : playerVictory ? "win" : "loss";
-  const enemyOutcome: "win" | "tie" | "loss" = tie ? "tie" : playerVictory ? "loss" : "win";
   const operationalUnits = (side: "player" | "enemy") => finalState.units
     .filter((unit) => unit.type !== "base" && unit.alive && canOperate(unit) && unit.side === side);
   const playerOperationalUnits = operationalUnits("player");
@@ -563,22 +524,10 @@ export async function runMatch(
       player: {
         win: playerVictory,
         tie,
-        gasStart: playerGasStart,
-        gasEnd: playerGasEnd,
-        onFieldGasValueStart: onFieldPlayerStart,
-        onFieldGasValueEnd: onFieldPlayerEnd,
-        gasWorthDelta: worth1Player - worth0Player,
-        score: scoreFor(playerOutcome, worth1Player - worth0Player),
       },
       enemy: {
         win: !playerVictory && !tie,
         tie,
-        gasStart: enemyGasStart,
-        gasEnd: enemyGasEnd,
-        onFieldGasValueStart: onFieldEnemyStart,
-        onFieldGasValueEnd: onFieldEnemyEnd,
-        gasWorthDelta: worth1Enemy - worth0Enemy,
-        score: scoreFor(enemyOutcome, worth1Enemy - worth0Enemy),
       },
     },
     final: {
@@ -589,7 +538,10 @@ export async function runMatch(
       playerUnitIntegrity: playerOperationalUnits.reduce((total, unit) => total + structureIntegrity(unit), 0),
       enemyUnitIntegrity: enemyOperationalUnits.reduce((total, unit) => total + structureIntegrity(unit), 0),
     },
-    losses,
+    losses: {
+      player: { destroyedObjects: losses.player.destroyedObjects },
+      enemy: { destroyedObjects: losses.enemy.destroyedObjects },
+    },
     performance: {
       destroyedByPlayer,
       destroyedByEnemy,

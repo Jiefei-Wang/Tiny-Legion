@@ -22,6 +22,10 @@ import {
   MAX_CERTIFIED_AI_LEVEL,
 } from "../../../game-core/src/ai/composite/level-modules.ts";
 import {
+  createCertifiedLevelMovementAi,
+  createCertifiedLevelTargetAi,
+} from "../../../game-core/src/ai/composite/certified-level-modules.ts";
+import {
   createCompositeAiController,
   type BattleAiController,
   type MovementAiModule,
@@ -423,6 +427,8 @@ void createDecisionTreeShootAtanAi;
 
 function createTargetModule(spec: CompositeModuleSpec): TargetAiModule {
   const familyId = spec.familyId.trim().toLowerCase();
+  const certified = /^certified-level-(\d+)-target$/.exec(familyId);
+  if (certified) return createCertifiedLevelTargetAi(Number.parseInt(certified[1] ?? "1", 10));
   const level = parseLevel(familyId, "target");
   if (level) return createLevelTargetAi(level);
   const tier = parseSkillTier(familyId, "target");
@@ -433,6 +439,8 @@ function createTargetModule(spec: CompositeModuleSpec): TargetAiModule {
 
 function createMovementModule(spec: CompositeModuleSpec): MovementAiModule {
   const familyId = spec.familyId.trim().toLowerCase();
+  const certified = /^certified-level-(\d+)-movement$/.exec(familyId);
+  if (certified) return createCertifiedLevelMovementAi(Number.parseInt(certified[1] ?? "1", 10));
   const level = parseLevel(familyId, "movement");
   if (level) return createLevelMovementAi(level);
   const tier = parseSkillTier(familyId, "movement");
@@ -499,44 +507,9 @@ export function skillTierCompositeConfig(tier: AiSkillTier): CompositeConfig {
 
 export function levelCompositeConfig(level: number): CompositeConfig {
   const normalized = Math.max(1, Math.min(MAX_CERTIFIED_AI_LEVEL, Math.floor(level)));
-  if (normalized === 1) {
-    return {
-      target: { familyId: "level-2-target", params: {} },
-      movement: { familyId: "level-6-movement", params: {} },
-      shoot: { familyId: "unified-level-1-shoot", params: {} },
-    };
-  }
-  if (normalized === 2) {
-    return {
-      target: { familyId: "level-47-target", params: {} },
-      movement: { familyId: "level-95-movement", params: {} },
-      shoot: { familyId: "unified-level-2-shoot", params: {} },
-    };
-  }
-  if (normalized === 3) {
-    return {
-      target: { familyId: "level-47-target", params: {} },
-      movement: { familyId: "level-95-movement", params: {} },
-      shoot: { familyId: "unified-level-3-shoot", params: {} },
-    };
-  }
-  if (normalized === 4) {
-    return {
-      target: { familyId: "level-47-target", params: {} },
-      movement: { familyId: "level-97-movement", params: {} },
-      shoot: { familyId: "unified-level-4-shoot", params: {} },
-    };
-  }
-  if (normalized === 5) {
-    return {
-      target: { familyId: "level-47-target", params: {} },
-      movement: { familyId: "level-99-movement", params: {} },
-      shoot: { familyId: "unified-level-5-shoot", params: {} },
-    };
-  }
   return {
-    target: { familyId: `level-${normalized}-target`, params: {} },
-    movement: { familyId: `level-${normalized}-movement`, params: {} },
+    target: { familyId: `certified-level-${normalized}-target`, params: {} },
+    movement: { familyId: `certified-level-${normalized}-movement`, params: {} },
     shoot: { familyId: `unified-level-${normalized}-shoot`, params: {} },
   };
 }
