@@ -414,7 +414,8 @@ export const GAME_CONFIG = {
       "movement": {
         "minimumFacingChangeSeconds": 0.5,
         "minimumGroundDirectionHoldSeconds": 0.8,
-        "groundReverseCloseRangeFactor": 0.45
+        "groundReverseCloseRangeFactor": 0.45,
+        "intendedWeaponStandoffRangeRatio": 0.9
       }
     },
     "arenaComparison": {
@@ -1005,7 +1006,8 @@ export const GAME_CONFIG_DESCRIPTIONS = {
       "target.awarenessRangeFactor": "Multiplier applied to desired weapon range when defining immediate local enemy awareness.",
       "movement.minimumFacingChangeSeconds": "Minimum time between ordinary AI visual-facing changes.",
       "movement.minimumGroundDirectionHoldSeconds": "Minimum time a ground craft holds a horizontal movement direction before an ordinary reversal.",
-      "movement.groundReverseCloseRangeFactor": "Desired-range fraction inside which a ground craft may reverse to escape a dangerously close enemy."
+      "movement.groundReverseCloseRangeFactor": "Desired-range fraction inside which a ground craft may reverse to escape a dangerously close enemy.",
+      "movement.intendedWeaponStandoffRangeRatio": "Fraction of the intended weapon's effective firing range that certified AI movement tries to hold from its target."
     },
     "arenaComparison": {
       "testArena.nodeDefense": "Default Test Arena node defense multiplier shared by browser and headless AI comparison.",

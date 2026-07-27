@@ -47,6 +47,7 @@ If you are a new coding agent/session, read this file first, then read:
   4. Aircraft may fly in any direction to dodge bullets.
   5. Movement must not ignore nearby enemies even while pursuing a separate strategic target.
   6. Reuse the current unified shooting algorithm. Target selection/integration may change, but ballistic solving, accuracy calibration, and miss behavior must not be replaced.
+  7. Certified movement should hold 90% of the currently intended weapon's effective firing range from its target; do not derive this standoff from the craft's longest weapon or a blend of all weapons.
 - Arena workflow is JS/TS-only (no Python bridge, no gRPC battlefield service).
 - Multi-weapon units with independent cooldown timers
 - Player weapon controls:

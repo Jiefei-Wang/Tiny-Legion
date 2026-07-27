@@ -148,10 +148,12 @@ export function validateGameConfig(config) {
   if (!(numberAt(targetBehavior, "minimumCommitSeconds", "ai/behavior.yaml.target") >= 0)) fail("ai/behavior.yaml.target.minimumCommitSeconds", "expected a non-negative number");
   if (!(numberAt(targetBehavior, "challengerImprovementRatio", "ai/behavior.yaml.target") >= 0)) fail("ai/behavior.yaml.target.challengerImprovementRatio", "expected a non-negative number");
   if (!(numberAt(targetBehavior, "awarenessRangeFactor", "ai/behavior.yaml.target") > 0)) fail("ai/behavior.yaml.target.awarenessRangeFactor", "expected a positive number");
-  const movementBehavior = validateScalarObject(behavior.movement, ["minimumFacingChangeSeconds", "minimumGroundDirectionHoldSeconds", "groundReverseCloseRangeFactor"], "ai/behavior.yaml.movement");
+  const movementBehavior = validateScalarObject(behavior.movement, ["minimumFacingChangeSeconds", "minimumGroundDirectionHoldSeconds", "groundReverseCloseRangeFactor", "intendedWeaponStandoffRangeRatio"], "ai/behavior.yaml.movement");
   if (!(numberAt(movementBehavior, "minimumFacingChangeSeconds", "ai/behavior.yaml.movement") >= 0)) fail("ai/behavior.yaml.movement.minimumFacingChangeSeconds", "expected a non-negative number");
   if (!(numberAt(movementBehavior, "minimumGroundDirectionHoldSeconds", "ai/behavior.yaml.movement") >= 0)) fail("ai/behavior.yaml.movement.minimumGroundDirectionHoldSeconds", "expected a non-negative number");
   if (!(numberAt(movementBehavior, "groundReverseCloseRangeFactor", "ai/behavior.yaml.movement") > 0)) fail("ai/behavior.yaml.movement.groundReverseCloseRangeFactor", "expected a positive number");
+  const intendedWeaponStandoffRangeRatio = numberAt(movementBehavior, "intendedWeaponStandoffRangeRatio", "ai/behavior.yaml.movement");
+  if (!(intendedWeaponStandoffRangeRatio > 0 && intendedWeaponStandoffRangeRatio <= 1)) fail("ai/behavior.yaml.movement.intendedWeaponStandoffRangeRatio", "expected a value above 0 and at most 1");
   const commander = exactKeys(config.balance.commander, ["armyCap"], "balance/commander.yaml");
   validateScalarObject(commander.armyCap, ["base", "skillPerAdditionalUnit"], "balance/commander.yaml.armyCap");
   validateScalarObject(config.balance.economy, ["baseIncome", "refineryIncome", "garrisonUpkeep"], "balance/economy.yaml");

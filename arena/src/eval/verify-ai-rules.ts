@@ -25,6 +25,7 @@ import {
   borderRecoveryVector,
   createCertifiedLevelMovementAi,
   createCertifiedLevelTargetAi,
+  intendedWeaponStandoff,
 } from "../../../game-core/src/ai/composite/certified-level-modules.ts";
 import { createCompositeAiController } from "../../../game-core/src/ai/composite/composite-ai.ts";
 import type { MatchResult } from "../match/match-types.ts";
@@ -170,6 +171,26 @@ targetUnit.aiStateTimer = 0.2;
 const splitTarget = targetAi.decideTarget(testInput(targetUnit, [farEnemy, nearEnemy]));
 assert.equal(splitTarget.rankedTargets[0]?.targetId, "near", "nearby engageable enemies must lead the fire list");
 assert.equal(splitTarget.attackPoint.x, farEnemy.x, "the committed movement target must survive an ordinary local fire opportunity");
+
+const standoffUnit = testUnit("standoff", "player", "ground", 500, 1100);
+standoffUnit.weaponAttachmentIds = [2, 3];
+standoffUnit.weaponAutoFire = [false, true];
+const standoffInput = testInput(standoffUnit, [farEnemy]);
+const originalGetWeapon = standoffInput.getWeaponFireInput;
+standoffInput.getWeaponFireInput = (slot) => {
+  const weapon = originalGetWeapon(slot);
+  return weapon ? { ...weapon, effectiveRange: slot === 0 ? 1_000 : 500 } : null;
+};
+assert.deepEqual(
+  intendedWeaponStandoff(standoffInput),
+  { slot: 1, range: 450 },
+  "movement standoff must use 90% of the enabled intended weapon range rather than a disabled longer weapon",
+);
+const standoffMovement = createCertifiedLevelMovementAi(3).decideMovement(
+  standoffInput,
+  { rankedTargets: [], attackPoint: { x: 850, y: 1100 }, debugTag: "standoff-test" },
+);
+assert.ok(standoffMovement.ax < 0, "AI inside its intended weapon standoff must move away from the target");
 
 const groundDodger = testUnit("ground-dodger", "player", "ground", 500, 1100);
 const groundMovement = createCertifiedLevelMovementAi(3).decideMovement(

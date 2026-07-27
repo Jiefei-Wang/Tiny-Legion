@@ -46,6 +46,23 @@ function ownWeaponRanges(input: BattleAiInput): number[] {
   return ranges;
 }
 
+/**
+ * Uses the first enabled live weapon in the same stable slot order traversed
+ * by unified shooting. Disabled weapons cannot stretch or shrink movement's
+ * engagement distance; a live-weapon fallback covers unusual all-manual data.
+ */
+export function intendedWeaponStandoff(input: BattleAiInput): { slot: number; range: number } {
+  const slots = Array.from({ length: input.unit.weaponAttachmentIds.length }, (_, slot) => slot);
+  const enabled = slots.find((slot) => input.unit.weaponAutoFire[slot] && input.getWeaponFireInput(slot) !== null);
+  const fallback = enabled ?? slots.find((slot) => input.getWeaponFireInput(slot) !== null) ?? -1;
+  const weapon = fallback >= 0 ? input.getWeaponFireInput(fallback) : null;
+  const range = weapon?.effectiveRange ?? input.desiredRange;
+  return {
+    slot: fallback,
+    range: Math.max(input.unit.radius * 4, range * AI_BEHAVIOR_CONFIG.movement.intendedWeaponStandoffRangeRatio),
+  };
+}
+
 export function immediateAwarenessRange(input: BattleAiInput): number {
   const ranges = ownWeaponRanges(input);
   const ownRange = ranges.length > 0 ? Math.max(...ranges) : input.desiredRange;
@@ -162,12 +179,13 @@ export function createCertifiedLevelMovementAi(levelRaw: number): MovementAiModu
       const distance = Math.hypot(dx, dy) || 1;
       const towardX = dx / distance;
       const towardY = dy / distance;
-      const desired = Math.max(input.unit.radius * 4, input.desiredRange * (0.72 + level * 0.035));
-      const rangeDirection = distance > desired * 1.08 ? 1 : distance < desired * 0.58 ? -0.35 : 0.12;
+      const intendedWeapon = intendedWeaponStandoff(input);
+      const desired = intendedWeapon.range;
+      const rangeDirection = distance > desired * 1.03 ? 1 : distance < desired * 0.97 ? -0.35 : 0;
       let ax = towardX * rangeDirection;
       let ay = towardY * Math.abs(rangeDirection) * 0.42;
       let shouldEvade = false;
-      let tactic = "range";
+      let tactic = `weapon-${intendedWeapon.slot}-standoff`;
 
       const localEnemy = nearestLocalEnemy(input);
       if (localEnemy) {
@@ -175,8 +193,9 @@ export function createCertifiedLevelMovementAi(levelRaw: number): MovementAiModu
         const localDy = localEnemy.y - input.unit.y;
         const localDistance = Math.hypot(localDx, localDy) || 1;
         const localWeight = clamp(1 - localDistance / immediateAwarenessRange(input), 0.18, 0.72);
-        ax = ax * (1 - localWeight * 0.35) + localDx / localDistance * localWeight * 0.35;
-        ay = ay * (1 - localWeight * 0.45) + localDy / localDistance * localWeight * 0.45;
+        const localRangeDirection = localDistance < desired * 0.97 ? -1 : localDistance > desired * 1.03 ? 1 : 0;
+        ax = ax * (1 - localWeight * 0.35) + localDx / localDistance * localWeight * 0.35 * localRangeDirection;
+        ay = ay * (1 - localWeight * 0.45) + localDy / localDistance * localWeight * 0.45 * localRangeDirection;
         tactic = "local-aware";
       }
 
@@ -232,7 +251,8 @@ export function createCertifiedLevelMovementAi(levelRaw: number): MovementAiModu
         const dangerouslyClose = distance <= desired * AI_BEHAVIOR_CONFIG.movement.groundReverseCloseRangeFactor;
         const critical = integrity < 0.22;
         const imminent = (primary?.timeToClosestS ?? Number.POSITIVE_INFINITY) < 0.32;
-        if (ax * towardX < -0.02 && !dangerouslyClose && !critical && !imminent) ax = 0;
+        const restoringWeaponStandoff = distance < desired * 0.97;
+        if (ax * towardX < -0.02 && !restoringWeaponStandoff && !dangerouslyClose && !critical && !imminent) ax = 0;
         const proposedSign = Math.abs(ax) < 0.08 ? 0 : Math.sign(ax) as -1 | 1;
         const ordinaryReversal = proposedSign !== 0 && prior.horizontalSign !== 0 && proposedSign !== prior.horizontalSign
           && now - prior.horizontalChangedAt < AI_BEHAVIOR_CONFIG.movement.minimumGroundDirectionHoldSeconds
