@@ -406,9 +406,9 @@ export const GAME_CONFIG = {
         "baseHp": 1000000000
       },
       "comparison": {
-        "spawnCountPerSide": 6,
+        "spawnCountPerSide": 4,
         "spawnIntervalSeconds": 20,
-        "maxSimSeconds": 600,
+        "maxSimSeconds": 80,
         "baseWorthUnits": 20
       }
     }

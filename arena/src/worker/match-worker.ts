@@ -9,7 +9,9 @@ if (!parentPort) {
 
 parentPort.on("message", async (msg: WorkerRequest) => {
   try {
-    const result = await runMatch(msg.payload);
+    const result = await runMatch(msg.payload, (progress) => {
+      parentPort?.postMessage({ id: msg.id, ok: true, progress });
+    });
     parentPort?.postMessage({ id: msg.id, ok: true, result });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

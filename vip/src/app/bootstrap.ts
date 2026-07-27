@@ -631,6 +631,20 @@ export function bootstrap(options: BootstrapOptions = {}): void {
   let testArenaLeaderboardCompeteRuns = 100;
   let testArenaLeaderboardCompeteBusy = false;
   let testArenaLeaderboardCompeteStatus = "";
+  type LeaderboardCompeteMatchProgress = {
+    index: number;
+    runA: string;
+    runB: string;
+    status: "queued" | "running" | "completed" | "failed";
+    startedAtMs?: number;
+    finishedAtMs?: number;
+    simSecondsElapsed: number;
+    maxSimSeconds: number;
+    units: number;
+    projectiles: number;
+    error?: string;
+  };
+  let testArenaLeaderboardCompeteProgress: LeaderboardCompeteMatchProgress[] = [];
   let testArenaLeaderboardManualPairA = "";
   let testArenaLeaderboardManualPairB = "";
   let testArenaLeaderboardManualVsRandom = "";
@@ -1846,6 +1860,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       }
     }
     testArenaLeaderboardCompeteBusy = true;
+    testArenaLeaderboardCompeteProgress = [];
     const totalRuns = Math.max(1, Math.floor(runs));
     testArenaLeaderboardCompeteStatus = `Running leaderboard matches... 0/${totalRuns}`;
     renderPanels();
@@ -1875,7 +1890,27 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       while (true) {
         const statusRes = await fetch(`/__arena/composite/leaderboard/compete/status?jobId=${encodeURIComponent(jobId)}`);
         const statusPayload = await statusRes.json().catch(() => null) as {
-          job?: { status?: string; completed?: number; failed?: number; total?: number; error?: string };
+          job?: {
+            status?: string;
+            completed?: number;
+            failed?: number;
+            total?: number;
+            startedAtMs?: number;
+            error?: string;
+            matches?: Array<{
+              index?: number;
+              runA?: string;
+              runB?: string;
+              status?: string;
+              startedAtMs?: number;
+              finishedAtMs?: number;
+              simSecondsElapsed?: number;
+              maxSimSeconds?: number;
+              units?: number;
+              projectiles?: number;
+              error?: string;
+            }>;
+          };
         } | null;
         if (!statusRes.ok || !statusPayload?.job) {
           testArenaLeaderboardCompeteStatus = "Competition progress is unavailable.";
@@ -1884,12 +1919,47 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         const completed = Math.max(0, Number(statusPayload.job.completed ?? 0));
         const failed = Math.max(0, Number(statusPayload.job.failed ?? 0));
         const total = Math.max(0, Number(statusPayload.job.total ?? jobTotal));
-        if (completed !== lastCompleted) {
+        const matches = statusPayload.job.matches ?? [];
+        testArenaLeaderboardCompeteProgress = matches.map((match, index) => ({
+          index: Math.max(0, Math.floor(Number(match.index ?? index))),
+          runA: String(match.runA ?? "-"),
+          runB: String(match.runB ?? "-"),
+          status: match.status === "running" || match.status === "completed" || match.status === "failed"
+            ? match.status
+            : "queued",
+          ...(Number.isFinite(match.startedAtMs) ? { startedAtMs: Number(match.startedAtMs) } : {}),
+          ...(Number.isFinite(match.finishedAtMs) ? { finishedAtMs: Number(match.finishedAtMs) } : {}),
+          simSecondsElapsed: Math.max(0, Number(match.simSecondsElapsed ?? 0)),
+          maxSimSeconds: Math.max(0, Number(match.maxSimSeconds ?? 0)),
+          units: Math.max(0, Math.floor(Number(match.units ?? 0))),
+          projectiles: Math.max(0, Math.floor(Number(match.projectiles ?? 0))),
+          ...(match.error ? { error: String(match.error) } : {}),
+        }));
+        const active = matches.filter((match) => match.status === "running");
+        const queued = matches.filter((match) => match.status === "queued").length;
+        const averageSimSeconds = active.length > 0
+          ? active.reduce((sum, match) => sum + Math.max(0, Number(match.simSecondsElapsed ?? 0)), 0) / active.length
+          : 0;
+        const maxSimSeconds = active.length > 0
+          ? Math.max(...active.map((match) => Math.max(0, Number(match.maxSimSeconds ?? 0))))
+          : 0;
+        const activeUnits = active.reduce((sum, match) => sum + Math.max(0, Number(match.units ?? 0)), 0);
+        const activeProjectiles = active.reduce((sum, match) => sum + Math.max(0, Number(match.projectiles ?? 0)), 0);
+        const wallSeconds = statusPayload.job.startedAtMs
+          ? Math.max(0, (Date.now() - statusPayload.job.startedAtMs) / 1000)
+          : 0;
+        if (completed !== lastCompleted || statusPayload.job.status === "running") {
           lastCompleted = completed;
-          testArenaLeaderboardCompeteStatus = `Running leaderboard matches... ${completed}/${total}${failed > 0 ? ` (${failed} failed)` : ""}`;
+          const progressDetail = active.length > 0
+            ? ` • ${active.length} active, avg ${averageSimSeconds.toFixed(0)}/${maxSimSeconds.toFixed(0)} sim s • ${activeUnits} units, ${activeProjectiles} shots`
+            : queued > 0
+              ? ` • ${queued} queued`
+              : "";
+          testArenaLeaderboardCompeteStatus = `Running leaderboard matches... ${completed}/${total}${failed > 0 ? ` (${failed} failed)` : ""}${progressDetail} • ${wallSeconds.toFixed(0)} wall s`;
           renderPanels();
         }
         if (statusPayload.job.status !== "running") {
+          testArenaLeaderboardCompeteProgress = [];
           await refreshTestArenaLeaderboard();
           await refreshTestArenaCompositeModelOptions();
           testArenaLeaderboardCompeteStatus = statusPayload.job.status === "done"
@@ -1903,6 +1973,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       testArenaLeaderboardCompeteStatus = "Competition failed due to network or server error.";
     } finally {
       testArenaLeaderboardCompeteBusy = false;
+      testArenaLeaderboardCompeteProgress = [];
       renderPanels();
     }
   };
@@ -5617,6 +5688,36 @@ export function bootstrap(options: BootstrapOptions = {}): void {
         </tr>`;
       })
       .join("");
+    const leaderboardProgressRows = testArenaLeaderboardCompeteProgress
+      .map((match) => {
+        const simSeconds = Math.min(match.maxSimSeconds || match.simSecondsElapsed, match.simSecondsElapsed);
+        const progressRatio = match.maxSimSeconds > 0 ? Math.min(1, simSeconds / match.maxSimSeconds) : 0;
+        const progressPercent = progressRatio * 100;
+        const endMs = match.finishedAtMs ?? Date.now();
+        const wallSeconds = match.startedAtMs ? Math.max(0, (endMs - match.startedAtMs) / 1000) : 0;
+        const statusLabel = match.status === "completed"
+          ? "Completed"
+          : match.status === "failed"
+            ? "Failed"
+            : match.status === "running"
+              ? "Running"
+              : "Queued";
+        return `<tr>
+          <td>${match.index + 1}</td>
+          <td>${escapeHtml(match.runA)} vs ${escapeHtml(match.runB)}</td>
+          <td><span class="leaderboard-run-status ${match.status}"${match.error ? ` title="${escapeHtml(match.error)}"` : ""}>${statusLabel}</span></td>
+          <td>${simSeconds.toFixed(0)} / ${match.maxSimSeconds.toFixed(0)} s</td>
+          <td>
+            <div class="leaderboard-run-progress" aria-label="${progressPercent.toFixed(0)} percent complete">
+              <i style="width:${progressPercent.toFixed(2)}%"></i>
+            </div>
+          </td>
+          <td>${match.units}</td>
+          <td>${match.projectiles}</td>
+          <td>${match.startedAtMs ? `${wallSeconds.toFixed(1)} s` : "-"}</td>
+        </tr>`;
+      })
+      .join("");
     const competeRunsValue = Math.max(1, Math.floor(testArenaLeaderboardCompeteRuns));
     const competeModeOptions = `
       <option value="random-pair" ${testArenaLeaderboardCompeteMode === "random-pair" ? "selected" : ""}>Random pair</option>
@@ -5691,6 +5792,18 @@ export function bootstrap(options: BootstrapOptions = {}): void {
           <tbody>${leaderboardRows}</tbody>
         </table>` : ""}
       </div>
+      ${leaderboardProgressRows ? `
+        <section class="leaderboard-runs" aria-live="polite">
+          <h3>Competition Runs</h3>
+          <div class="small">Live worker progress. This table is removed when the competition finishes.</div>
+          <div class="leaderboard-runs-scroll">
+            <table class="leaderboard-runs-table">
+              <thead><tr><th>#</th><th>Match</th><th>Status</th><th>Simulation</th><th>Progress</th><th>Units</th><th>Shots</th><th>Wall time</th></tr></thead>
+              <tbody>${leaderboardProgressRows}</tbody>
+            </table>
+          </div>
+        </section>
+      ` : ""}
     `;
 
     ensureEditorSelectionForLayer();

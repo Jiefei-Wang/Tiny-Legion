@@ -3,13 +3,16 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { resolve, dirname } from "node:path";
 
 type WorkerRequest = { id: string; payload: unknown };
-type WorkerResponse = { id: string; ok: true; result: unknown } | { id: string; ok: false; error: string };
+type WorkerResponse =
+  | { id: string; ok: true; result: unknown }
+  | { id: string; ok: true; progress: unknown }
+  | { id: string; ok: false; error: string };
 
 export class WorkerPool {
   private readonly workers: Worker[];
   private readonly idle: Worker[];
-  private readonly pending: Array<{ req: WorkerRequest; resolve: (v: unknown) => void; reject: (e: Error) => void }>;
-  private readonly inflight: Map<string, { resolve: (v: unknown) => void; reject: (e: Error) => void }>;
+  private readonly pending: Array<{ req: WorkerRequest; resolve: (v: unknown) => void; reject: (e: Error) => void; onProgress?: (progress: unknown) => void }>;
+  private readonly inflight: Map<string, { resolve: (v: unknown) => void; reject: (e: Error) => void; onProgress?: (progress: unknown) => void }>;
 
   constructor(workerFileUrl: string, size: number) {
     const resolvedSize = Math.max(1, Math.floor(size));
@@ -38,11 +41,11 @@ export class WorkerPool {
     return pathToFileURL(workerPath).href;
   }
 
-  public run(payload: unknown): Promise<unknown> {
+  public run(payload: unknown, onProgress?: (progress: unknown) => void): Promise<unknown> {
     const id = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
     const req: WorkerRequest = { id, payload };
     return new Promise((resolvePromise, rejectPromise) => {
-      this.pending.push({ req, resolve: resolvePromise, reject: rejectPromise });
+      this.pending.push({ req, resolve: resolvePromise, reject: rejectPromise, onProgress });
       this.pump();
     });
   }
@@ -58,7 +61,7 @@ export class WorkerPool {
       if (!worker || !item) {
         return;
       }
-      this.inflight.set(item.req.id, { resolve: item.resolve, reject: item.reject });
+      this.inflight.set(item.req.id, { resolve: item.resolve, reject: item.reject, onProgress: item.onProgress });
       worker.postMessage(item.req);
     }
   }
@@ -66,6 +69,10 @@ export class WorkerPool {
   private onMessage(worker: Worker, msg: WorkerResponse): void {
     const handlers = this.inflight.get(msg.id);
     if (!handlers) {
+      return;
+    }
+    if (msg.ok && "progress" in msg) {
+      handlers.onProgress?.(msg.progress);
       return;
     }
     this.inflight.delete(msg.id);

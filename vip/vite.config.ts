@@ -10,7 +10,7 @@ import {
   parsePartDefinition,
   validatePartDefinitionDetailed,
 } from "../game-core/src/parts/part-schema.ts";
-import { runMatch } from "../arena/src/match/run-match.ts";
+import { runMatch, type MatchProgress } from "../arena/src/match/run-match.ts";
 import { compareMatchResult } from "../arena/src/match/match-comparison.ts";
 import { loadLeaderboardScenario, type LeaderboardScenario } from "../arena/src/config/leaderboard-scenario.ts";
 import { levelCompositeConfig } from "../arena/src/ai/composite-controller.ts";
@@ -1070,10 +1070,25 @@ function arenaModelPlugin() {
   let leaderboardCompetitionJob: {
     id: string;
     status: "running" | "done" | "failed";
+    startedAtMs: number;
     runsRequested: number;
     total: number;
     completed: number;
     failed: number;
+    matches: Array<{
+      index: number;
+      runA: string;
+      runB: string;
+      status: "queued" | "running" | "completed" | "failed";
+      startedAtMs?: number;
+      finishedAtMs?: number;
+      simSecondsElapsed: number;
+      maxSimSeconds: number;
+      units: number;
+      projectiles: number;
+      lastProgressAtMs?: number;
+      error?: string;
+    }>;
     error?: string;
   } | null = null;
   const leaderboardParallelWorkers = Math.max(
@@ -1081,7 +1096,10 @@ function arenaModelPlugin() {
     typeof availableParallelism === "function" ? availableParallelism() : cpus().length,
   );
   const workerPoolModuleFile = resolve(process.cwd(), "..", "arena", ".dist", "arena", "src", "lib", "worker-pool.js");
-  let workerPoolPromise: Promise<{ run: (payload: unknown) => Promise<unknown>; close: () => Promise<void> } | null> | null = null;
+  let workerPoolPromise: Promise<{
+    run: (payload: unknown, onProgress?: (progress: unknown) => void) => Promise<unknown>;
+    close: () => Promise<void>;
+  } | null> | null = null;
 
   type ModuleEntry = {
     id: string;
@@ -1168,7 +1186,10 @@ function arenaModelPlugin() {
     params: {},
     composite: levelCompositeConfig(level),
   });
-  const getWorkerPool = async (): Promise<{ run: (payload: unknown) => Promise<unknown>; close: () => Promise<void> } | null> => {
+  const getWorkerPool = async (): Promise<{
+    run: (payload: unknown, onProgress?: (progress: unknown) => void) => Promise<unknown>;
+    close: () => Promise<void>;
+  } | null> => {
     if (!workerPoolPromise) {
       workerPoolPromise = (async () => {
         if (!existsSync(workerPoolModuleFile)) {
@@ -1178,7 +1199,7 @@ function arenaModelPlugin() {
           const workerPoolModule = await import(pathToFileURL(workerPoolModuleFile).href) as {
             WorkerPool?: {
               new (workerFileUrl: string, size: number): {
-                run: (payload: unknown) => Promise<unknown>;
+                run: (payload: unknown, onProgress?: (progress: unknown) => void) => Promise<unknown>;
                 close: () => Promise<void>;
               };
               matchWorkerUrl: () => string;
@@ -1911,10 +1932,21 @@ function arenaModelPlugin() {
             leaderboardCompetitionJob = {
               id: jobId,
               status: "running",
+              startedAtMs: Date.now(),
               runsRequested,
               total: jobs.length,
               completed: 0,
               failed: 0,
+              matches: jobs.map((job, index) => ({
+                index,
+                runA: job.modelA.runId,
+                runB: job.modelB.runId,
+                status: "queued",
+                simSecondsElapsed: 0,
+                maxSimSeconds: job.spec.maxSimSeconds,
+                units: 0,
+                projectiles: 0,
+              })),
             };
             json(res, 202, {
               ok: true,
@@ -1926,23 +1958,52 @@ function arenaModelPlugin() {
 
             void (async () => {
               try {
-                const run = (spec: MatchSpec): Promise<MatchResult> => pool
-                  ? pool.run(spec).then((result) => result as MatchResult)
-                  : runMatch(spec);
-                const settledResults = await Promise.allSettled(jobs.map((job) => run(job.spec).then(
-                  (result) => {
+                const settledResults = await Promise.allSettled(jobs.map((job, index) => {
+                  const onProgress = (progress: MatchProgress): void => {
+                    const match = leaderboardCompetitionJob?.id === jobId
+                      ? leaderboardCompetitionJob.matches[index]
+                      : undefined;
+                    if (!match) return;
+                    if (match.status === "queued") {
+                      match.status = "running";
+                      match.startedAtMs = Date.now();
+                    }
+                    match.simSecondsElapsed = Math.max(0, Number(progress.simSecondsElapsed) || 0);
+                    match.maxSimSeconds = Math.max(0, Number(progress.maxSimSeconds) || job.spec.maxSimSeconds);
+                    match.units = Math.max(0, Math.floor(Number(progress.units) || 0));
+                    match.projectiles = Math.max(0, Math.floor(Number(progress.projectiles) || 0));
+                    match.lastProgressAtMs = Date.now();
+                  };
+                  const matchPromise = pool
+                    ? pool.run(job.spec, (progress) => onProgress(progress as MatchProgress)).then((result) => result as MatchResult)
+                    : runMatch(job.spec, onProgress);
+                  return matchPromise.then((result) => {
+                    if (!result || typeof result.simSecondsElapsed !== "number") {
+                      throw new Error("Leaderboard worker returned an invalid match result.");
+                    }
                     if (leaderboardCompetitionJob?.id === jobId) {
                       leaderboardCompetitionJob.completed += 1;
+                      const match = leaderboardCompetitionJob.matches[index];
+                      if (match) {
+                        match.status = "completed";
+                        match.simSecondsElapsed = result.simSecondsElapsed;
+                        match.finishedAtMs = Date.now();
+                      }
                     }
                     return result;
-                  },
-                  (error) => {
+                  }).catch((error) => {
                     if (leaderboardCompetitionJob?.id === jobId) {
                       leaderboardCompetitionJob.failed += 1;
+                      const match = leaderboardCompetitionJob.matches[index];
+                      if (match) {
+                        match.status = "failed";
+                        match.finishedAtMs = Date.now();
+                        match.error = error instanceof Error ? error.message : String(error);
+                      }
                     }
                     throw error;
-                  },
-                )));
+                  });
+                }));
                 // Apply Elo in request order so parallel completion timing cannot change ratings.
                 for (let index = 0; index < settledResults.length; index += 1) {
                   const settled = settledResults[index];

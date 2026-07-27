@@ -80,7 +80,17 @@ function livingCraftCount(units: any[], side: "player" | "enemy"): number {
   return units.filter((unit: any) => unit.type !== "base" && unit.alive && unit.side === side).length;
 }
 
-export async function runMatch(spec: MatchSpec): Promise<MatchResult> {
+export type MatchProgress = {
+  simSecondsElapsed: number;
+  maxSimSeconds: number;
+  units: number;
+  projectiles: number;
+};
+
+export async function runMatch(
+  spec: MatchSpec,
+  onProgress?: (progress: MatchProgress) => void,
+): Promise<MatchResult> {
   setMathRandomSeed(spec.seed);
   resetUidCounter();
   const partCatalog = loadRuntimeMergedParts();
@@ -278,6 +288,18 @@ export async function runMatch(spec: MatchSpec): Promise<MatchResult> {
   const dt = 1 / 60;
   const noKeys = { a: false, d: false, w: false, s: false, space: false };
   let t = 0;
+  let nextProgressAt = 0;
+
+  const reportProgress = (): void => {
+    if (!onProgress) return;
+    const state = battle.getState();
+    onProgress({
+      simSecondsElapsed: t,
+      maxSimSeconds: spec.maxSimSeconds,
+      units: state.units.length,
+      projectiles: state.projectiles.length,
+    });
+  };
 
   const spawnMode = spec.spawnMode ?? "mirrored-random";
   const spawnBurst = Math.max(1, Math.floor(spec.spawnBurst ?? 1));
@@ -445,6 +467,8 @@ export async function runMatch(spec: MatchSpec): Promise<MatchResult> {
 
   // The first wave appears at game-time zero, followed by one wave per interval.
   spawnScheduledMirroredWave();
+  reportProgress();
+  nextProgressAt = 5;
   while (battle.getState().active && !battle.getState().outcome && t < spec.maxSimSeconds) {
     if (allowSpawns) {
       spawnTimer += dt;
@@ -463,6 +487,10 @@ export async function runMatch(spec: MatchSpec): Promise<MatchResult> {
     }
     battle.update(dt, noKeys);
     t += dt;
+    if (t + 1e-9 >= nextProgressAt) {
+      reportProgress();
+      nextProgressAt += 5;
+    }
     replenishInitialLineup();
     maintainTestArenaPopulation();
     if (!scenario.withBase) {
@@ -511,6 +539,7 @@ export async function runMatch(spec: MatchSpec): Promise<MatchResult> {
   }
 
   const finalState = battle.getState();
+  reportProgress();
   const outcome = finalState.outcome ?? { victory: false, reason: "unknown" };
   const losses = battle.getLossStats();
   const baseWorthUnits = Math.max(0, Math.floor(spec.baseWorthUnits ?? 0));
