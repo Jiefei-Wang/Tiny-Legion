@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 import type { Params } from "../ai/ai-schema.ts";
 import { getModuleSchema, type CompositeModuleSpec, baselineCompositeConfig } from "../ai/composite-controller.ts";
 import type { MatchResult, MatchSpec } from "../match/match-types.ts";
+import { loadLeaderboardScenario } from "../config/leaderboard-scenario.ts";
 import { WorkerPool } from "../lib/worker-pool.ts";
 import { aggregateResults, wilsonLowerBound } from "./fitness.ts";
 import { crossover, defaultParams, mutate, randomParams } from "./param-genetics.ts";
@@ -46,6 +47,8 @@ type PhaseDef = {
   enemyGas?: number;
   spawnBurst?: number;
   spawnMaxActive?: number;
+  spawnIntervalSeconds?: number;
+  baseWorthUnits?: number;
   maintainUnitsPerSide?: number;
   opponentMode?: "best" | "leaderboard-nearby";
   leaderboard?: {
@@ -125,6 +128,8 @@ function makePhase(
     ...(typeof config?.enemyGas === "number" ? { enemyGas: config.enemyGas } : {}),
     ...(typeof config?.spawnBurst === "number" ? { spawnBurst: config.spawnBurst } : {}),
     ...(typeof config?.spawnMaxActive === "number" ? { spawnMaxActive: config.spawnMaxActive } : {}),
+    ...(typeof config?.spawnIntervalSeconds === "number" ? { spawnIntervalSeconds: config.spawnIntervalSeconds } : {}),
+    ...(typeof config?.baseWorthUnits === "number" ? { baseWorthUnits: config.baseWorthUnits } : {}),
     ...(typeof config?.maintainUnitsPerSide === "number" ? { maintainUnitsPerSide: config.maintainUnitsPerSide } : {}),
     opponentMode: config?.opponentMode ?? "best",
     ...(config?.leaderboard ? { leaderboard: { opponentCount: Math.max(1, Math.floor(config.leaderboard.opponentCount)) } } : {}),
@@ -177,7 +182,7 @@ function loadPhaseDefs(
           continue;
         }
         const withBase = Boolean(entry.withBase);
-        const initialUnitsPerSide = Math.max(1, Math.floor(Number(entry.initialUnitsPerSide ?? nUnits)));
+        const initialUnitsPerSide = Math.max(0, Math.floor(Number(entry.initialUnitsPerSide ?? nUnits)));
         const seeds = Math.max(1, Math.floor(Number(entry.seeds ?? phaseSeeds)));
         out.push(makePhase(id, withBase, initialUnitsPerSide, seeds, entry));
       }
@@ -277,7 +282,6 @@ function makeEvalSpecs(
   const specs: MatchSpec[] = [];
   for (const seed of seeds) {
     specs.push({ ...base, seed, aiPlayer: candidateAi, aiEnemy: baselineAi });
-    specs.push({ ...base, seed, aiPlayer: baselineAi, aiEnemy: candidateAi });
   }
   return specs;
 }
@@ -349,7 +353,6 @@ type EvalJob = {
   spec: MatchSpec;
   opponentId: string;
   opponentScore: number;
-  candidateSide: "player" | "enemy";
 };
 
 function makeEvalJobsVsOpponents(
@@ -367,13 +370,6 @@ function makeEvalJobsVsOpponents(
         spec: { ...base, seed, aiPlayer: candidateAi, aiEnemy: opponentAi },
         opponentId: opponent.runId,
         opponentScore: opponent.score,
-        candidateSide: "player",
-      });
-      jobs.push({
-        spec: { ...base, seed, aiPlayer: opponentAi, aiEnemy: candidateAi },
-        opponentId: opponent.runId,
-        opponentScore: opponent.score,
-        candidateSide: "enemy",
       });
     }
   }
@@ -471,23 +467,32 @@ export async function runCompositeTraining(opts: {
         const phaseDir = resolve(runDir, moduleKind, phase.id);
         ensureDir(phaseDir);
 
+        const leaderboardScenario = phase.id === "p4-leaderboard" ? loadLeaderboardScenario() : null;
         const baseMatch: Omit<MatchSpec, "seed" | "aiPlayer" | "aiEnemy"> = {
-          maxSimSeconds: phase.maxSimSeconds,
-          nodeDefense: phase.nodeDefense ?? opts.nodeDefense,
-          ...((phase.baseHp ?? opts.baseHp) ? { baseHp: phase.baseHp ?? opts.baseHp ?? undefined } : {}),
-          playerGas: phase.playerGas ?? opts.playerGas,
-          enemyGas: phase.enemyGas ?? opts.enemyGas,
-          spawnBurst: phase.spawnBurst ?? opts.spawnBurst,
+          maxSimSeconds: leaderboardScenario?.maxSimSeconds ?? phase.maxSimSeconds,
+          nodeDefense: leaderboardScenario?.nodeDefense ?? phase.nodeDefense ?? opts.nodeDefense,
+          ...((leaderboardScenario?.baseHp ?? phase.baseHp ?? opts.baseHp)
+            ? { baseHp: leaderboardScenario?.baseHp ?? phase.baseHp ?? opts.baseHp ?? undefined }
+            : {}),
+          playerGas: leaderboardScenario?.playerGas ?? phase.playerGas ?? opts.playerGas,
+          enemyGas: leaderboardScenario?.enemyGas ?? phase.enemyGas ?? opts.enemyGas,
+          spawnBurst: leaderboardScenario?.spawnBurst ?? phase.spawnBurst ?? opts.spawnBurst,
           spawnMaxActive: phase.spawnMaxActive ?? opts.spawnMaxActive,
+          ...(leaderboardScenario ? {
+            spawnIntervalSeconds: leaderboardScenario.spawnIntervalSeconds,
+            baseWorthUnits: leaderboardScenario.baseWorthUnits,
+          } : {}),
           scenario: {
             withBase: phase.withBase,
-            initialUnitsPerSide: phase.initialUnitsPerSide,
-            ...(typeof phase.maintainUnitsPerSide === "number"
+            initialUnitsPerSide: leaderboardScenario?.initialUnitsPerSide ?? phase.initialUnitsPerSide,
+            ...(leaderboardScenario?.scheduledMirroredWaves
+              ? { scheduledMirroredWaves: true }
+              : typeof phase.maintainUnitsPerSide === "number"
               ? { maintainUnitsPerSide: phase.maintainUnitsPerSide }
               : {}),
           },
-          templateNames: phase.templateNames,
-          battlefield: phase.battlefield,
+          templateNames: leaderboardScenario?.templateNames ?? phase.templateNames,
+          battlefield: leaderboardScenario?.battlefield ?? phase.battlefield,
         };
 
         const seeds = buildSeedList(opts.seed0, phase.seeds);
@@ -510,10 +515,10 @@ export async function runCompositeTraining(opts: {
             if (phase.opponentMode === "leaderboard-nearby" && nearbyOpponents.length > 0) {
               const jobs = makeEvalJobsVsOpponents(baseMatch, candidateModules, nearbyOpponents, seeds);
               const results = (await Promise.all(jobs.map((j) => pool.run(j.spec)))) as MatchResult[];
-              agg = aggregateResults(results, (_r, i) => jobs[i]?.candidateSide ?? "player");
+              agg = aggregateResults(results);
               const pairRoundsByOpponent = new Map<string, number>();
               for (let i = 0; i < results.length; i += 1) {
-                const side = jobs[i]?.candidateSide ?? "player";
+                const side = "player" as const;
                 const opponentId = jobs[i]?.opponentId ?? "unknown";
                 const pairRounds = pairRoundsByOpponent.get(opponentId) ?? 0;
                 const opponentScore = Number.isFinite(jobs[i]?.opponentScore) ? Number(jobs[i]?.opponentScore) : 100;
@@ -530,11 +535,7 @@ export async function runCompositeTraining(opts: {
               const specs = makeEvalSpecs(baseMatch, candidateModules, baselineModules, seeds);
               const results = (await Promise.all(specs.map((s) => pool.run(s)))) as MatchResult[];
 
-              const candidateKey = JSON.stringify(candidateModules);
-              agg = aggregateResults(results, (r) => {
-                const playerKey = JSON.stringify(r.spec.aiPlayer.composite ?? null);
-                return playerKey === candidateKey ? "player" : "enemy";
-              });
+              agg = aggregateResults(results);
             }
 
             const wl = wilsonLowerBound(agg.wins, agg.games);

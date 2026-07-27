@@ -11,7 +11,8 @@ import {
   validatePartDefinitionDetailed,
 } from "../game-core/src/parts/part-schema.ts";
 import { runMatch } from "../arena/src/match/run-match.ts";
-import { compareMirroredSeries } from "../arena/src/match/mirrored-series.ts";
+import { compareMatchResult } from "../arena/src/match/match-comparison.ts";
+import { loadLeaderboardScenario, type LeaderboardScenario } from "../arena/src/config/leaderboard-scenario.ts";
 import { levelCompositeConfig } from "../arena/src/ai/composite-controller.ts";
 import { aiLevelCertificationSeed } from "../arena/src/eval/evaluate-ai-levels.ts";
 import { MAX_CERTIFIED_AI_LEVEL } from "../game-core/src/ai/composite/level-modules.ts";
@@ -20,12 +21,6 @@ import {
   BATTLEFIELD_WIDTH,
   DEFAULT_GROUND_HEIGHT,
 } from "../game-core/src/config/balance/battlefield.ts";
-import {
-  AI_COMPARISON_ACTIVE_UNITS_PER_SIDE,
-  AI_COMPARISON_MAX_SIM_SECONDS,
-  TEST_ARENA_BASE_HP,
-  TEST_ARENA_NODE_DEFENSE,
-} from "../game-core/src/config/ai/arena-comparison.ts";
 import type { MatchAiSpec, MatchResult, MatchSpec } from "../arena/src/match/match-types.ts";
 import {
   audioDir as gameCoreAudioDir,
@@ -1072,6 +1067,15 @@ function arenaModelPlugin() {
   const craftArenaSeedFile = resolve(arenaDataDir, "craft-arena", "scenario-seed.json");
   const phaseConfigFile = resolve(process.cwd(), "..", "arena", "composite-training.phases.json");
   let leaderboardCompeteBusy = false;
+  let leaderboardCompetitionJob: {
+    id: string;
+    status: "running" | "done" | "failed";
+    runsRequested: number;
+    total: number;
+    completed: number;
+    failed: number;
+    error?: string;
+  } | null = null;
   const leaderboardParallelWorkers = Math.max(
     1,
     typeof availableParallelism === "function" ? availableParallelism() : cpus().length,
@@ -1099,10 +1103,14 @@ function arenaModelPlugin() {
     wins: number;
     losses: number;
     ties: number;
+    destroyedUnits: number;
+    lostUnits: number;
+    ratioSum: number;
+    ratioSamples: number;
     updatedAtMs: number;
   };
   type RatingStore = {
-    version: 9;
+    version: 11;
     updatedAt: string;
     ratings: Record<string, RatingEntry>;
     matchupRounds: Record<string, number>;
@@ -1122,6 +1130,9 @@ function arenaModelPlugin() {
     wins: number;
     losses: number;
     ties: number;
+    destroyedUnits: number;
+    lostUnits: number;
+    averageRatio: number;
     isUnranked: boolean;
     mtimeMs: number;
     spec: MatchAiSpec;
@@ -1130,24 +1141,7 @@ function arenaModelPlugin() {
     previousLevelRounds?: number;
     previousLevelCertified?: boolean;
   };
-  type LeaderboardPhaseScenario = {
-    withBase: boolean;
-    initialUnitsPerSide: number;
-    maintainUnitsPerSide: number;
-    templateNames: string[];
-    battlefield?: {
-      width?: number;
-      height?: number;
-      groundHeight?: number;
-    };
-    maxSimSeconds?: number;
-    nodeDefense?: number;
-    baseHp?: number;
-    playerGas?: number;
-    enemyGas?: number;
-    spawnBurst?: number;
-    spawnMaxActive?: number;
-  };
+  type LeaderboardPhaseScenario = LeaderboardScenario;
 
   const round2 = (value: number): number => Math.round(value * 100) / 100;
   const clampInt = (value: unknown, min: number, max: number, fallback: number): number => {
@@ -1163,6 +1157,10 @@ function arenaModelPlugin() {
     wins: 0,
     losses: 0,
     ties: 0,
+    destroyedUnits: 0,
+    lostUnits: 0,
+    ratioSum: 0,
+    ratioSamples: 0,
     updatedAtMs: Date.now(),
   });
   const levelCompositeSpec = (level: number): MatchAiSpec => ({
@@ -1280,98 +1278,22 @@ function arenaModelPlugin() {
   };
 
   const loadLeaderboardPhaseScenario = (): LeaderboardPhaseScenario => {
-    const fallback: LeaderboardPhaseScenario = {
-      withBase: true,
-      initialUnitsPerSide: AI_COMPARISON_ACTIVE_UNITS_PER_SIDE,
-      maintainUnitsPerSide: AI_COMPARISON_ACTIVE_UNITS_PER_SIDE,
-      templateNames: ["*"],
-      battlefield: { width: BATTLEFIELD_WIDTH, height: BATTLEFIELD_HEIGHT, groundHeight: DEFAULT_GROUND_HEIGHT },
-      maxSimSeconds: AI_COMPARISON_MAX_SIM_SECONDS,
-      nodeDefense: TEST_ARENA_NODE_DEFENSE,
-      baseHp: TEST_ARENA_BASE_HP,
-      playerGas: 0,
-      enemyGas: 0,
-      spawnBurst: 1,
-      spawnMaxActive: AI_COMPARISON_ACTIVE_UNITS_PER_SIDE,
-    };
-    if (!existsSync(phaseConfigFile)) {
-      return fallback;
-    }
-    try {
-      const raw = readFileSync(phaseConfigFile, "utf8");
-      const parsed = JSON.parse(raw) as {
-        phases?: Array<Record<string, unknown>>;
-        byComponent?: Record<string, Array<Record<string, unknown>>>;
-      };
-      const fromGlobal = Array.isArray(parsed?.phases)
-        ? parsed.phases.find((phase) => phase && phase.id === "p4-leaderboard")
-        : null;
-      const fromByComponent = parsed?.byComponent && typeof parsed.byComponent === "object"
-        ? (["shoot", "movement", "target"] as const)
-          .flatMap((kind) => Array.isArray(parsed.byComponent?.[kind]) ? parsed.byComponent[kind] : [])
-          .find((phase) => phase && phase.id === "p4-leaderboard")
-        : null;
-      const source = (fromGlobal ?? fromByComponent) as Record<string, unknown> | null;
-      if (!source) {
-        return fallback;
-      }
-      const withBase = Boolean(source.withBase);
-      const initialUnitsPerSide = Math.max(1, Math.floor(typeof source.initialUnitsPerSide === "number" ? source.initialUnitsPerSide : fallback.initialUnitsPerSide));
-      const maintainUnitsPerSide = Math.max(0, Math.floor(typeof source.maintainUnitsPerSide === "number" ? source.maintainUnitsPerSide : fallback.maintainUnitsPerSide));
-      const templateNames = Array.isArray(source.templateNames) && source.templateNames.length > 0
-        ? source.templateNames.map((v) => String(v)).filter((v) => v.trim().length > 0)
-        : fallback.templateNames;
-      const useGlobalBattlefield = source.useGlobalBattlefield === true;
-      const bf = source.battlefield && typeof source.battlefield === "object" ? source.battlefield as Record<string, unknown> : null;
-      const battlefield = useGlobalBattlefield
-        ? { width: BATTLEFIELD_WIDTH, height: BATTLEFIELD_HEIGHT, groundHeight: DEFAULT_GROUND_HEIGHT }
-        : bf
-        ? {
-          ...(typeof bf.width === "number" ? { width: Math.max(640, Math.floor(bf.width)) } : {}),
-          ...(typeof bf.height === "number" ? { height: Math.max(360, Math.floor(bf.height)) } : {}),
-          ...(typeof bf.groundHeight === "number" ? { groundHeight: Math.max(80, Math.floor(bf.groundHeight)) } : {}),
-        }
-        : fallback.battlefield;
-      // Parse additional match parameters from config
-      const maxSimSeconds = typeof source.maxSimSeconds === "number" ? Math.max(10, Math.floor(source.maxSimSeconds)) : fallback.maxSimSeconds;
-      const nodeDefense = typeof source.nodeDefense === "number" ? Math.max(0, source.nodeDefense) : fallback.nodeDefense;
-      const baseHp = typeof source.baseHp === "number" ? Math.max(100, Math.floor(source.baseHp)) : fallback.baseHp;
-      const playerGas = typeof source.playerGas === "number" ? Math.max(0, Math.floor(source.playerGas)) : fallback.playerGas;
-      const enemyGas = typeof source.enemyGas === "number" ? Math.max(0, Math.floor(source.enemyGas)) : fallback.enemyGas;
-      const spawnBurst = typeof source.spawnBurst === "number" ? Math.max(1, Math.floor(source.spawnBurst)) : fallback.spawnBurst;
-      const spawnMaxActive = typeof source.spawnMaxActive === "number" ? Math.max(1, Math.floor(source.spawnMaxActive)) : fallback.spawnMaxActive;
-      return {
-        withBase,
-        initialUnitsPerSide,
-        maintainUnitsPerSide,
-        templateNames,
-        ...(battlefield ? { battlefield } : {}),
-        maxSimSeconds,
-        nodeDefense,
-        baseHp,
-        playerGas,
-        enemyGas,
-        spawnBurst,
-        spawnMaxActive,
-      };
-    } catch {
-      return fallback;
-    }
+    return loadLeaderboardScenario(phaseConfigFile);
   };
 
   const loadRatingStore = (): RatingStore => {
     if (!existsSync(leaderboardFile)) {
-      return { version: 9, updatedAt: new Date().toISOString(), ratings: {}, matchupRounds: {}, matchupResults: {} };
+      return { version: 11, updatedAt: new Date().toISOString(), ratings: {}, matchupRounds: {}, matchupResults: {} };
     }
     try {
       const raw = readFileSync(leaderboardFile, "utf8");
       const parsed = JSON.parse(raw) as unknown;
       if (!parsed || typeof parsed !== "object") {
-        return { version: 9, updatedAt: new Date().toISOString(), ratings: {}, matchupRounds: {}, matchupResults: {} };
+        return { version: 11, updatedAt: new Date().toISOString(), ratings: {}, matchupRounds: {}, matchupResults: {} };
       }
       const obj = parsed as Record<string, unknown>;
-      if (obj.version !== 9) {
-        return { version: 9, updatedAt: new Date().toISOString(), ratings: {}, matchupRounds: {}, matchupResults: {} };
+      if (obj.version !== 11) {
+        return { version: 11, updatedAt: new Date().toISOString(), ratings: {}, matchupRounds: {}, matchupResults: {} };
       }
       const ratingsRaw = (obj.ratings && typeof obj.ratings === "object") ? obj.ratings as Record<string, unknown> : {};
       const matchupRaw = (obj.matchupRounds && typeof obj.matchupRounds === "object")
@@ -1395,6 +1317,10 @@ function arenaModelPlugin() {
           wins: clampInt(e.wins, 0, 1_000_000, 0),
           losses: clampInt(e.losses, 0, 1_000_000, 0),
           ties: clampInt(e.ties, 0, 1_000_000, 0),
+          destroyedUnits: Math.max(0, Number.isFinite(e.destroyedUnits) ? Number(e.destroyedUnits) : 0),
+          lostUnits: Math.max(0, Number.isFinite(e.lostUnits) ? Number(e.lostUnits) : 0),
+          ratioSum: Math.max(0, Number.isFinite(e.ratioSum) ? Number(e.ratioSum) : 0),
+          ratioSamples: clampInt(e.ratioSamples, 0, 1_000_000, 0),
           updatedAtMs: Number.isFinite(e.updatedAtMs) ? Number(e.updatedAtMs) : Date.now(),
         };
       }
@@ -1414,14 +1340,14 @@ function arenaModelPlugin() {
         };
       }
       return {
-        version: 9,
+        version: 11,
         updatedAt: typeof obj.updatedAt === "string" ? obj.updatedAt : new Date().toISOString(),
         ratings,
         matchupRounds,
         matchupResults,
       };
     } catch {
-      return { version: 9, updatedAt: new Date().toISOString(), ratings: {}, matchupRounds: {}, matchupResults: {} };
+      return { version: 11, updatedAt: new Date().toISOString(), ratings: {}, matchupRounds: {}, matchupResults: {} };
     }
   };
 
@@ -1470,6 +1396,9 @@ function arenaModelPlugin() {
         wins: rating.wins,
         losses: rating.losses,
         ties: rating.ties,
+        destroyedUnits: rating.destroyedUnits,
+        lostUnits: rating.lostUnits,
+        averageRatio: rating.ratioSamples > 0 ? rating.ratioSum / rating.ratioSamples : 0,
         isUnranked: rating.rounds <= 0,
         mtimeMs: run.mtimeMs,
         spec: run.spec,
@@ -1503,6 +1432,8 @@ function arenaModelPlugin() {
     runA: string,
     runB: string,
     outcomeA: 0 | 0.5 | 1,
+    destroyedByA: number,
+    destroyedByB: number,
   ): { deltaA: number; deltaB: number } => {
     const a = store.ratings[runA] ?? (store.ratings[runA] = defaultRatingEntry());
     const b = store.ratings[runB] ?? (store.ratings[runB] = defaultRatingEntry());
@@ -1537,6 +1468,14 @@ function arenaModelPlugin() {
     b.rounds += 1;
     a.games += 1;
     b.games += 1;
+    a.destroyedUnits += destroyedByA;
+    a.lostUnits += destroyedByB;
+    b.destroyedUnits += destroyedByB;
+    b.lostUnits += destroyedByA;
+    a.ratioSum += destroyedByA / Math.max(1, destroyedByB);
+    b.ratioSum += destroyedByB / Math.max(1, destroyedByA);
+    a.ratioSamples += 1;
+    b.ratioSamples += 1;
     if (outcomeA >= 0.99) {
       a.wins += 1;
       b.losses += 1;
@@ -1794,6 +1733,21 @@ function arenaModelPlugin() {
         });
       });
 
+      server.middlewares.use("/__arena/composite/leaderboard/compete/status", (req, res) => {
+        if (req.method !== "GET") {
+          res.statusCode = 405;
+          res.end("method not allowed");
+          return;
+        }
+        const requestUrl = new URL(req.url ?? "/", "http://localhost");
+        const jobId = requestUrl.searchParams.get("jobId") ?? "";
+        if (!leaderboardCompetitionJob || (jobId && leaderboardCompetitionJob.id !== jobId)) {
+          json(res, 404, { ok: false, reason: "job_not_found" });
+          return;
+        }
+        json(res, 200, { ok: true, job: leaderboardCompetitionJob });
+      });
+
       server.middlewares.use("/__arena/composite/leaderboard/compete", (req, res) => {
         if (req.method !== "POST") {
           res.statusCode = 405;
@@ -1895,8 +1849,7 @@ function arenaModelPlugin() {
             const jobs: Array<{
               modelA: CompositeRun;
               modelB: CompositeRun;
-              aAsPlayer: MatchSpec;
-              aAsEnemy: MatchSpec;
+              spec: MatchSpec;
             }> = [];
             const updates: Array<{
               runA: string;
@@ -1904,12 +1857,17 @@ function arenaModelPlugin() {
               outcome: "A" | "B" | "T";
               deltaA: number;
               deltaB: number;
+              destroyedByA: number;
+              destroyedByB: number;
+              ratioA: number;
+              ratioB: number;
             }> = [];
             for (let i = 0; i < runsRequested; i += 1) {
               const pair = choosePair();
               if (!pair) {
                 if (mode === "manual-pair") {
                   json(res, 400, { ok: false, reason: "invalid_manual_pair" });
+                  leaderboardCompeteBusy = false;
                   return;
                 }
                 break;
@@ -1924,84 +1882,118 @@ function arenaModelPlugin() {
                 ? aiLevelCertificationSeed(pairRounds + i)
                 : Date.now() + i * 9973 + Math.floor(Math.random() * 1000);
               const baseSpec = {
-                  seed,
-                  maxSimSeconds: phaseScenario.maxSimSeconds ?? 180,
-                  nodeDefense: phaseScenario.nodeDefense ?? 1,
-                  baseHp: phaseScenario.baseHp ?? 1200,
-                  playerGas: phaseScenario.playerGas ?? 10000,
-                  enemyGas: phaseScenario.enemyGas ?? 10000,
-                  spawnBurst: phaseScenario.spawnBurst ?? 1,
-                  spawnMaxActive: phaseScenario.spawnMaxActive ?? 5,
-                  scenario: {
-                    withBase: phaseScenario.withBase,
-                    initialUnitsPerSide: phaseScenario.initialUnitsPerSide,
-                    maintainUnitsPerSide: phaseScenario.maintainUnitsPerSide,
-                  },
-                  templateNames: phaseScenario.templateNames,
-                  ...(phaseScenario.battlefield ? { battlefield: phaseScenario.battlefield } : {}),
+                seed,
+                maxSimSeconds: phaseScenario.maxSimSeconds,
+                nodeDefense: phaseScenario.nodeDefense,
+                baseHp: phaseScenario.baseHp,
+                playerGas: phaseScenario.playerGas,
+                enemyGas: phaseScenario.enemyGas,
+                spawnBurst: phaseScenario.spawnBurst,
+                spawnIntervalSeconds: phaseScenario.spawnIntervalSeconds,
+                baseWorthUnits: phaseScenario.baseWorthUnits,
+                scenario: {
+                  withBase: phaseScenario.withBase,
+                  initialUnitsPerSide: phaseScenario.initialUnitsPerSide,
+                  scheduledMirroredWaves: phaseScenario.scheduledMirroredWaves,
+                },
+                templateNames: phaseScenario.templateNames,
+                battlefield: phaseScenario.battlefield,
               };
               jobs.push({
                 modelA,
                 modelB,
-                aAsPlayer: { ...baseSpec, aiPlayer: modelA.spec, aiEnemy: modelB.spec },
-                aAsEnemy: { ...baseSpec, aiPlayer: modelB.spec, aiEnemy: modelA.spec },
+                spec: { ...baseSpec, aiPlayer: modelA.spec, aiEnemy: modelB.spec },
               });
             }
 
             const pool = await getWorkerPool();
-            const settledResults = await Promise.allSettled(
-              jobs.map(async (job) => {
+            const jobId = `${Date.now()}-${Math.floor(Math.random() * 1_000_000)}`;
+            leaderboardCompetitionJob = {
+              id: jobId,
+              status: "running",
+              runsRequested,
+              total: jobs.length,
+              completed: 0,
+              failed: 0,
+            };
+            json(res, 202, {
+              ok: true,
+              jobId,
+              total: jobs.length,
+              parallelWorkers: pool ? leaderboardParallelWorkers : 1,
+              parallelMode: pool ? "worker-threads" : "single-thread-fallback",
+            });
+
+            void (async () => {
+              try {
                 const run = (spec: MatchSpec): Promise<MatchResult> => pool
                   ? pool.run(spec).then((result) => result as MatchResult)
                   : runMatch(spec);
-                const [aAsPlayer, aAsEnemy] = await Promise.all([run(job.aAsPlayer), run(job.aAsEnemy)]);
-                return { aAsPlayer, aAsEnemy };
-              }),
-            );
-            let completed = 0;
-            for (let i = 0; i < settledResults.length; i += 1) {
-              const settled = settledResults[i];
-              if (settled.status !== "fulfilled") {
-                continue;
+                const settledResults = await Promise.allSettled(jobs.map((job) => run(job.spec).then(
+                  (result) => {
+                    if (leaderboardCompetitionJob?.id === jobId) {
+                      leaderboardCompetitionJob.completed += 1;
+                    }
+                    return result;
+                  },
+                  (error) => {
+                    if (leaderboardCompetitionJob?.id === jobId) {
+                      leaderboardCompetitionJob.failed += 1;
+                    }
+                    throw error;
+                  },
+                )));
+                // Apply Elo in request order so parallel completion timing cannot change ratings.
+                for (let index = 0; index < settledResults.length; index += 1) {
+                  const settled = settledResults[index];
+                  const job = jobs[index];
+                  if (!job || settled.status !== "fulfilled") continue;
+                  const comparison = compareMatchResult(settled.value);
+                  const outcomeA: 0 | 0.5 | 1 = comparison.outcomeA > 0 ? 1 : comparison.outcomeA < 0 ? 0 : 0.5;
+                  const ratingDelta = applyLeaderboardMatch(
+                    store,
+                    job.modelA.runId,
+                    job.modelB.runId,
+                    outcomeA,
+                    comparison.destroyedByA,
+                    comparison.destroyedByB,
+                  );
+                  updates.push({
+                    runA: job.modelA.runId,
+                    runB: job.modelB.runId,
+                    outcome: outcomeA >= 0.99 ? "A" : outcomeA <= 0.01 ? "B" : "T",
+                    deltaA: ratingDelta.deltaA,
+                    deltaB: ratingDelta.deltaB,
+                    destroyedByA: comparison.destroyedByA,
+                    destroyedByB: comparison.destroyedByB,
+                    ratioA: comparison.ratioA,
+                    ratioB: comparison.ratioB,
+                  });
+                }
+                saveRatingStore(store);
+                if (leaderboardCompetitionJob?.id === jobId) {
+                  leaderboardCompetitionJob.status = leaderboardCompetitionJob.completed > 0 || jobs.length === 0
+                    ? "done"
+                    : "failed";
+                  if (leaderboardCompetitionJob.status === "failed") {
+                    leaderboardCompetitionJob.error = "No competition matches completed.";
+                  }
+                }
+              } catch (error) {
+                if (leaderboardCompetitionJob?.id === jobId) {
+                  leaderboardCompetitionJob.status = "failed";
+                  leaderboardCompetitionJob.error = error instanceof Error ? error.message : String(error);
+                }
+              } finally {
+                leaderboardCompeteBusy = false;
               }
-              const result = settled.value;
-              const job = jobs[i];
-              if (!job) {
-                continue;
-              }
-              const comparison = compareMirroredSeries(result.aAsPlayer, result.aAsEnemy);
-              const outcomeA: 0 | 0.5 | 1 = comparison.outcomeA > 0 ? 1 : comparison.outcomeA < 0 ? 0 : 0.5;
-              const ratingDelta = applyLeaderboardMatch(store, job.modelA.runId, job.modelB.runId, outcomeA);
-              updates.push({
-                runA: job.modelA.runId,
-                runB: job.modelB.runId,
-                outcome: outcomeA >= 0.99 ? "A" : outcomeA <= 0.01 ? "B" : "T",
-                deltaA: ratingDelta.deltaA,
-                deltaB: ratingDelta.deltaB,
-              });
-              completed += 1;
-            }
-            if (completed <= 0 && jobs.length > 0) {
-              throw new Error("No competition rounds completed.");
-            }
-            saveRatingStore(store);
-            json(res, 200, {
-              ok: true,
-              mode,
-              runsRequested,
-              completed,
-              parallelWorkers: pool ? leaderboardParallelWorkers : 1,
-              parallelMode: pool ? "worker-threads" : "single-thread-fallback",
-              updates: updates.slice(-30),
-              leaderboard: buildLeaderboardEntries(),
-            });
+            })();
           } catch (error) {
             json(res, 500, {
               ok: false,
               reason: "compete_failed",
               error: error instanceof Error ? error.message : String(error),
             });
-          } finally {
             leaderboardCompeteBusy = false;
           }
         });
@@ -2014,7 +2006,7 @@ function arenaModelPlugin() {
           return;
         }
         try {
-          const store: RatingStore = { version: 9, updatedAt: new Date().toISOString(), ratings: {}, matchupRounds: {}, matchupResults: {} };
+          const store: RatingStore = { version: 11, updatedAt: new Date().toISOString(), ratings: {}, matchupRounds: {}, matchupResults: {} };
           saveRatingStore(store);
           res.setHeader("content-type", "application/json");
           res.end(JSON.stringify({ ok: true, message: "Leaderboard scores reset" }));
@@ -2066,6 +2058,9 @@ function arenaModelPlugin() {
           wins: entry.wins,
           losses: entry.losses,
           ties: entry.ties,
+          destroyedUnits: entry.destroyedUnits,
+          lostUnits: entry.lostUnits,
+          averageRatio: entry.averageRatio,
           winRate: entry.games > 0 ? entry.wins / entry.games : 0,
           leaderboardScore: entry.score,
           previousLevelWinRate: entry.previousLevelWinRate,

@@ -2,7 +2,7 @@ import { availableParallelism } from "node:os";
 import { levelCompositeConfig, type CompositeConfig } from "../ai/composite-controller.ts";
 import { loadLeaderboardScenario } from "../config/leaderboard-scenario.ts";
 import { WorkerPool } from "../lib/worker-pool.ts";
-import { compareMirroredSeries } from "../match/mirrored-series.ts";
+import { compareMatchResult } from "../match/match-comparison.ts";
 import { runMatch } from "../match/run-match.ts";
 import type { MatchAiSpec, MatchResult, MatchSpec } from "../match/match-types.ts";
 
@@ -59,13 +59,14 @@ function configMatchSpec(seed: number, aiPlayer: MatchAiSpec, aiEnemy: MatchAiSp
     scenario: {
       withBase: scenario.withBase,
       initialUnitsPerSide: scenario.initialUnitsPerSide,
-      maintainUnitsPerSide: scenario.maintainUnitsPerSide,
+      scheduledMirroredWaves: scenario.scheduledMirroredWaves,
     },
     templateNames: scenario.templateNames,
     battlefield: scenario.battlefield,
     spawnMode: "mirrored-random",
     spawnBurst: scenario.spawnBurst,
-    spawnMaxActive: scenario.spawnMaxActive,
+    spawnIntervalSeconds: scenario.spawnIntervalSeconds,
+    baseWorthUnits: scenario.baseWorthUnits,
   };
 }
 
@@ -81,9 +82,8 @@ export async function evaluateCompositePair(
   let ties = 0;
   for (let index = 0; index < series; index += 1) {
     const seed = aiLevelCertificationSeed(index);
-    const asPlayer = await runMatch(configMatchSpec(seed, configAiSpec(higher), configAiSpec(lower)));
-    const asEnemy = await runMatch(configMatchSpec(seed, configAiSpec(lower), configAiSpec(higher)));
-    const comparison = compareMirroredSeries(asPlayer, asEnemy);
+    const result = await runMatch(configMatchSpec(seed, configAiSpec(higher), configAiSpec(lower)));
+    const comparison = compareMatchResult(result);
     wins += Number(comparison.outcomeA > 0);
     losses += Number(comparison.outcomeA < 0);
     ties += Number(comparison.outcomeA === 0);
@@ -118,11 +118,8 @@ async function evaluateCompositePairWithPool(
     const seed = aiLevelCertificationSeed(index);
     const lowerSpec = configAiSpec(lower);
     const higherSpec = configAiSpec(higher);
-    const [asPlayer, asEnemy] = await Promise.all([
-      pool.run(configMatchSpec(seed, higherSpec, lowerSpec)).then((result) => result as MatchResult),
-      pool.run(configMatchSpec(seed, lowerSpec, higherSpec)).then((result) => result as MatchResult),
-    ]);
-    return compareMirroredSeries(asPlayer, asEnemy).outcomeA;
+    const result = await pool.run(configMatchSpec(seed, higherSpec, lowerSpec)) as MatchResult;
+    return compareMatchResult(result).outcomeA;
   }));
   const wins = outcomes.filter((outcome) => outcome > 0).length;
   const losses = outcomes.filter((outcome) => outcome < 0).length;

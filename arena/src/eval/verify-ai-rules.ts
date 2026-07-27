@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { loadLeaderboardScenario } from "../config/leaderboard-scenario.ts";
-import { compareMirroredSeries } from "../match/mirrored-series.ts";
+import { compareMatchResult } from "../match/match-comparison.ts";
 import { levelCompositeConfig } from "../ai/composite-controller.ts";
 import { runMatch } from "../match/run-match.ts";
 import {
@@ -9,8 +9,10 @@ import {
   DEFAULT_GROUND_HEIGHT,
 } from "../../../game-core/src/config/balance/battlefield.ts";
 import {
-  AI_COMPARISON_ACTIVE_UNITS_PER_SIDE,
+  AI_COMPARISON_BASE_WORTH_UNITS,
   AI_COMPARISON_MAX_SIM_SECONDS,
+  AI_COMPARISON_SPAWN_COUNT_PER_SIDE,
+  AI_COMPARISON_SPAWN_INTERVAL_SECONDS,
   TEST_ARENA_BASE_HP,
   TEST_ARENA_NODE_DEFENSE,
 } from "../../../game-core/src/config/ai/arena-comparison.ts";
@@ -29,6 +31,8 @@ function result(overrides: {
   enemyDestroyed?: number;
   playerGasWasted?: number;
   enemyGasWasted?: number;
+  destroyedByPlayer?: number;
+  destroyedByEnemy?: number;
 }): MatchResult {
   return {
     final: {
@@ -48,6 +52,12 @@ function result(overrides: {
         destroyedObjects: overrides.enemyDestroyed ?? 0,
         gasWasted: overrides.enemyGasWasted ?? 0,
       },
+    },
+    performance: {
+      destroyedByPlayer: overrides.destroyedByPlayer ?? overrides.enemyDestroyed ?? 0,
+      destroyedByEnemy: overrides.destroyedByEnemy ?? overrides.playerDestroyed ?? 0,
+      playerDestroyedRatio: 0,
+      enemyDestroyedRatio: 0,
     },
     sides: {
       player: { gasWorthDelta: 0 },
@@ -94,34 +104,20 @@ assert.equal(
   "built-in Level 5 must use per-weapon strategic-target intercept fallback",
 );
 
-const baseRusherAsPlayer = result({
-  playerBaseHp: 1_000,
-  enemyBaseHp: 0,
-  playerGasWasted: 500,
-  enemyGasWasted: 0,
-});
-const baseRusherAsEnemy = result({
-  playerBaseHp: 0,
-  enemyBaseHp: 1_000,
-  playerGasWasted: 0,
-  enemyGasWasted: 500,
-});
-const craftFirst = compareMirroredSeries(baseRusherAsPlayer, baseRusherAsEnemy);
-assert.equal(craftFirst.outcomeA, -1, "base rushing must not outweigh losing more craft value");
-assert.equal(craftFirst.decidingMetric, "destroyed-gas");
-
-const craftCountFirst = compareMirroredSeries(
-  result({ playerBaseHp: 1_000, enemyBaseHp: 0, playerDestroyed: 2, enemyDestroyed: 1 }),
-  result({ playerBaseHp: 0, enemyBaseHp: 1_000, playerDestroyed: 1, enemyDestroyed: 2 }),
-);
-assert.equal(craftCountFirst.outcomeA, -1, "craft destruction count must precede base HP");
-assert.equal(craftCountFirst.decidingMetric, "destroyed-craft");
+const destroyedCountResult = compareMatchResult(result({ destroyedByPlayer: 12, destroyedByEnemy: 7 }));
+assert.equal(destroyedCountResult.outcomeA, 1, "the AI that destroys more weighted units must win");
+assert.equal(destroyedCountResult.decidingMetric, "destroyed-units");
+assert.equal(destroyedCountResult.destroyedByA, 12);
+assert.equal(destroyedCountResult.destroyedByB, 7);
+assert.equal(destroyedCountResult.ratioA, 12 / 7);
 
 const scenario = loadLeaderboardScenario();
-assert.equal(scenario.initialUnitsPerSide, AI_COMPARISON_ACTIVE_UNITS_PER_SIDE);
-assert.equal(scenario.maintainUnitsPerSide, AI_COMPARISON_ACTIVE_UNITS_PER_SIDE);
-assert.equal(scenario.spawnMaxActive, AI_COMPARISON_ACTIVE_UNITS_PER_SIDE);
+assert.equal(scenario.initialUnitsPerSide, 0);
+assert.equal(scenario.scheduledMirroredWaves, true);
+assert.equal(scenario.spawnBurst, AI_COMPARISON_SPAWN_COUNT_PER_SIDE);
+assert.equal(scenario.spawnIntervalSeconds, AI_COMPARISON_SPAWN_INTERVAL_SECONDS);
 assert.equal(scenario.maxSimSeconds, AI_COMPARISON_MAX_SIM_SECONDS);
+assert.equal(scenario.baseWorthUnits, AI_COMPARISON_BASE_WORTH_UNITS);
 assert.equal(scenario.nodeDefense, TEST_ARENA_NODE_DEFENSE);
 assert.equal(scenario.baseHp, TEST_ARENA_BASE_HP);
 assert.equal(scenario.playerGas, 0);
@@ -154,15 +150,16 @@ const paritySmoke = await runMatch({
   scenario: {
     withBase: scenario.withBase,
     initialUnitsPerSide: scenario.initialUnitsPerSide,
-    maintainUnitsPerSide: scenario.maintainUnitsPerSide,
+    scheduledMirroredWaves: scenario.scheduledMirroredWaves,
   },
   templateNames: scenario.templateNames,
   battlefield: scenario.battlefield,
   spawnMode: "mirrored-random",
   spawnBurst: scenario.spawnBurst,
-  spawnMaxActive: scenario.spawnMaxActive,
+  spawnIntervalSeconds: scenario.spawnIntervalSeconds,
+  baseWorthUnits: scenario.baseWorthUnits,
 });
-assert.equal(paritySmoke.final.playerOperationalUnits, AI_COMPARISON_ACTIVE_UNITS_PER_SIDE);
-assert.equal(paritySmoke.final.enemyOperationalUnits, AI_COMPARISON_ACTIVE_UNITS_PER_SIDE);
+assert.equal(paritySmoke.final.playerOperationalUnits, AI_COMPARISON_SPAWN_COUNT_PER_SIDE);
+assert.equal(paritySmoke.final.enemyOperationalUnits, AI_COMPARISON_SPAWN_COUNT_PER_SIDE);
 
 console.log("AI rule verification passed.");

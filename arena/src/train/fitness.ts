@@ -14,7 +14,7 @@ export function scoreForSide(outcome: "win" | "tie" | "loss", gasWorthDelta: num
   return O * 1_000_000 + gasWorthDelta;
 }
 
-export function aggregateResults(results: MatchResult[], candidateSideForEach: (r: MatchResult, index: number) => "player" | "enemy"): Aggregate {
+export function aggregateResults(results: MatchResult[]): Aggregate {
   let wins = 0;
   let ties = 0;
   let losses = 0;
@@ -22,8 +22,7 @@ export function aggregateResults(results: MatchResult[], candidateSideForEach: (
   let sumScore = 0;
   for (let index = 0; index < results.length; index += 1) {
     const r = results[index];
-    const side = candidateSideForEach(r, index);
-    const s = r.sides[side];
+    const s = r.sides.player;
     const outcome: "win" | "tie" | "loss" = s.tie ? "tie" : s.win ? "win" : "loss";
     if (outcome === "win") {
       wins += 1;

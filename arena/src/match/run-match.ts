@@ -159,6 +159,7 @@ export async function runMatch(spec: MatchSpec): Promise<MatchResult> {
     disableEnemyMinimumPresence: true,
     disableDefaultStarters: true,
     spawnBattleBases: scenario.withBase,
+    disableBaseBattleEnd: scenario.scheduledMirroredWaves === true,
     partCatalog,
   });
 
@@ -218,7 +219,7 @@ export async function runMatch(spec: MatchSpec): Promise<MatchResult> {
     }
   } else if (scenario.withBase) {
     // Symmetric starters (free and non-refundable, like headless smoke test semantics).
-    const unitsPerSide = Math.max(1, Math.floor(scenario.initialUnitsPerSide));
+    const unitsPerSide = Math.max(0, Math.floor(scenario.initialUnitsPerSide));
     const useTestArenaPlacement = Math.max(0, Math.floor(scenario.maintainUnitsPerSide ?? 0)) > 0;
     const starterRoster = [...roster];
     for (let index = starterRoster.length - 1; index > 0; index -= 1) {
@@ -256,6 +257,14 @@ export async function runMatch(spec: MatchSpec): Promise<MatchResult> {
 
   // Override enemy gas if requested.
   const state0 = battle.getState();
+  const hadPlayerBaseUnit = state0.units.some((unit) => unit.type === "base" && unit.side === "player");
+  const hadEnemyBaseUnit = state0.units.some((unit) => unit.type === "base" && unit.side === "enemy");
+  const isBaseDestroyed = (state: ReturnType<BattleSession["getState"]>, side: "player" | "enemy"): boolean => {
+    const objective = side === "player" ? state.playerBase : state.enemyBase;
+    const hadBaseUnit = side === "player" ? hadPlayerBaseUnit : hadEnemyBaseUnit;
+    return objective.hp <= 0
+      || (hadBaseUnit && !state.units.some((unit) => unit.type === "base" && unit.side === side && unit.alive));
+  };
   state0.enemyGas = scenario.withBase ? spec.enemyGas : 0;
   if (!scenario.withBase) {
     playerGas = 0;
@@ -273,10 +282,12 @@ export async function runMatch(spec: MatchSpec): Promise<MatchResult> {
   const spawnMode = spec.spawnMode ?? "mirrored-random";
   const spawnBurst = Math.max(1, Math.floor(spec.spawnBurst ?? 1));
   const spawnMaxActive = Math.max(1, Math.floor(spec.spawnMaxActive ?? 5));
+  const spawnIntervalSeconds = Math.max(0.1, spec.spawnIntervalSeconds ?? 1.8);
   const maintainUnitsPerSide = Math.max(0, Math.floor(scenario.maintainUnitsPerSide ?? 0));
-  const allowSpawns = scenario.withBase && maintainUnitsPerSide <= 0;
+  const scheduledMirroredWaves = scenario.scheduledMirroredWaves === true;
+  const allowSpawns = scenario.withBase && maintainUnitsPerSide <= 0 && !scheduledMirroredWaves;
   let spawnTimer = 0;
-  let spawnIntervalS = 1.8;
+  let spawnIntervalS = spawnIntervalSeconds;
 
   const spawnFamilyPlayer = spawnMode === "ai" && spec.spawnPlayer ? getSpawnFamily(spec.spawnPlayer.familyId) : null;
   const spawnFamilyEnemy = spawnMode === "ai" && spec.spawnEnemy ? getSpawnFamily(spec.spawnEnemy.familyId) : null;
@@ -361,6 +372,31 @@ export async function runMatch(spec: MatchSpec): Promise<MatchResult> {
     spawnIntervalS = Math.max(0.5, Math.min(6.0, minInterval));
   };
 
+  const spawnScheduledMirroredWave = (): void => {
+    if (!scheduledMirroredWaves || roster.length <= 0) {
+      return;
+    }
+    const templateId = roster[Math.floor(spawnRng() * roster.length)] ?? null;
+    if (!templateId) {
+      return;
+    }
+    for (let index = 0; index < spawnBurst; index += 1) {
+      const y = 220 + spawnRng() * 260;
+      const options = {
+        chargeGas: false,
+        deploymentGasCost: 0,
+        ignoreCap: true,
+        ignoreLowGasThreshold: true,
+        y,
+      };
+      const playerDeployed = battle.arenaDeploy("player", templateId, options);
+      const enemyDeployed = battle.arenaDeploy("enemy", templateId, options);
+      if (!playerDeployed || !enemyDeployed) {
+        throw new Error(`runMatch: could not deploy mirrored scheduled wave unit ${index + 1}/${spawnBurst}`);
+      }
+    }
+  };
+
   const replenishInitialLineup = (): void => {
     if (!scenario.initialLineup || scenario.replenishInitialLineup !== true) {
       return;
@@ -407,12 +443,22 @@ export async function runMatch(spec: MatchSpec): Promise<MatchResult> {
     }
   };
 
+  // The first wave appears at game-time zero, followed by one wave per interval.
+  spawnScheduledMirroredWave();
   while (battle.getState().active && !battle.getState().outcome && t < spec.maxSimSeconds) {
     if (allowSpawns) {
       spawnTimer += dt;
       if (spawnTimer >= spawnIntervalS) {
         spawnTimer = 0;
         stepSpawn();
+      }
+    } else if (scheduledMirroredWaves) {
+      spawnTimer += dt;
+      if (spawnTimer + 1e-9 >= spawnIntervalSeconds) {
+        spawnTimer -= spawnIntervalSeconds;
+        if (t + dt < spec.maxSimSeconds) {
+          spawnScheduledMirroredWave();
+        }
       }
     }
     battle.update(dt, noKeys);
@@ -434,24 +480,13 @@ export async function runMatch(spec: MatchSpec): Promise<MatchResult> {
   if (state1.active && !state1.outcome) {
     if (scenario.withBase) {
       const deadlineLosses = battle.getLossStats();
-      const integrityFor = (side: "player" | "enemy"): number => state1.units
-        .filter((unit) => unit.type !== "base" && unit.alive && canOperate(unit) && unit.side === side)
-        .reduce((total, unit) => total + structureIntegrity(unit), 0);
-      const gasDestroyedDelta = deadlineLosses.enemy.gasWasted - deadlineLosses.player.gasWasted;
-      const destroyedCraftDelta = deadlineLosses.enemy.destroyedObjects - deadlineLosses.player.destroyedObjects;
-      const integrityDelta = integrityFor("player") - integrityFor("enemy");
-      const operationalDelta = aliveCount(state1.units, "player") - aliveCount(state1.units, "enemy");
-      const baseHpDelta = state1.playerBase.hp - state1.enemyBase.hp;
-      if (Math.abs(gasDestroyedDelta) > 1e-6) {
-        battle.forceEnd(gasDestroyedDelta > 0, "Arena deadline reached (destroyed craft gas)");
-      } else if (destroyedCraftDelta !== 0) {
-        battle.forceEnd(destroyedCraftDelta > 0, "Arena deadline reached (destroyed craft count)");
-      } else if (Math.abs(integrityDelta) > 1e-6) {
-        battle.forceEnd(integrityDelta > 0, "Arena deadline reached (unit integrity)");
-      } else if (operationalDelta !== 0) {
-        battle.forceEnd(operationalDelta > 0, "Arena deadline reached (operational units)");
-      } else if (Math.abs(baseHpDelta) > 1e-6) {
-        battle.forceEnd(baseHpDelta > 0, "Arena deadline reached (base HP)");
+      const baseWorthUnits = Math.max(0, Math.floor(spec.baseWorthUnits ?? 0));
+      const destroyedByPlayer = deadlineLosses.enemy.destroyedObjects
+        + (isBaseDestroyed(state1, "enemy") ? baseWorthUnits : 0);
+      const destroyedByEnemy = deadlineLosses.player.destroyedObjects
+        + (isBaseDestroyed(state1, "player") ? baseWorthUnits : 0);
+      if (destroyedByPlayer !== destroyedByEnemy) {
+        battle.forceEnd(destroyedByPlayer > destroyedByEnemy, "Arena deadline reached (destroyed units)");
       } else {
         battle.forceEnd(false, "Arena deadline reached (tie)");
       }
@@ -478,6 +513,11 @@ export async function runMatch(spec: MatchSpec): Promise<MatchResult> {
   const finalState = battle.getState();
   const outcome = finalState.outcome ?? { victory: false, reason: "unknown" };
   const losses = battle.getLossStats();
+  const baseWorthUnits = Math.max(0, Math.floor(spec.baseWorthUnits ?? 0));
+  const destroyedByPlayer = losses.enemy.destroyedObjects
+    + (isBaseDestroyed(finalState, "enemy") ? baseWorthUnits : 0);
+  const destroyedByEnemy = losses.player.destroyedObjects
+    + (isBaseDestroyed(finalState, "player") ? baseWorthUnits : 0);
   const playerGasEnd = playerGas;
   const enemyGasEnd = finalState.enemyGas;
   const onFieldPlayerEnd = computeOnFieldGasValue(finalState.units, "player", refundFactor);
@@ -489,11 +529,18 @@ export async function runMatch(spec: MatchSpec): Promise<MatchResult> {
   const worth1Enemy = enemyGasEnd + onFieldEnemyEnd;
 
   const reasonLower = String(outcome.reason).toLowerCase();
-  const tie = reasonLower.includes("tie")
-    || reasonLower.includes("round deadline");
+  const tie = scheduledMirroredWaves
+    ? destroyedByPlayer === destroyedByEnemy
+    : reasonLower.includes("tie") || reasonLower.includes("round deadline");
+  const playerVictory = scheduledMirroredWaves
+    ? destroyedByPlayer > destroyedByEnemy
+    : Boolean(outcome.victory);
+  const outcomeReason = scheduledMirroredWaves
+    ? `Destroyed units: player ${destroyedByPlayer}, enemy ${destroyedByEnemy}`
+    : String(outcome.reason);
 
-  const playerOutcome: "win" | "tie" | "loss" = tie ? "tie" : Boolean(outcome.victory) ? "win" : "loss";
-  const enemyOutcome: "win" | "tie" | "loss" = tie ? "tie" : Boolean(outcome.victory) ? "loss" : "win";
+  const playerOutcome: "win" | "tie" | "loss" = tie ? "tie" : playerVictory ? "win" : "loss";
+  const enemyOutcome: "win" | "tie" | "loss" = tie ? "tie" : playerVictory ? "loss" : "win";
   const operationalUnits = (side: "player" | "enemy") => finalState.units
     .filter((unit) => unit.type !== "base" && unit.alive && canOperate(unit) && unit.side === side);
   const playerOperationalUnits = operationalUnits("player");
@@ -502,10 +549,10 @@ export async function runMatch(spec: MatchSpec): Promise<MatchResult> {
   return {
     spec,
     simSecondsElapsed: t,
-    outcome: { playerVictory: Boolean(outcome.victory), reason: String(outcome.reason) },
+    outcome: { playerVictory, reason: outcomeReason },
     sides: {
       player: {
-        win: Boolean(outcome.victory),
+        win: playerVictory,
         tie,
         gasStart: playerGasStart,
         gasEnd: playerGasEnd,
@@ -515,7 +562,7 @@ export async function runMatch(spec: MatchSpec): Promise<MatchResult> {
         score: scoreFor(playerOutcome, worth1Player - worth0Player),
       },
       enemy: {
-        win: !Boolean(outcome.victory) && !tie,
+        win: !playerVictory && !tie,
         tie,
         gasStart: enemyGasStart,
         gasEnd: enemyGasEnd,
@@ -534,6 +581,12 @@ export async function runMatch(spec: MatchSpec): Promise<MatchResult> {
       enemyUnitIntegrity: enemyOperationalUnits.reduce((total, unit) => total + structureIntegrity(unit), 0),
     },
     losses,
+    performance: {
+      destroyedByPlayer,
+      destroyedByEnemy,
+      playerDestroyedRatio: destroyedByPlayer / Math.max(1, destroyedByEnemy),
+      enemyDestroyedRatio: destroyedByEnemy / Math.max(1, destroyedByPlayer),
+    },
     replay: {
       seed: spec.seed,
       maxSimSeconds: spec.maxSimSeconds,

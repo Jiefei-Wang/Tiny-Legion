@@ -406,8 +406,10 @@ export const GAME_CONFIG = {
         "baseHp": 1000000000
       },
       "comparison": {
-        "activeUnitsPerSide": 10,
-        "maxSimSeconds": 120
+        "spawnCountPerSide": 6,
+        "spawnIntervalSeconds": 20,
+        "maxSimSeconds": 600,
+        "baseWorthUnits": 20
       }
     }
   },
@@ -978,8 +980,10 @@ export const GAME_CONFIG_DESCRIPTIONS = {
     "arenaComparison": {
       "testArena.nodeDefense": "Default Test Arena node defense multiplier shared by browser and headless AI comparison.",
       "testArena.baseHp": "Default HP assigned to both Test Arena bases and headless AI comparison bases.",
-      "comparison.activeUnitsPerSide": "Number of operational craft that headless AI comparison keeps active on each side.",
-      "comparison.maxSimSeconds": "Duration of each headless AI comparison game before deadline scoring."
+      "comparison.spawnCountPerSide": "Number of identical randomly selected craft spawned for each side in every headless AI comparison wave.",
+      "comparison.spawnIntervalSeconds": "Game-time interval in seconds between headless AI comparison spawn waves.",
+      "comparison.maxSimSeconds": "Game-time duration in seconds of each headless AI comparison.",
+      "comparison.baseWorthUnits": "Number of destroyed craft credited for destroying the opposing base."
     }
   },
   "display": {

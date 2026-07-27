@@ -10,6 +10,6 @@ testArena:
   baseHp: 1000000000
 comparison:
   spawnCountPerSide: 6
-  spawnIntervalSeconds: 10
+  spawnIntervalSeconds: 20
   maxSimSeconds: 600
   baseWorthUnits: 20

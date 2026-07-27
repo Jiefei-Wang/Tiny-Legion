@@ -189,7 +189,7 @@ Node/TypeScript service. Responsibilities:
 - Primary requirement: win rate vs baseline >= 0.80.
 - Recommended robustness: require a conservative lower confidence bound >= 0.80 (e.g., Wilson lower bound) to avoid promotion by variance.
 - Use fairness pairing:
-  - For each seed batch, run two games with side swap.
+  - For each seed, run one fixed-orientation game; the battlefield and spawn rules are symmetric, so no side-swapped duplicate is required.
   - Use a fixed seed schedule per evaluation batch for stable comparisons.
 
 ### Arena League (promoted pool)

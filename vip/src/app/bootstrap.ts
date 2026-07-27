@@ -538,6 +538,9 @@ export function bootstrap(options: BootstrapOptions = {}): void {
     isUnranked?: boolean;
     winRate?: number;
     leaderboardScore?: number;
+    destroyedUnits?: number;
+    lostUnits?: number;
+    averageRatio?: number;
     previousLevelWinRate?: number;
     previousLevelRounds?: number;
     previousLevelCertified?: boolean;
@@ -1857,20 +1860,44 @@ export function bootstrap(options: BootstrapOptions = {}): void {
           runBId: runBId ?? null,
         }),
       });
-      const parsed = await res.json().catch(() => null) as { completed?: number; reason?: string } | null;
-      const completedTotal = Math.max(0, Number(parsed?.completed ?? 0));
+      const parsed = await res.json().catch(() => null) as { jobId?: string; total?: number; reason?: string } | null;
       if (!res.ok) {
-        testArenaLeaderboardCompeteStatus = `Competition stopped at ${completedTotal}/${totalRuns}: ${parsed?.reason ?? "request failed"}`;
+        testArenaLeaderboardCompeteStatus = `Competition could not start: ${parsed?.reason ?? "request failed"}`;
         return;
       }
-      await refreshTestArenaLeaderboard();
-      await refreshTestArenaCompositeModelOptions();
-      if (completedTotal >= totalRuns) {
-        testArenaLeaderboardCompeteStatus = `Competition completed: ${completedTotal}/${totalRuns} rounds.`;
-      } else if (completedTotal > 0) {
-        testArenaLeaderboardCompeteStatus = `Competition partially completed: ${completedTotal}/${totalRuns} rounds.`;
-      } else if (!testArenaLeaderboardCompeteStatus.toLowerCase().includes("stopped")) {
-        testArenaLeaderboardCompeteStatus = "Competition finished with no completed rounds.";
+      const jobId = parsed?.jobId ?? "";
+      const jobTotal = Math.max(0, Number(parsed?.total ?? totalRuns));
+      if (!jobId) {
+        testArenaLeaderboardCompeteStatus = "Competition started without a progress identifier.";
+        return;
+      }
+      let lastCompleted = -1;
+      while (true) {
+        const statusRes = await fetch(`/__arena/composite/leaderboard/compete/status?jobId=${encodeURIComponent(jobId)}`);
+        const statusPayload = await statusRes.json().catch(() => null) as {
+          job?: { status?: string; completed?: number; failed?: number; total?: number; error?: string };
+        } | null;
+        if (!statusRes.ok || !statusPayload?.job) {
+          testArenaLeaderboardCompeteStatus = "Competition progress is unavailable.";
+          return;
+        }
+        const completed = Math.max(0, Number(statusPayload.job.completed ?? 0));
+        const failed = Math.max(0, Number(statusPayload.job.failed ?? 0));
+        const total = Math.max(0, Number(statusPayload.job.total ?? jobTotal));
+        if (completed !== lastCompleted) {
+          lastCompleted = completed;
+          testArenaLeaderboardCompeteStatus = `Running leaderboard matches... ${completed}/${total}${failed > 0 ? ` (${failed} failed)` : ""}`;
+          renderPanels();
+        }
+        if (statusPayload.job.status !== "running") {
+          await refreshTestArenaLeaderboard();
+          await refreshTestArenaCompositeModelOptions();
+          testArenaLeaderboardCompeteStatus = statusPayload.job.status === "done"
+            ? `Competition completed: ${completed}/${total} matches${failed > 0 ? `, ${failed} failed` : ""}.`
+            : `Competition failed: ${statusPayload.job.error ?? "no match completed"}`;
+          break;
+        }
+        await new Promise<void>((resolve) => window.setTimeout(resolve, 750));
       }
     } catch {
       testArenaLeaderboardCompeteStatus = "Competition failed due to network or server error.";
@@ -5561,6 +5588,8 @@ export function bootstrap(options: BootstrapOptions = {}): void {
       .map((entry, index) => {
         const winRate = Number.isFinite(entry.winRate) ? `${(Number(entry.winRate) * 100).toFixed(1)}%` : "-";
         const score = Number.isFinite(entry.leaderboardScore) ? Number(entry.leaderboardScore).toFixed(2) : "-";
+        const averageRatio = Number.isFinite(entry.averageRatio) ? Number(entry.averageRatio).toFixed(2) : "-";
+        const destroyedLost = `${Math.round(Number(entry.destroyedUnits) || 0)}/${Math.round(Number(entry.lostUnits) || 0)}`;
         const previousLevelRate = Number.isFinite(entry.previousLevelWinRate)
           ? `${(Number(entry.previousLevelWinRate) * 100).toFixed(1)}% (${Number(entry.previousLevelRounds) || 0})${entry.previousLevelCertified ? " ✓" : ""}`
           : entry.runId === "level-1-ai" ? "reference" : "not tested";
@@ -5579,6 +5608,8 @@ export function bootstrap(options: BootstrapOptions = {}): void {
           <td>${escapeHtml(entry.runId)} ${rankTag}</td>
           <td>${escapeHtml(components)}</td>
           <td>${score}</td>
+          <td>${averageRatio}</td>
+          <td>${destroyedLost}</td>
           <td>${escapeHtml(previousLevelRate)}</td>
           <td>${winRate}</td>
           <td>${wins}/${losses}/${ties}</td>
@@ -5638,7 +5669,7 @@ export function bootstrap(options: BootstrapOptions = {}): void {
 
     leaderboardCenter.innerHTML = `
       <h3>AI Leaderboard</h3>
-      <div class="small">Persistent head-to-head ranking. “Vs previous” is certified after 16 mirrored rounds and must exceed 60%.</div>
+      <div class="small">Persistent head-to-head ranking. “Vs previous” is certified after 16 matches and must exceed 60%.</div>
       <div class="leaderboard-table-wrap" style="margin-top:6px; border:1px solid #333; border-radius:6px; padding:6px; max-height:520px; overflow:auto;">
         ${testArenaLeaderboardLoading ? `<div class="small">Loading...</div>` : ""}
         ${!testArenaLeaderboardLoading && leaderboardRows.length <= 0 ? `<div class="small warn">No leaderboard data found. Train composite runs first.</div>` : ""}
@@ -5649,6 +5680,8 @@ export function bootstrap(options: BootstrapOptions = {}): void {
               <th style="text-align:left;">Run</th>
               <th style="text-align:left;">Components (Target / Move / Shoot)</th>
               <th style="text-align:left;">Score</th>
+              <th style="text-align:left;">Avg. destroyed ratio</th>
+              <th style="text-align:left;">Destroyed/Lost</th>
               <th style="text-align:left;">Vs previous</th>
               <th style="text-align:left;">Win Rate</th>
               <th style="text-align:left;">W/L/T</th>

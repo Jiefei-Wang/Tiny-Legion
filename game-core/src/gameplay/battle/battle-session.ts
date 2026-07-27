@@ -84,6 +84,7 @@ export interface BattleSessionOptions {
   disableDefaultStarters?: boolean;
   /** Spawn the standard fixed base craft for each side when a battle begins. */
   spawnBattleBases?: boolean;
+  disableBaseBattleEnd?: boolean;
   externalAiSides?: Partial<Record<Side, boolean>>;
   partCatalog?: ReadonlyArray<PartDefinition>;
   movementSpeedMultiplier?: number;
@@ -137,6 +138,7 @@ export class BattleSession {
   private readonly disableEnemyMinimumPresence: boolean;
   private readonly disableDefaultStarters: boolean;
   private readonly spawnBattleBases: boolean;
+  private readonly disableBaseBattleEnd: boolean;
   private externalAiSides: Partial<Record<Side, boolean>>;
   private externalCommandsByUnitId: Map<string, UnitCommand>;
   private partCatalog: PartDefinition[];
@@ -183,6 +185,7 @@ export class BattleSession {
     this.disableEnemyMinimumPresence = options.disableEnemyMinimumPresence ?? false;
     this.disableDefaultStarters = options.disableDefaultStarters ?? false;
     this.spawnBattleBases = options.spawnBattleBases ?? true;
+    this.disableBaseBattleEnd = options.disableBaseBattleEnd ?? false;
     this.externalAiSides = {
       player: options.externalAiSides?.player === true,
       enemy: options.externalAiSides?.enemy === true,
@@ -1134,11 +1137,13 @@ export class BattleSession {
     this.recordDestroyedUnits();
     this.state.units = this.state.units.filter((unit) => unit.alive);
 
-    if (this.state.playerBase.hp <= 0) {
-      this.endBattle(false, "Player battle base destroyed");
-    }
-    if (this.state.enemyBase.hp <= 0) {
-      this.endBattle(true, "Enemy base destroyed");
+    if (!this.disableBaseBattleEnd) {
+      if (this.state.playerBase.hp <= 0) {
+        this.endBattle(false, "Player battle base destroyed");
+      }
+      if (this.state.enemyBase.hp <= 0) {
+        this.endBattle(true, "Enemy base destroyed");
+      }
     }
   }
 

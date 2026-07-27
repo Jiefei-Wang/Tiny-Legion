@@ -253,11 +253,22 @@ export function validateGameConfig(config) {
   validateScalarObject(config.ai.levels, ["maxCertifiedLevel"], "ai/levels.yaml");
   const arenaComparison = exactKeys(config.ai.arenaComparison, ["testArena", "comparison"], "ai/arena-comparison.yaml");
   validateScalarObject(arenaComparison.testArena, ["nodeDefense", "baseHp"], "ai/arena-comparison.yaml.testArena");
-  validateScalarObject(
+  const comparison = validateScalarObject(
     arenaComparison.comparison,
     ["spawnCountPerSide", "spawnIntervalSeconds", "maxSimSeconds", "baseWorthUnits"],
     "ai/arena-comparison.yaml.comparison",
   );
+  for (const key of ["spawnCountPerSide", "baseWorthUnits"]) {
+    const value = numberAt(comparison, key, "ai/arena-comparison.yaml.comparison");
+    if (!Number.isInteger(value) || value <= 0) {
+      fail(`ai/arena-comparison.yaml.comparison.${key}`, "expected a positive integer");
+    }
+  }
+  for (const key of ["spawnIntervalSeconds", "maxSimSeconds"]) {
+    if (numberAt(comparison, key, "ai/arena-comparison.yaml.comparison") <= 0) {
+      fail(`ai/arena-comparison.yaml.comparison.${key}`, "expected a value greater than zero");
+    }
+  }
 
   const display = exactKeys(config.display.battle, ["canvas", "view"], "display/battle.yaml");
   const displayCanvas = validateScalarObject(display.canvas, ["resolutionScale"], "display/battle.yaml.canvas");

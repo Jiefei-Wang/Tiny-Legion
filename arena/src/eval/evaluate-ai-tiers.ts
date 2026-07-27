@@ -1,7 +1,7 @@
 import { baselineCompositeConfig, skillTierCompositeConfig, type CompositeConfig } from "../ai/composite-controller.ts";
 import { loadLeaderboardScenario } from "../config/leaderboard-scenario.ts";
 import { runMatch } from "../match/run-match.ts";
-import { compareMirroredSeries } from "../match/mirrored-series.ts";
+import { compareMatchResult } from "../match/match-comparison.ts";
 import type { MatchAiSpec, MatchSpec } from "../match/match-types.ts";
 
 type TierName = "baseline" | "low" | "medium" | "high";
@@ -23,13 +23,14 @@ function matchSpec(seed: number, player: TierName, enemy: TierName): MatchSpec {
     scenario: {
       withBase: scenario.withBase,
       initialUnitsPerSide: scenario.initialUnitsPerSide,
-      maintainUnitsPerSide: scenario.maintainUnitsPerSide,
+      scheduledMirroredWaves: scenario.scheduledMirroredWaves,
     },
     templateNames: scenario.templateNames,
     battlefield: scenario.battlefield,
     spawnMode: "mirrored-random",
     spawnBurst: scenario.spawnBurst,
-    spawnMaxActive: scenario.spawnMaxActive,
+    spawnIntervalSeconds: scenario.spawnIntervalSeconds,
+    baseWorthUnits: scenario.baseWorthUnits,
   };
 }
 
@@ -46,9 +47,8 @@ export async function evaluateAiTiers(seedCount = 10): Promise<void> {
     const games = Math.max(2, Math.floor(seedCount));
     for (let index = 0; index < games; index += 1) {
       const seed = 40_000 + index * 977;
-      const asPlayer = await runMatch(matchSpec(seed, pair.higher, pair.lower));
-      const asEnemy = await runMatch(matchSpec(seed, pair.lower, pair.higher));
-      const comparison = compareMirroredSeries(asPlayer, asEnemy);
+      const result = await runMatch(matchSpec(seed, pair.higher, pair.lower));
+      const comparison = compareMatchResult(result);
       wins += Number(comparison.outcomeA > 0);
       ties += Number(comparison.outcomeA === 0);
     }
